@@ -765,10 +765,10 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                     value => settings.MaterialAcrylicBackground = value),
                 Range("模糊强度", () => settings.MaterialAcrylicBlurStrength,
                     value => settings.MaterialAcrylicBlurStrength = value, 1, 12, 1, value => value.ToString()),
-                Text("字体名称", () => settings.FontFamily, value => settings.FontFamily = value,
-                    "例如 Microsoft YaHei UI", 96),
-                Text("字体文件", () => settings.FontFile, value => settings.FontFile = value,
-                    "留空则使用字体名称", 240),
+                Choice("界面字体", UiFontCatalog.InstalledFamilies, () => settings.FontFamily, value => {
+                    settings.FontFamily = value;
+                    settings.FontFile = "";
+                }),
                 Toggle("取代原版选关页", () => settings.ReplaceChapterSelect,
                     value => settings.ReplaceChapterSelect = value),
                 Toggle("选关页显示 Collab 地图", () => settings.ChapterSelectShowCollabMaps,
@@ -847,6 +847,23 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         placeholder: placeholder,
         maxInputLength: maxLength
     );
+
+    private static SettingRow Choice(
+        string label,
+        IReadOnlyList<string> values,
+        Func<string> get,
+        Action<string> set
+    ) => new(label, SettingKind.Enum, get, direction => {
+        if (values.Count == 0) return;
+        int index = -1;
+        for (int candidate = 0; candidate < values.Count; candidate++) {
+            if (!string.Equals(values[candidate], get(), StringComparison.OrdinalIgnoreCase)) continue;
+            index = candidate;
+            break;
+        }
+        index = (index + Math.Sign(direction) + values.Count) % values.Count;
+        set(values[index]);
+    });
 
     private static SettingRow Key(string label, Func<Keys> get, Action<Keys> set) => new(
         label,

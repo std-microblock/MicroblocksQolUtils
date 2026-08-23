@@ -44,8 +44,26 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue("Microsoft YaHei UI")]
     public string FontFamily { get; set; } = "Microsoft YaHei UI";
 
+    [SettingIgnore]
     [DefaultValue("")]
     public string FontFile { get; set; } = "";
+
+    public void CreateFontFamilyEntry(TextMenu menu, bool inGame) {
+        string current = string.IsNullOrWhiteSpace(FontFamily) ? "Microsoft YaHei UI" : FontFamily.Trim();
+        TextMenu.Option<string> fonts = new(Dialog.Clean("modoptions_microblocksqolutils_fontfamily"));
+
+        if (!UiFontCatalog.InstalledFamilies.Contains(current, StringComparer.OrdinalIgnoreCase))
+            fonts.Add(current, current, selected: true);
+
+        foreach (string family in UiFontCatalog.InstalledFamilies)
+            fonts.Add(family, family, string.Equals(family, current, StringComparison.OrdinalIgnoreCase));
+
+        fonts.Change(family => {
+            FontFamily = family;
+            FontFile = "";
+        });
+        menu.Add(fonts);
+    }
 
     [DefaultValue(true)]
     public bool MiniMapEnabled { get; set; } = true;
