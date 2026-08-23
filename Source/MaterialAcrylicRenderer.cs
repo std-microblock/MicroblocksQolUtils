@@ -174,7 +174,7 @@ internal static class MaterialAcrylicRenderer {
                 Engine.ScreenMatrix
             );
             begun = true;
-            page.RenderMaterialContent(acrylicActive: true, Engine.ScreenMatrix);
+            page.RenderMaterialContent(acrylicActive: true);
         } finally {
             if (begun) Draw.SpriteBatch.End();
         }

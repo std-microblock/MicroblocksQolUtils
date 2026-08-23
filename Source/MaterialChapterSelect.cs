@@ -119,11 +119,10 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
 
     public override void Render() {
         if (SuppressNormalRender) return;
-        Matrix renderMatrix = HiresRenderer.DrawToBuffer ? Matrix.Identity : Engine.ScreenMatrix;
-        RenderMaterialContent(acrylicActive: false, renderMatrix);
+        RenderMaterialContent(acrylicActive: false);
     }
 
-    public void RenderMaterialContent(bool acrylicActive, Matrix renderMatrix) {
+    public void RenderMaterialContent(bool acrylicActive) {
         if (!Visible || ease <= 0f) return;
         ChapterEntry? selected = entries.Count == 0 ? null : entries[Math.Clamp(selectedIndex, 0, entries.Count - 1)];
         MaterialPalette palette = MaterialPalette.FromSeed(paletteSeed);
@@ -140,8 +139,8 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
             MaterialTextRole.Display, palette.OnSurface, eased);
         RenderSearchBox(palette, layout, eased);
 
-        RenderLevelSets(palette, layout, eased, renderMatrix);
-        RenderCards(palette, layout, eased, renderMatrix);
+        RenderLevelSets(palette, layout, eased);
+        RenderCards(palette, layout, eased);
         RenderFooter(palette, selected, layout, eased);
         RenderMouseCursor(palette, eased);
     }
@@ -354,8 +353,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
     private void RenderLevelSets(
         MaterialPalette palette,
         ChapterLayout layout,
-        float alpha,
-        Matrix renderMatrix
+        float alpha
     ) {
         MaterialUiKit.Surface(layout.Sidebar,
             28f, palette with { SurfaceHigh = palette.SurfaceHigh * 0.82f }, alpha);
@@ -363,7 +361,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
             new Vector2(layout.Sidebar.X + MaterialSpacing.Lg,
                 layout.Sidebar.Y + ChapterLayout.SidebarHeaderHeight / 2f),
             new Vector2(0f, 0.5f), MaterialTextRole.Section, palette.OnSurface, alpha);
-        levelSetViewport.Render(layout.SidebarItems, renderMatrix, () => {
+        levelSetViewport.Render(layout.SidebarItems, () => {
             for (int index = 0; index < levelSets.Count; index++) {
                 MaterialRect item = layout.SidebarItem(index, levelSetScroll.Offset);
                 if (item.Bottom < layout.SidebarItems.Y || item.Y > layout.SidebarItems.Bottom) continue;
@@ -384,10 +382,9 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
     private void RenderCards(
         MaterialPalette palette,
         ChapterLayout layout,
-        float alpha,
-        Matrix renderMatrix
+        float alpha
     ) {
-        cardViewport.Render(layout.Cards, renderMatrix, () => {
+        cardViewport.Render(layout.Cards, () => {
             for (int index = 0; index < entries.Count; index++) {
                 MaterialRect card = layout.Card(index, cardScroll.Offset);
                 if (card.Bottom < layout.Cards.Y || card.Y > layout.Cards.Bottom) continue;

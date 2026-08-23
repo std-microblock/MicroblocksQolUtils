@@ -131,11 +131,10 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     public override void Render() {
         base.Render();
         if (SuppressNormalRender) return;
-        Matrix renderMatrix = HiresRenderer.DrawToBuffer ? Matrix.Identity : Engine.ScreenMatrix;
-        RenderMaterialContent(acrylicActive: false, renderMatrix);
+        RenderMaterialContent(acrylicActive: false);
     }
 
-    public void RenderMaterialContent(bool acrylicActive, Matrix renderMatrix) {
+    public void RenderMaterialContent(bool acrylicActive) {
         if (ease <= 0f) return;
         OverlayLayout layout = OverlayLayout.Create(ease);
         MaterialPalette palette = MaterialPalette.FromSeed(new Color(126, 99, 184));
@@ -153,7 +152,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             Vector2.Zero, MaterialTextRole.Body, palette.OnSurfaceVariant, ease, scaleOverride: 0.32f);
 
         RenderNavigation(layout, palette);
-        RenderContent(layout, palette, renderMatrix);
+        RenderContent(layout, palette);
 
         string footer = editingRow is not null
             ? "输入后按 Enter 保存，Esc 取消"
@@ -197,14 +196,14 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             MaterialTextRole.Caption, palette.OnSurfaceVariant, ease, scaleOverride: 0.25f);
     }
 
-    private void RenderContent(OverlayLayout layout, MaterialPalette palette, Matrix renderMatrix) {
+    private void RenderContent(OverlayLayout layout, MaterialPalette palette) {
         MaterialUiKit.Text(tabs[selectedTab].Title, new Vector2(layout.ContentHeader.X, layout.ContentHeader.Y),
             Vector2.Zero, MaterialTextRole.Title, palette.OnSurface, ease * contentEase,
             scaleOverride: 0.48f);
         MaterialUiKit.Text($"{CurrentRows.Count} 项", new Vector2(layout.ContentHeader.Right, layout.ContentHeader.Y + 8f),
             new Vector2(1f, 0f), MaterialTextRole.Caption, palette.OnSurfaceVariant,
             ease * contentEase, scaleOverride: 0.28f);
-        RenderRows(layout, palette, renderMatrix);
+        RenderRows(layout, palette);
 
         float maximum = MaxRowScroll(layout);
         if (maximum <= 0f) return;
@@ -218,9 +217,9 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             palette.Primary * (0.68f * ease));
     }
 
-    private void RenderRows(OverlayLayout layout, MaterialPalette palette, Matrix renderMatrix) {
+    private void RenderRows(OverlayLayout layout, MaterialPalette palette) {
         List<SettingRow> rows = CurrentRows;
-        rowViewport.Render(layout.Rows, renderMatrix, () => {
+        rowViewport.Render(layout.Rows, () => {
             for (int index = 0; index < rows.Count; index++) {
                 SettingRow row = rows[index];
                 MaterialRect rect = layout.Row(index, rowScroll.Offset)
