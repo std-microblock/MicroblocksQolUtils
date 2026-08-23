@@ -32,8 +32,7 @@ public enum UiFontWeight {
 public static class SystemTtfFont {
     private const float BasePixelSize = 42f;
     private const float BaseLineHeight = 54f;
-    private const float RasterOversample = 2f;
-    private static readonly Dictionary<(char Character, int PixelSize, int ScaleKey, UiFontWeight Weight), Glyph> Glyphs = [];
+    private static readonly Dictionary<(char Character, int PixelSize, UiFontWeight Weight), Glyph> Glyphs = [];
     private static readonly Dictionary<(int PixelSize, UiFontWeight Weight), DrawingFont> Fonts = [];
     private static PrivateFontCollection? privateFonts;
     private static DrawingFontFamily? fontFamily;
@@ -184,10 +183,9 @@ public static class SystemTtfFont {
             Glyph glyph = GetGlyph(character, scale, weight);
             if (glyph.Texture is not null) {
                 Vector2 at = position + cursor + glyph.Offset - origin;
-                at = new Vector2(
-                    MathF.Round(at.X * glyph.OutputScale) / glyph.OutputScale,
-                    MathF.Round(at.Y * glyph.OutputScale) / glyph.OutputScale
-                );
+                // Glyphs are rasterized at their final size. Keep both texture vertices on the
+                // render-target pixel grid so SpriteBatch never has to resample the glyph.
+                at = new Vector2(MathF.Round(at.X), MathF.Round(at.Y));
                 Monocle.Draw.SpriteBatch.Draw(
                     glyph.Texture,
                     at,
@@ -195,7 +193,7 @@ public static class SystemTtfFont {
                     color,
                     0f,
                     Vector2.Zero,
-                    glyph.TextureScale,
+                    1f,
                     SpriteEffects.None,
                     0f
                 );
@@ -206,18 +204,15 @@ public static class SystemTtfFont {
 
     private static Glyph GetGlyph(char character, float scale, UiFontWeight weight) {
         Prepare();
-        float desiredPixelSize = BasePixelSize * Math.Max(0.01f, scale);
-        int pixelSize = Math.Max(8, (int)MathF.Round(desiredPixelSize * RasterOversample));
-        float textureScale = desiredPixelSize / pixelSize;
-        int scaleKey = (int)MathF.Round(desiredPixelSize * 1024f);
-        var key = (character, pixelSize, scaleKey, weight);
+        int pixelSize = PixelSize(scale);
+        var key = (character, pixelSize, weight);
         if (Glyphs.TryGetValue(key, out Glyph? glyph)) return glyph;
         if (fontFamily is null || stringFormat is null) throw new InvalidOperationException("UI font is not prepared.");
 
         DrawingFont font = GetFont(pixelSize, weight);
         if (character == '\t')
-            return Glyphs[key] = new Glyph(null, pixelSize * 2f * textureScale,
-                Vector2.Zero, Vector2.Zero, Vector2.Zero, textureScale, 1f);
+            return Glyphs[key] = new Glyph(null, pixelSize * 2f,
+                Vector2.Zero, Vector2.Zero, Vector2.Zero);
 
         string value = character.ToString();
         float advance;
@@ -227,9 +222,10 @@ public static class SystemTtfFont {
             graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
             advance = Math.Max(1f, graphics.MeasureString(value, font, DrawingPointF.Empty, stringFormat).Width);
         }
+        advance = MathF.Round(advance);
         if (char.IsWhiteSpace(character))
-            return Glyphs[key] = new Glyph(null, advance * textureScale,
-                Vector2.Zero, Vector2.Zero, Vector2.Zero, textureScale, 1f);
+            return Glyphs[key] = new Glyph(null, advance,
+                Vector2.Zero, Vector2.Zero, Vector2.Zero);
 
         int padding = Math.Max(2, (int)MathF.Ceiling(pixelSize / 10f));
         int width = Math.Max(1, (int)Math.Ceiling(advance) + padding * 2);
@@ -249,15 +245,13 @@ public static class SystemTtfFont {
 
         TextureData textureData = CreateTexture(bitmap);
         Rectangle ink = textureData.InkBounds;
-        Vector2 textureOffset = new(-padding * textureScale);
+        Vector2 textureOffset = new(-padding);
         return Glyphs[key] = new Glyph(
             textureData.Texture,
-            advance * textureScale,
+            advance,
             textureOffset,
-            textureOffset + new Vector2(ink.X, ink.Y) * textureScale,
-            new Vector2(ink.Width, ink.Height) * textureScale,
-            textureScale,
-            1f
+            textureOffset + new Vector2(ink.X, ink.Y),
+            new Vector2(ink.Width, ink.Height)
         );
     }
 
@@ -314,7 +308,11 @@ public static class SystemTtfFont {
         }
     }
 
-    private static float LineHeight(float scale) => Math.Max(1f, BaseLineHeight * scale);
+    private static int PixelSize(float scale) =>
+        Math.Max(8, (int)MathF.Round(BasePixelSize * Math.Max(0.01f, scale)));
+
+    private static float LineHeight(float scale) =>
+        Math.Max(1f, MathF.Round(BaseLineHeight * PixelSize(scale) / BasePixelSize));
 
     private static TextMetrics MeasureMetrics(string text, float scale, UiFontWeight weight) {
         Prepare();
@@ -392,9 +390,7 @@ public static class SystemTtfFont {
         float Advance,
         Vector2 Offset,
         Vector2 InkOffset,
-        Vector2 InkSize,
-        float TextureScale,
-        float OutputScale
+        Vector2 InkSize
     );
 
     private sealed record TextureData(Texture2D Texture, Rectangle InkBounds);
