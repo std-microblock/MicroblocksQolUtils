@@ -14,6 +14,8 @@ public static class AutoRecorder {
     private static readonly List<PendingDeathReplay> PendingDeathReplays = [];
     private static readonly object FinalizationProgressLock = new();
     private static readonly Dictionary<long, FinalizationProgressState> ActiveFinalizations = [];
+    private static readonly Dictionary<string, FinalizationOutputProgressState> ActiveFinalizationOutputs =
+        new(StringComparer.OrdinalIgnoreCase);
     private static NativeRoomRecording? current;
     private static NativeRoomRecording? deathReplayCurrent;
     private static RecordingTimelineSnapshot? respawnAnchor;
@@ -77,6 +79,18 @@ public static class AutoRecorder {
                     .FirstOrDefault() ?? "视频";
             }
         }
+    }
+    internal static bool TryGetFinalizationProgress(string output, out double progress, out string description) {
+        lock (FinalizationProgressLock) {
+            if (ActiveFinalizationOutputs.TryGetValue(Path.GetFullPath(output), out FinalizationOutputProgressState? state)) {
+                progress = state.Progress;
+                description = state.Description;
+                return true;
+            }
+        }
+        progress = 0d;
+        description = "";
+        return false;
     }
     public static string RecordingRoot => ResolveRecordingRoot();
     public static string FullRecordingRoot => Path.Combine(ResolveRecordingRoot(), FullRecordingsDirectory);
@@ -674,7 +688,9 @@ public static class AutoRecorder {
                     job.Description,
                     progress => UpdateFinalization(
                         finalizationId,
+                        job.Output,
                         (capturedCompletedWeight + job.Weight * progress) / totalWeight,
+                        progress,
                         job.Description
                     )
                 ).ConfigureAwait(false)) {
@@ -709,21 +725,45 @@ public static class AutoRecorder {
                 jobs[0].Description,
                 ++finalizationUpdateSequence
             );
+            foreach (RecordingFinalizationJob job in jobs) {
+                ActiveFinalizationOutputs[Path.GetFullPath(job.Output)] =
+                    new FinalizationOutputProgressState(0d, job.Description, id);
+            }
         }
         return id;
     }
 
-    private static void UpdateFinalization(long id, double progress, string description) {
+    private static void UpdateFinalization(
+        long id,
+        string output,
+        double progress,
+        double outputProgress,
+        string description
+    ) {
         lock (FinalizationProgressLock) {
             if (!ActiveFinalizations.TryGetValue(id, out FinalizationProgressState? state)) return;
             state.Progress = Math.Clamp(progress, 0d, 1d);
             state.Description = description;
             state.UpdateSequence = ++finalizationUpdateSequence;
+            string path = Path.GetFullPath(output);
+            if (ActiveFinalizationOutputs.TryGetValue(path, out FinalizationOutputProgressState? outputState)
+                && outputState.FinalizationId == id) {
+                outputState.Progress = Math.Clamp(outputProgress, 0d, 1d);
+                outputState.Description = description;
+            }
         }
     }
 
     private static void EndFinalization(long id) {
-        lock (FinalizationProgressLock) ActiveFinalizations.Remove(id);
+        lock (FinalizationProgressLock) {
+            ActiveFinalizations.Remove(id);
+            foreach (string output in ActiveFinalizationOutputs
+                         .Where(pair => pair.Value.FinalizationId == id)
+                         .Select(pair => pair.Key)
+                         .ToArray()) {
+                ActiveFinalizationOutputs.Remove(output);
+            }
+        }
     }
 
     private static void DeleteTemporaryFiles(IEnumerable<string> files) {
@@ -843,5 +883,15 @@ public static class AutoRecorder {
         public double Progress { get; set; } = progress;
         public string Description { get; set; } = description;
         public long UpdateSequence { get; set; } = updateSequence;
+    }
+
+    private sealed class FinalizationOutputProgressState(
+        double progress,
+        string description,
+        long finalizationId
+    ) {
+        public double Progress { get; set; } = progress;
+        public string Description { get; set; } = description;
+        public long FinalizationId { get; } = finalizationId;
     }
 }
