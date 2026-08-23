@@ -34,7 +34,6 @@ public enum UiFontWeight {
 public static class SystemTtfFont {
     private const float BasePixelSize = 42f;
     private const float BaseLineHeight = 54f;
-    private const int ClearTypeCoverageBoost = 302;
     private static readonly Dictionary<(char Character, int PixelSize, UiFontWeight Weight), Glyph> Glyphs = [];
     private static readonly Dictionary<(int PixelSize, UiFontWeight Weight), DrawingFont> Fonts = [];
     private const BindingFlags SpriteBatchFields = BindingFlags.Instance | BindingFlags.NonPublic;
@@ -228,7 +227,7 @@ public static class SystemTtfFont {
         using (DrawingBitmap measure = new(1, 1, PixelFormat.Format32bppArgb))
         using (DrawingGraphics graphics = DrawingGraphics.FromImage(measure)) {
             graphics.PageUnit = DrawingGraphicsUnit.Pixel;
-            graphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+            graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
             advance = Math.Max(1f, graphics.MeasureString(value, font, DrawingPointF.Empty, stringFormat).Width);
         }
         advance = MathF.Round(advance);
@@ -241,16 +240,13 @@ public static class SystemTtfFont {
         int height = Math.Max(1, (int)Math.Ceiling(BaseLineHeight * pixelSize / BasePixelSize) + padding * 2);
         using DrawingBitmap bitmap = new(width, height, PixelFormat.Format32bppArgb);
         using (DrawingGraphics graphics = DrawingGraphics.FromImage(bitmap)) {
-            // ClearType cannot produce a useful alpha mask on a transparent surface.
-            // Rasterize white onto opaque black, then collapse the RGB subpixel coverage
-            // into a grayscale alpha mask in CreateTexture.
-            graphics.Clear(System.Drawing.Color.Black);
+            graphics.Clear(System.Drawing.Color.Transparent);
             graphics.PageUnit = DrawingGraphicsUnit.Pixel;
             graphics.CompositingMode = CompositingMode.SourceOver;
             graphics.CompositingQuality = CompositingQuality.HighQuality;
             graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
             graphics.SmoothingMode = SmoothingMode.HighQuality;
-            graphics.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
+            graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
             graphics.TextContrast = 0;
             using var brush = new System.Drawing.SolidBrush(System.Drawing.Color.White);
             graphics.DrawString(value, font, brush, new DrawingPointF(padding, padding), stringFormat);
@@ -297,14 +293,7 @@ public static class SystemTtfFont {
                 int row = sourceY * stride;
                 for (int x = 0; x < bitmap.Width; x++) {
                     int source = row + x * 4;
-                    int blue = pixels[source];
-                    int green = pixels[source + 1];
-                    int red = pixels[source + 2];
-                    // Preserve ClearType's stronger grid fitting without retaining colored
-                    // subpixel fringes. A small coverage boost keeps regular-weight Chinese
-                    // strokes from becoming too thin after the RGB mask is collapsed.
-                    int luminance = (red * 54 + green * 183 + blue * 19 + 128) >> 8;
-                    byte alpha = (byte)Math.Min(255, (luminance * ClearTypeCoverageBoost + 128) >> 8);
+                    byte alpha = SharpenCoverage(pixels[source + 3]);
                     if (alpha != 0) {
                         inkLeft = Math.Min(inkLeft, x);
                         inkTop = Math.Min(inkTop, y);
@@ -326,6 +315,12 @@ public static class SystemTtfFont {
         } finally {
             bitmap.UnlockBits(data);
         }
+    }
+
+    private static byte SharpenCoverage(byte alpha) {
+        int value = alpha;
+        int smooth = (value * value * (765 - value * 2) + 32512) / 65025;
+        return (byte)((value + smooth * 3 + 2) / 4);
     }
 
     private static TextMetrics MeasureMetrics(string text, RasterContext context, UiFontWeight weight) {

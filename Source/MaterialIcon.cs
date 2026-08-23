@@ -13,6 +13,7 @@ using DrawingGraphicsPath = System.Drawing.Drawing2D.GraphicsPath;
 using DrawingFillMode = System.Drawing.Drawing2D.FillMode;
 using DrawingMatrix = System.Drawing.Drawing2D.Matrix;
 using DrawingPointF = System.Drawing.PointF;
+using XnaMatrix = Microsoft.Xna.Framework.Matrix;
 
 #pragma warning disable CA1416
 
@@ -24,23 +25,30 @@ namespace Celeste.Mod.MicroblocksQolUtils;
 /// Source/MaterialSymbols/Rounded, then reference it as MaterialIcon.Draw("name", ...).
 /// </summary>
 internal static class MaterialIcon {
-    private const int RasterSize = 128;
+    private const int Supersample = 4;
     private const string ResourcePrefix = "Celeste.Mod.MicroblocksQolUtils.MaterialSymbols.Rounded.";
-    private static readonly Dictionary<string, Texture2D?> Textures = new(StringComparer.OrdinalIgnoreCase);
+    private const BindingFlags SpriteBatchFields = BindingFlags.Instance | BindingFlags.NonPublic;
+    private static readonly FieldInfo SpriteBatchBeginCalledField = RequiredSpriteBatchField(
+        "beginCalled", "_beginCalled");
+    private static readonly FieldInfo SpriteBatchTransformMatrixField = RequiredSpriteBatchField(
+        "transformMatrix", "_transformMatrix");
+    private static readonly Dictionary<(string Name, int PixelSize), Texture2D?> Textures = new();
     private static readonly HashSet<string> ReportedFailures = new(StringComparer.OrdinalIgnoreCase);
 
     public static void Draw(string name, Vector2 center, float size, Color color, float alpha = 1f) {
         if (size <= 0f || alpha <= 0f) return;
-        Texture2D? texture = GetTexture(name);
+        RasterContext context = RasterContext.Create(size);
+        Texture2D? texture = GetTexture(name, context.PixelSize);
         if (texture is null) return;
+        Vector2 at = context.SnapToPixel(center - context.LayoutSize / 2f);
         Monocle.Draw.SpriteBatch.Draw(
             texture,
-            center,
+            at,
             null,
             color * alpha,
             0f,
-            new Vector2(texture.Width / 2f, texture.Height / 2f),
-            size / texture.Width,
+            Vector2.Zero,
+            context.TextureScale,
             SpriteEffects.None,
             0f
         );
@@ -55,22 +63,23 @@ internal static class MaterialIcon {
         ReportedFailures.Clear();
     }
 
-    private static Texture2D? GetTexture(string name) {
+    private static Texture2D? GetTexture(string name, int pixelSize) {
         name = NormalizeName(name);
         if (name.Length == 0) return null;
-        if (Textures.TryGetValue(name, out Texture2D? texture)) return texture;
+        var key = (name, pixelSize);
+        if (Textures.TryGetValue(key, out Texture2D? texture)) return texture;
         try {
-            return Textures[name] = Rasterize(name);
+            return Textures[key] = Rasterize(name, pixelSize);
         } catch (Exception exception) {
             if (ReportedFailures.Add(name)) {
                 Logger.Log(LogLevel.Warn, "MicroblocksQolUtils/MaterialIcon",
                     $"Could not load Material Symbol '{name}': {exception.Message}");
             }
-            return Textures[name] = null;
+            return Textures[key] = null;
         }
     }
 
-    private static Texture2D Rasterize(string name) {
+    private static Texture2D Rasterize(string name, int rasterSize) {
         Assembly assembly = typeof(MaterialIcon).Assembly;
         using Stream stream = assembly.GetManifestResourceStream(ResourceName(name))
             ?? throw new FileNotFoundException($"Embedded Material Symbol '{name}' was not found.");
@@ -88,13 +97,14 @@ internal static class MaterialIcon {
             combined.AddPath(parsed, connect: false);
         }
 
-        float scale = Math.Min(RasterSize / viewBox[2], RasterSize / viewBox[3]);
-        float x = (RasterSize - viewBox[2] * scale) / 2f - viewBox[0] * scale;
-        float y = (RasterSize - viewBox[3] * scale) / 2f - viewBox[1] * scale;
+        int sourceSize = rasterSize * Supersample;
+        float scale = Math.Min(sourceSize / viewBox[2], sourceSize / viewBox[3]);
+        float x = (sourceSize - viewBox[2] * scale) / 2f - viewBox[0] * scale;
+        float y = (sourceSize - viewBox[3] * scale) / 2f - viewBox[1] * scale;
         using DrawingMatrix transform = new(scale, 0f, 0f, scale, x, y);
         combined.Transform(transform);
 
-        using DrawingBitmap bitmap = new(RasterSize, RasterSize, PixelFormat.Format32bppArgb);
+        using DrawingBitmap bitmap = new(sourceSize, sourceSize, PixelFormat.Format32bppArgb);
         using (DrawingGraphics graphics = DrawingGraphics.FromImage(bitmap)) {
             graphics.Clear(System.Drawing.Color.Transparent);
             graphics.CompositingMode = CompositingMode.SourceOver;
@@ -105,26 +115,37 @@ internal static class MaterialIcon {
             using var brush = new System.Drawing.SolidBrush(System.Drawing.Color.White);
             graphics.FillPath(brush, combined);
         }
-        return CreateTexture(bitmap);
+        return CreateTexture(bitmap, Supersample);
     }
 
-    private static Texture2D CreateTexture(DrawingBitmap bitmap) {
+    private static Texture2D CreateTexture(DrawingBitmap bitmap, int sampleScale) {
         var bounds = new System.Drawing.Rectangle(0, 0, bitmap.Width, bitmap.Height);
         BitmapData data = bitmap.LockBits(bounds, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
         try {
             int stride = Math.Abs(data.Stride);
             byte[] pixels = new byte[stride * bitmap.Height];
             Marshal.Copy(data.Scan0, pixels, 0, pixels.Length);
-            Color[] colors = new Color[bitmap.Width * bitmap.Height];
-            for (int y = 0; y < bitmap.Height; y++) {
-                int sourceY = data.Stride < 0 ? bitmap.Height - 1 - y : y;
-                int row = sourceY * stride;
-                for (int x = 0; x < bitmap.Width; x++) {
-                    byte alpha = pixels[row + x * 4 + 3];
-                    colors[y * bitmap.Width + x] = new Color(alpha, alpha, alpha, alpha);
+            int width = bitmap.Width / sampleScale;
+            int height = bitmap.Height / sampleScale;
+            Color[] colors = new Color[width * height];
+            int sampleCount = sampleScale * sampleScale;
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    int coverage = 0;
+                    for (int sampleY = 0; sampleY < sampleScale; sampleY++) {
+                        int bitmapY = y * sampleScale + sampleY;
+                        int sourceY = data.Stride < 0 ? bitmap.Height - 1 - bitmapY : bitmapY;
+                        int row = sourceY * stride;
+                        for (int sampleX = 0; sampleX < sampleScale; sampleX++) {
+                            int bitmapX = x * sampleScale + sampleX;
+                            coverage += pixels[row + bitmapX * 4 + 3];
+                        }
+                    }
+                    byte alpha = SharpenCoverage((byte)((coverage + sampleCount / 2) / sampleCount));
+                    colors[y * width + x] = new Color(alpha, alpha, alpha, alpha);
                 }
             }
-            Texture2D texture = new(Engine.Graphics.GraphicsDevice, bitmap.Width, bitmap.Height);
+            Texture2D texture = new(Engine.Graphics.GraphicsDevice, width, height);
             texture.SetData(colors);
             return texture;
         } finally {
@@ -136,6 +157,71 @@ internal static class MaterialIcon {
 
     private static string ResourceName(string name) =>
         ResourcePrefix + NormalizeName(name) + ".svg";
+
+    private static byte SharpenCoverage(byte alpha) {
+        int value = alpha;
+        int smooth = (value * value * (765 - value * 2) + 32512) / 65025;
+        return (byte)((value + smooth * 3 + 2) / 4);
+    }
+
+    private static FieldInfo RequiredSpriteBatchField(params string[] names) {
+        Type type = typeof(SpriteBatch);
+        foreach (string name in names) {
+            FieldInfo? field = type.GetField(name, SpriteBatchFields);
+            if (field is not null) return field;
+        }
+        throw new MissingFieldException(type.FullName, string.Join(" or ", names));
+    }
+
+    private static XnaMatrix CurrentTransform() {
+        try {
+            SpriteBatch spriteBatch = Monocle.Draw.SpriteBatch;
+            if ((bool?)SpriteBatchBeginCalledField.GetValue(spriteBatch) == true
+                && SpriteBatchTransformMatrixField.GetValue(spriteBatch) is XnaMatrix transform)
+                return transform;
+        } catch {
+            // Fall through to the transform used by the normal high-resolution UI pass.
+        }
+        return HiresRenderer.DrawToBuffer ? XnaMatrix.Identity : Engine.ScreenMatrix;
+    }
+
+    private readonly record struct RasterContext(
+        int PixelSize,
+        Vector2 LayoutSize,
+        Vector2 TextureScale,
+        XnaMatrix Transform,
+        XnaMatrix InverseTransform,
+        bool ScreenAligned
+    ) {
+        public static RasterContext Create(float size) {
+            XnaMatrix transform = CurrentTransform();
+            bool screenAligned = MathF.Abs(transform.M12) < 0.0001f
+                && MathF.Abs(transform.M21) < 0.0001f
+                && MathF.Abs(transform.M11) > 0.0001f
+                && MathF.Abs(transform.M22) > 0.0001f;
+            Vector2 pixelsPerUnit = screenAligned
+                ? new Vector2(MathF.Abs(transform.M11), MathF.Abs(transform.M22))
+                : Vector2.One;
+            int pixelSize = Math.Max(1, (int)MathF.Round(size * pixelsPerUnit.Y));
+            Vector2 textureScale = new(1f / pixelsPerUnit.X, 1f / pixelsPerUnit.Y);
+            XnaMatrix inverse = screenAligned ? XnaMatrix.Invert(transform) : XnaMatrix.Identity;
+            return new RasterContext(
+                pixelSize,
+                new Vector2(pixelSize) * textureScale,
+                textureScale,
+                transform,
+                inverse,
+                screenAligned
+            );
+        }
+
+        public Vector2 SnapToPixel(Vector2 position) {
+            if (!ScreenAligned) return new Vector2(MathF.Round(position.X), MathF.Round(position.Y));
+            Vector2 pixel = Vector2.Transform(position, Transform);
+            pixel = new Vector2(MathF.Round(pixel.X), MathF.Round(pixel.Y));
+            return Vector2.Transform(pixel, InverseTransform);
+        }
+    }
 
     private static IEnumerable<float> ParseNumbers(string value) {
         SvgNumberReader reader = new(value);
