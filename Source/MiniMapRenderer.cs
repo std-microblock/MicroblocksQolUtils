@@ -1,4 +1,5 @@
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
 using Monocle;
 using System.Runtime.CompilerServices;
 
@@ -7,7 +8,13 @@ namespace Celeste.Mod.MicroblocksQolUtils;
 public static class MiniMapRenderer {
     private const float ScreenWidth = 1920f;
     private const float Margin = 22f;
-    private static readonly ConditionalWeakTable<SolidTiles, SolidPointCache> SolidPoints = new();
+    private static readonly ConditionalWeakTable<SolidTiles, SolidRunCache> SolidRuns = new();
+    private static Texture2D? solidPixel;
+
+    public static void Dispose() {
+        solidPixel?.Dispose();
+        solidPixel = null;
+    }
 
     public static void Render(Level level) {
         QolSettings settings = MicroblocksQolUtilsModule.Settings;
@@ -233,12 +240,57 @@ public static class MiniMapRenderer {
         MiniMapShape shape,
         Color color
     ) {
-        float tileSize = Math.Max(1f, 8f * scale);
-        foreach (Vector2 world in SolidPoints.GetValue(solids, static value => new SolidPointCache(value)).Points) {
-            Vector2 point = center + (world - player) * scale;
-            if (!Inside(point, center, radius - tileSize, shape)) continue;
-            Draw.Rect(point.X - tileSize / 2f, point.Y - tileSize / 2f, tileSize + 0.5f, tileSize + 0.5f, color);
+        float tileSize = 8f * scale;
+        float safeRadius = radius - Math.Max(1f, tileSize);
+        if (safeRadius <= 0f) return;
+
+        float originX = center.X + (solids.Position.X - player.X) * scale;
+        float originY = center.Y + (solids.Position.Y - player.Y) * scale;
+        Texture2D pixel = GetSolidPixel();
+        foreach (SolidRun run in SolidRuns.GetValue(solids, static value => new SolidRunCache(value)).Runs) {
+            float rowCenter = originY + (run.Y + 0.5f) * tileSize;
+            float deltaY = rowCenter - center.Y;
+            float halfWidth;
+            if (shape == MiniMapShape.Circle) {
+                float remaining = safeRadius * safeRadius - deltaY * deltaY;
+                if (remaining < 0f) continue;
+                halfWidth = MathF.Sqrt(remaining);
+            } else {
+                if (Math.Abs(deltaY) > safeRadius) continue;
+                halfWidth = safeRadius;
+            }
+
+            float minimumCenterX = center.X - halfWidth;
+            float maximumCenterX = center.X + halfWidth;
+            int first = Math.Max(run.Start,
+                (int)MathF.Ceiling((minimumCenterX - originX) / tileSize - 0.5f));
+            int end = Math.Min(run.End,
+                (int)MathF.Floor((maximumCenterX - originX) / tileSize - 0.5f) + 1);
+            if (end <= first) continue;
+
+            // Draw.Rect truncates every float independently and samples a one-pixel region from
+            // an atlas. At non-integer zooms (or with a linear HUD sampler), doing that per tile
+            // exposes the atlas edge and creates the conspicuous grid. A dedicated 1x1 texture,
+            // one quad per continuous run, and shared integer boundaries keep adjacent rows flush.
+            int left = (int)MathF.Floor(originX + first * tileSize);
+            int right = (int)MathF.Floor(originX + end * tileSize);
+            int top = (int)MathF.Floor(originY + run.Y * tileSize);
+            int bottom = (int)MathF.Floor(originY + (run.Y + 1) * tileSize);
+            if (right <= left || bottom <= top) continue;
+            Draw.SpriteBatch.Draw(pixel, new Rectangle(left, top, right - left, bottom - top), color);
         }
+    }
+
+    private static Texture2D GetSolidPixel() {
+        GraphicsDevice graphics = Engine.Graphics.GraphicsDevice;
+        if (solidPixel is not null
+            && !solidPixel.IsDisposed
+            && ReferenceEquals(solidPixel.GraphicsDevice, graphics)) return solidPixel;
+
+        solidPixel?.Dispose();
+        solidPixel = new Texture2D(graphics, 1, 1);
+        solidPixel.SetData(new[] { Color.White });
+        return solidPixel;
     }
 
     private static void DrawCollectibles(
@@ -506,13 +558,19 @@ public static class MiniMapRenderer {
             : MathF.Pow((value + 0.055f) / 1.055f, 2.4f);
     }
 
-    private sealed class SolidPointCache {
-        public List<Vector2> Points { get; } = [];
+    private readonly record struct SolidRun(int Y, int Start, int End);
 
-        public SolidPointCache(SolidTiles solids) {
+    private sealed class SolidRunCache {
+        public List<SolidRun> Runs { get; } = [];
+
+        public SolidRunCache(SolidTiles solids) {
             for (int y = 0; y < solids.Grid.CellsY; y++) {
-                for (int x = 0; x < solids.Grid.CellsX; x++) {
-                    if (solids.Grid[x, y]) Points.Add(solids.Position + new Vector2(x * 8f + 4f, y * 8f + 4f));
+                int x = 0;
+                while (x < solids.Grid.CellsX) {
+                    while (x < solids.Grid.CellsX && !solids.Grid[x, y]) x++;
+                    int start = x;
+                    while (x < solids.Grid.CellsX && solids.Grid[x, y]) x++;
+                    if (x > start) Runs.Add(new SolidRun(y, start, x));
                 }
             }
         }
