@@ -81,6 +81,35 @@ internal static class MaterialUi {
         Draw.SpriteBatch.Draw(mask, center - new Vector2(diameter / 2f), color);
     }
 
+    public static void ClippedCircle(Vector2 center, float radius, MaterialRect clip, Color color) {
+        const int maskDiameter = 256;
+        int displayDiameter = Math.Max(1, (int)MathF.Round(radius * 2f));
+        Texture2D mask = GetCircleMask(maskDiameter);
+        int circleX = (int)MathF.Round(center.X - displayDiameter / 2f);
+        int circleY = (int)MathF.Round(center.Y - displayDiameter / 2f);
+        Rectangle circleBounds = new(circleX, circleY, displayDiameter, displayDiameter);
+        Rectangle clipBounds = new(
+            (int)MathF.Floor(clip.X),
+            (int)MathF.Floor(clip.Y),
+            Math.Max(1, (int)MathF.Ceiling(clip.Width)),
+            Math.Max(1, (int)MathF.Ceiling(clip.Height))
+        );
+        Rectangle visible = Rectangle.Intersect(circleBounds, clipBounds);
+        if (visible.Width <= 0 || visible.Height <= 0) return;
+        int sourceLeft = Math.Clamp((int)MathF.Floor(
+            (visible.X - circleBounds.X) / (float)displayDiameter * maskDiameter), 0, maskDiameter - 1);
+        int sourceTop = Math.Clamp((int)MathF.Floor(
+            (visible.Y - circleBounds.Y) / (float)displayDiameter * maskDiameter), 0, maskDiameter - 1);
+        int sourceRight = Math.Clamp((int)MathF.Ceiling(
+            (visible.Right - circleBounds.X) / (float)displayDiameter * maskDiameter),
+            sourceLeft + 1, maskDiameter);
+        int sourceBottom = Math.Clamp((int)MathF.Ceiling(
+            (visible.Bottom - circleBounds.Y) / (float)displayDiameter * maskDiameter),
+            sourceTop + 1, maskDiameter);
+        Rectangle source = new(sourceLeft, sourceTop, sourceRight - sourceLeft, sourceBottom - sourceTop);
+        Draw.SpriteBatch.Draw(mask, visible, source, color);
+    }
+
     public static void CircleOutline(Vector2 center, float radius, float thickness, Color color) {
         int diameter = Math.Max(1, (int)MathF.Round(radius * 2f));
         int pixelThickness = Math.Clamp((int)MathF.Round(thickness), 1, Math.Max(1, diameter / 2));

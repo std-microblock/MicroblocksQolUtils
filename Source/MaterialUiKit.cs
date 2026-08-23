@@ -33,6 +33,133 @@ internal readonly record struct MaterialRect(float X, float Y, float Width, floa
     );
 
     public MaterialRect Offset(float x, float y) => new(X + x, Y + y, Width, Height);
+
+    public MaterialRect ScaleFromCenter(float scale) {
+        float width = Width * scale;
+        float height = Height * scale;
+        return new MaterialRect(Center.X - width / 2f, Center.Y - height / 2f, width, height);
+    }
+}
+
+internal readonly record struct MaterialInteractionTarget(
+    string Key,
+    MaterialRect Bounds,
+    bool Enabled = true,
+    bool Focused = false
+);
+
+internal sealed class MaterialMotionController {
+    private readonly Dictionary<string, MaterialInteractionState> states = new(StringComparer.Ordinal);
+    private string? capturedKey;
+    private int frame;
+
+    public void Update(IEnumerable<MaterialInteractionTarget> targets) {
+        frame++;
+        Vector2 mouse = MInput.Mouse.Position;
+        List<MaterialInteractionTarget> current = targets.ToList();
+
+        if (MInput.Mouse.PressedLeftButton) {
+            capturedKey = current
+                .Where(target => target.Enabled && target.Bounds.Contains(mouse))
+                .OrderBy(target => target.Bounds.Width * target.Bounds.Height)
+                .Select(target => target.Key)
+                .FirstOrDefault();
+            if (capturedKey is not null) State(capturedKey).BeginRipple(mouse);
+        }
+
+        foreach (MaterialInteractionTarget target in current) {
+            MaterialInteractionState state = State(target.Key);
+            state.LastSeenFrame = frame;
+            bool hovered = target.Enabled && target.Bounds.Contains(mouse);
+            bool pressed = target.Enabled && capturedKey == target.Key && MInput.Mouse.CheckLeftButton;
+            state.Update(hovered, pressed, target.Focused, Engine.RawDeltaTime);
+        }
+
+        foreach (MaterialInteractionState state in states.Values.Where(state => state.LastSeenFrame != frame))
+            state.Update(false, false, false, Engine.RawDeltaTime);
+
+        if (MInput.Mouse.ReleasedLeftButton || !MInput.Mouse.CheckLeftButton) capturedKey = null;
+        if (states.Count > 512) {
+            foreach (string key in states
+                .Where(pair => frame - pair.Value.LastSeenFrame > 120 && pair.Value.IsIdle)
+                .Select(pair => pair.Key)
+                .ToArray()) states.Remove(key);
+        }
+    }
+
+    public MaterialRect Animate(string key, MaterialRect rect, float hoverScale = 0.012f,
+        float pressedScale = 0.018f, float hoverLift = 2f) {
+        MaterialInteractionState state = State(key);
+        float scale = 1f + state.Hover * hoverScale - state.Pressed * pressedScale;
+        return rect.ScaleFromCenter(scale).Offset(0f, -state.Hover * hoverLift + state.Pressed * hoverLift);
+    }
+
+    public float Emphasis(string key) {
+        MaterialInteractionState state = State(key);
+        return Math.Max(state.Focus, Math.Max(state.Hover * 0.78f, state.Pressed));
+    }
+
+    public void RenderStateLayer(string key, MaterialRect rect, float radius, Color color, float alpha = 1f) {
+        MaterialInteractionState state = State(key);
+        float stateAlpha = state.Hover * 0.075f + state.Pressed * 0.085f + state.Focus * 0.035f;
+        if (stateAlpha > 0.001f) {
+            MaterialUi.RoundedRect(rect.X, rect.Y, rect.Width, rect.Height, radius,
+                color * (alpha * stateAlpha));
+        }
+        if (state.RippleOpacity <= 0.001f) return;
+        float maximumRadius = MaxDistanceToCorner(state.RippleOrigin, rect);
+        float progress = Ease.CubeOut(Math.Clamp(state.RippleProgress, 0f, 1f));
+        MaterialUi.ClippedCircle(state.RippleOrigin, Math.Max(2f, maximumRadius * progress), rect,
+            color * (alpha * state.RippleOpacity * 0.16f));
+    }
+
+    public void Pulse(string key, Vector2 origin) => State(key).BeginRipple(origin);
+
+    private MaterialInteractionState State(string key) {
+        if (states.TryGetValue(key, out MaterialInteractionState? state)) return state;
+        state = new MaterialInteractionState();
+        states[key] = state;
+        return state;
+    }
+
+    private static float MaxDistanceToCorner(Vector2 point, MaterialRect rect) {
+        float x = Math.Max(Math.Abs(point.X - rect.X), Math.Abs(point.X - rect.Right));
+        float y = Math.Max(Math.Abs(point.Y - rect.Y), Math.Abs(point.Y - rect.Bottom));
+        return MathF.Sqrt(x * x + y * y);
+    }
+
+    private sealed class MaterialInteractionState {
+        public float Hover { get; private set; }
+        public float Pressed { get; private set; }
+        public float Focus { get; private set; }
+        public float RippleProgress { get; private set; } = 1f;
+        public float RippleOpacity { get; private set; }
+        public Vector2 RippleOrigin { get; private set; }
+        public int LastSeenFrame { get; set; }
+        public bool IsIdle => Hover <= 0.001f && Pressed <= 0.001f && Focus <= 0.001f
+            && RippleOpacity <= 0.001f;
+
+        public void BeginRipple(Vector2 origin) {
+            RippleOrigin = origin;
+            RippleProgress = 0f;
+            RippleOpacity = 1f;
+            Pressed = Math.Max(Pressed, 0.35f);
+        }
+
+        public void Update(bool hovered, bool pressed, bool focused, float deltaTime) {
+            Hover = Smooth(Hover, hovered ? 1f : 0f, hovered ? 18f : 12f, deltaTime);
+            Pressed = Smooth(Pressed, pressed ? 1f : 0f, pressed ? 26f : 18f, deltaTime);
+            Focus = Smooth(Focus, focused ? 1f : 0f, 11f, deltaTime);
+            RippleProgress = Math.Min(1f, RippleProgress + deltaTime * (pressed ? 2.6f : 3.8f));
+            if (!pressed && RippleProgress >= 0.72f)
+                RippleOpacity = Math.Max(0f, RippleOpacity - deltaTime * 5.5f);
+        }
+
+        private static float Smooth(float value, float target, float speed, float deltaTime) {
+            float amount = 1f - MathF.Exp(-speed * Math.Max(0f, deltaTime));
+            return MathHelper.Lerp(value, target, amount);
+        }
+    }
 }
 
 internal enum MaterialAxis {

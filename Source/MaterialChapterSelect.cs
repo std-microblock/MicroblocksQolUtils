@@ -42,6 +42,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
     private readonly MaterialScrollController levelSetScroll = new();
     private readonly MaterialScrollViewport cardViewport = new("mqol-chapter-cards");
     private readonly MaterialScrollViewport levelSetViewport = new("mqol-chapter-levelsets");
+    private readonly MaterialMotionController motion = new();
     private int selectedIndex;
     private int selectedLevelSet;
     private float ease;
@@ -120,6 +121,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         cardScroll.Update(MaxCardScroll(layout));
         levelSetScroll.Update(MaxLevelSetScroll(layout));
         ease = Calc.Approach(ease, display ? 1f : 0f, Engine.DeltaTime * 7f);
+        UpdateInteractions(layout);
         if (Focused && display) UpdateInput();
         base.Update();
     }
@@ -235,6 +237,42 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
                 if (MInput.Mouse.PressedLeftButton) ActivateSelected();
             }
         }
+    }
+
+    private void UpdateInteractions(ChapterLayout layout) {
+        List<MaterialInteractionTarget> targets = [
+            new MaterialInteractionTarget("chapter.search", layout.Search, Focused: searchFocused)
+        ];
+        if (!Visible || !display || searchFocused) {
+            motion.Update(targets);
+            return;
+        }
+
+        for (int index = 0; index < levelSets.Count; index++) {
+            MaterialRect item = layout.SidebarItem(index, levelSetScroll.Offset);
+            if (item.Bottom < layout.SidebarItems.Y || item.Y > layout.SidebarItems.Bottom) continue;
+            targets.Add(new MaterialInteractionTarget(
+                $"chapter.levelset.{levelSets[index].Id}",
+                item,
+                Focused: index == selectedLevelSet
+            ));
+        }
+
+        ChapterContentLayout content = BuildContentLayout(layout, cardScroll.Offset);
+        foreach (SectionPlacement placement in content.Sections) {
+            if (placement.Rect.Bottom < layout.Cards.Y || placement.Rect.Y > layout.Cards.Bottom) continue;
+            targets.Add(new MaterialInteractionTarget(
+                $"chapter.section.{sections[placement.SectionIndex].Id}", placement.Rect));
+        }
+        foreach (CardPlacement placement in content.Cards) {
+            if (placement.Rect.Bottom < layout.Cards.Y || placement.Rect.Y > layout.Cards.Bottom) continue;
+            targets.Add(new MaterialInteractionTarget(
+                $"chapter.card.{entries[placement.EntryIndex].Sid}",
+                placement.Rect,
+                Focused: placement.EntryIndex == selectedIndex
+            ));
+        }
+        motion.Update(targets);
     }
 
     private void RebuildEntries() {
@@ -468,10 +506,14 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
             new Vector2(0f, 0.5f), MaterialTextRole.Section, palette.OnSurface, alpha);
         levelSetViewport.Render(layout.SidebarItems, () => {
             for (int index = 0; index < levelSets.Count; index++) {
+                string key = $"chapter.levelset.{levelSets[index].Id}";
                 MaterialRect item = layout.SidebarItem(index, levelSetScroll.Offset);
                 if (item.Bottom < layout.SidebarItems.Y || item.Y > layout.SidebarItems.Bottom) continue;
+                item = motion.Animate(key, item, hoverScale: 0.010f, pressedScale: 0.018f, hoverLift: 1f);
                 bool selected = index == selectedLevelSet;
                 MaterialUiKit.NavigationPill(item, palette, selected, alpha);
+                motion.RenderStateLayer(key, item, item.Height / 2f,
+                    selected ? palette.OnPrimary : palette.Primary, alpha);
                 SystemTtfFont.DrawVisual(
                     Trim(levelSets[index].Title, 20),
                     new Vector2(item.X + 20f, item.Center.Y),
@@ -494,17 +536,24 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
             foreach (SectionPlacement placement in content.Sections) {
                 if (placement.Rect.Bottom < layout.Cards.Y || placement.Rect.Y > layout.Cards.Bottom) continue;
                 ChapterSection section = sections[placement.SectionIndex];
-                RenderSectionHeader(section, placement.Rect,
-                    collapsedSections.GetValueOrDefault(section.Id), palette, alpha);
+                string key = $"chapter.section.{section.Id}";
+                MaterialRect header = motion.Animate(key, placement.Rect,
+                    hoverScale: 0.005f, pressedScale: 0.010f, hoverLift: 1.5f);
+                RenderSectionHeader(section, header,
+                    collapsedSections.GetValueOrDefault(section.Id), palette, alpha, key);
             }
             foreach (CardPlacement placement in content.Cards) {
                 int index = placement.EntryIndex;
+                string key = $"chapter.card.{entries[index].Sid}";
                 MaterialRect card = placement.Rect;
                 if (card.Bottom < layout.Cards.Y || card.Y > layout.Cards.Bottom) continue;
+                card = motion.Animate(key, card, hoverScale: 0.014f, pressedScale: 0.024f, hoverLift: 3f);
                 bool selected = index == selectedIndex;
                 Color surface = selected ? palette.SurfaceHighest : palette.SurfaceHigh;
                 MaterialUiKit.Card(card,
                     palette with { SurfaceHigh = surface * (selected ? 0.98f : 0.85f) }, selected, alpha);
+                motion.RenderStateLayer(key, card, 30f,
+                    selected ? palette.Primary : palette.OnSurface, alpha);
                 RenderCard(entries[index], card, selected, palette, alpha);
             }
             if (entries.Count == 0 && sections.Count == 0) {
@@ -517,17 +566,19 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         });
     }
 
-    private static void RenderSectionHeader(
+    private void RenderSectionHeader(
         ChapterSection section,
         MaterialRect header,
         bool collapsed,
         MaterialPalette palette,
-        float alpha
+        float alpha,
+        string key
     ) {
         MaterialUi.RoundedRect(header.X, header.Y, header.Width, header.Height, 20f,
             palette.SurfaceHighest * 0.78f * alpha);
         MaterialUi.RoundedOutline(header.X, header.Y, header.Width, header.Height, 20f, 1f,
             palette.Outline * 0.72f * alpha);
+        motion.RenderStateLayer(key, header, 20f, palette.Primary, alpha);
 
         float iconSize = 34f;
         Vector2 iconCenter = new(header.X + 28f, header.Center.Y);
@@ -861,21 +912,24 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
     }
 
     private void RenderSearchBox(MaterialPalette palette, ChapterLayout layout, float alpha) {
+        MaterialRect search = motion.Animate("chapter.search", layout.Search,
+            hoverScale: 0.004f, pressedScale: 0.008f, hoverLift: 1f);
         Color fill = searchFocused ? palette.SurfaceHighest : palette.SurfaceHigh;
-        MaterialUi.RoundedRect(layout.Search.X, layout.Search.Y, layout.Search.Width, layout.Search.Height,
-            layout.Search.Height / 2f, fill * alpha);
-        MaterialUi.RoundedOutline(layout.Search.X, layout.Search.Y, layout.Search.Width, layout.Search.Height,
-            layout.Search.Height / 2f, searchFocused ? 2f : 1f,
+        MaterialUi.RoundedRect(search.X, search.Y, search.Width, search.Height,
+            search.Height / 2f, fill * alpha);
+        motion.RenderStateLayer("chapter.search", search, search.Height / 2f, palette.Primary, alpha);
+        MaterialUi.RoundedOutline(search.X, search.Y, search.Width, search.Height,
+            search.Height / 2f, searchFocused ? 2f : 1f,
             (searchFocused ? palette.Primary : palette.Outline) * alpha);
         string shown = searchText + (searchFocused ? imeText : "");
         string text = shown.Length == 0 ? "搜索地图、地图集或 SID…" : shown;
         Color color = shown.Length == 0 ? palette.OnSurfaceVariant * 0.68f : palette.OnSurface;
-        Vector2 textPosition = new(layout.Search.X + 24f, layout.Search.Center.Y);
+        Vector2 textPosition = new(search.X + 24f, search.Center.Y);
         SystemTtfFont.DrawVisual(Trim(text, 46), textPosition, new Vector2(0f, 0.5f), 0.36f, color * alpha);
         if (searchFocused && Scene.BetweenInterval(0.5f)) {
             float caretX = textPosition.X + SystemTtfFont.MeasureVisible(Trim(shown, 46), 0.36f).X + 2f;
-            MaterialUi.Line(new Vector2(caretX, layout.Search.Y + 11f),
-                new Vector2(caretX, layout.Search.Bottom - 11f), 2f, palette.Primary * alpha);
+            MaterialUi.Line(new Vector2(caretX, search.Y + 11f),
+                new Vector2(caretX, search.Bottom - 11f), 2f, palette.Primary * alpha);
         }
         float xScale = Engine.ViewWidth / ScreenWidth;
         float yScale = Engine.ViewHeight / ScreenHeight;
