@@ -8,6 +8,11 @@ public enum MiniMapShape {
     Square
 }
 
+public enum MiniMapAvatarShape {
+    Circle,
+    Square
+}
+
 public enum MiniMapNameMode {
     None,
     WatchedOnly,
@@ -95,6 +100,13 @@ public sealed class QolSettings : EverestModuleSettings {
     public bool MiniMapRoomBounds { get; set; } = true;
 
     [DefaultValue(true)]
+    public bool MiniMapRoomBackgrounds { get; set; } = true;
+
+    [SettingRange(0, 10)]
+    [DefaultValue(3)]
+    public int MiniMapRoomBackgroundOpacity { get; set; } = 3;
+
+    [DefaultValue(true)]
     public bool MiniMapHighlightRoute { get; set; } = true;
 
     [DefaultValue(true)]
@@ -112,6 +124,9 @@ public sealed class QolSettings : EverestModuleSettings {
 
     [DefaultValue(true)]
     public bool MiniMapShowOffscreenPlayers { get; set; } = true;
+
+    [DefaultValue(MiniMapAvatarShape.Circle)]
+    public MiniMapAvatarShape MiniMapAvatarShape { get; set; } = MiniMapAvatarShape.Circle;
 
     [DefaultValue(MiniMapNameMode.WatchedOnly)]
     public MiniMapNameMode MiniMapNames { get; set; } = MiniMapNameMode.WatchedOnly;
