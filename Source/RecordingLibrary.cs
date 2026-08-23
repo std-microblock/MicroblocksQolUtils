@@ -2,12 +2,18 @@ using System.Diagnostics;
 
 namespace Celeste.Mod.MicroblocksQolUtils;
 
+internal enum RecordingLibraryKind {
+    DeathReplay,
+    Full
+}
+
 internal readonly record struct RecordingLibraryEntry(
     string Path,
     string FileName,
     string RelativeDirectory,
     DateTime ModifiedAt,
-    long SizeBytes
+    long SizeBytes,
+    RecordingLibraryKind Kind
 );
 
 internal static class RecordingLibrary {
@@ -26,7 +32,8 @@ internal static class RecordingLibrary {
                     file.Name,
                     RelativeDirectory(root, file.DirectoryName),
                     file.LastWriteTime,
-                    file.Length
+                    file.Length,
+                    KindOf(root, file.FullName)
                 ))
                 .ToArray();
         } catch (Exception exception) {
@@ -99,10 +106,20 @@ internal static class RecordingLibrary {
     }
 
     private static bool IsWorkingFile(string root, string path) {
-        string working = Path.GetFullPath(Path.Combine(root, ".working"))
+        return IsUnderDirectory(path, Path.Combine(root, ".working"));
+    }
+
+    internal static RecordingLibraryKind KindOf(string root, string path) {
+        return IsUnderDirectory(path, Path.Combine(root, "deaths"))
+            ? RecordingLibraryKind.DeathReplay
+            : RecordingLibraryKind.Full;
+    }
+
+    private static bool IsUnderDirectory(string path, string directory) {
+        string fullDirectory = Path.GetFullPath(directory)
             .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
             + Path.DirectorySeparatorChar;
-        return Path.GetFullPath(path).StartsWith(working, StringComparison.OrdinalIgnoreCase);
+        return Path.GetFullPath(path).StartsWith(fullDirectory, StringComparison.OrdinalIgnoreCase);
     }
 
     private static string RelativeDirectory(string root, string? directory) {

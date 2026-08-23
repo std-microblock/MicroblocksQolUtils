@@ -229,6 +229,13 @@ public sealed class QolSettings : EverestModuleSettings {
     [SettingRange(0, 500)]
     public int RecordingRetentionCount { get; set; } = 100;
 
+    [DefaultValue(false)]
+    public bool DeathReplayEnabled { get; set; }
+
+    [DefaultValue(30)]
+    [SettingRange(0, 200)]
+    public int DeathReplayRetentionCount { get; set; } = 30;
+
     [DefaultValue("")]
     public string RecordingDirectory { get; set; } = "";
 
