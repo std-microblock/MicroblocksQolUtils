@@ -20,8 +20,9 @@ Implemented:
   expose them for direct selection without making CollabUtils2 a dependency.
 - Rolling FPS display.
 - Persistent watched-player list and Everest console commands.
-- Circular/square current-room minimap rendered from the live solid-tile grid.
-- Cached room-graph shortest distance to the heart/end room.
+- Circular/square current-room minimap rendered from the live solid-tile grid,
+  with collectible markers and highlighted shortest-route rooms.
+- Cached room-graph shortest distance and route to the heart/end room.
 - Optional reflection-only MiaoNet player positions, avatars, names and map count.
 - `/qol watch`, `/qol unwatch` and `/qol list` inside MiaoNet's own chat box
   (plus `qol_watch`, `qol_unwatch`, `qol_watch_list` in the Everest console).
@@ -46,6 +47,9 @@ Implemented:
 - Native background finalization decodes only the retained ranges from the
   continuous room file and re-encodes them into a gapless MP4. This permits
   exact non-keyframe cuts while failed attempts and load freezes are omitted.
+- Completed recordings are pruned oldest-first at startup and after finalization;
+  the recording settings can change the retention count, disable the limit,
+  or run cleanup immediately.
 - Pass-through FMOD DSP taps capture `bus:/gameplay_sfx` and optionally
   `bus:/ui_sfx`, while deliberately excluding `bus:/music`. Mixer callbacks
   feed a fixed pool of 32 native PCM chunks with non-blocking `try_lock`

@@ -94,6 +94,12 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue(true)]
     public bool MiniMapRoomBounds { get; set; } = true;
 
+    [DefaultValue(true)]
+    public bool MiniMapHighlightRoute { get; set; } = true;
+
+    [DefaultValue(true)]
+    public bool MiniMapCollectibles { get; set; } = true;
+
     [SettingRange(0, 10)]
     [DefaultValue(6)]
     public int MiniMapBackgroundOpacity { get; set; } = 6;
@@ -174,6 +180,10 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue(12000)]
     [SettingRange(2000, 50000)]
     public int RecordingBitrateKbps { get; set; } = 12000;
+
+    [DefaultValue(100)]
+    [SettingRange(0, 500)]
+    public int RecordingRetentionCount { get; set; } = 100;
 
     [DefaultValue("")]
     public string RecordingDirectory { get; set; } = "";

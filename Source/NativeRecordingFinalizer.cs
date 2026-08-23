@@ -30,6 +30,7 @@ internal static class NativeRecordingFinalizer {
             ).ConfigureAwait(false);
             Logger.Log(LogLevel.Info, "MicroblocksQolUtils/Recorder", $"Saved successful room recording: {output}");
             completed = true;
+            AutoRecorder.CleanupRecordings();
         } catch (Exception exception) {
             Logger.LogDetailed(exception, "MicroblocksQolUtils/Recorder");
         } finally {
