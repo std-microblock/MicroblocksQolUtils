@@ -23,7 +23,8 @@ Implemented:
 - Rolling FPS display.
 - Persistent watched-player list and Everest console commands.
 - Circular/square current-room minimap rendered from the live solid-tile grid,
-  with collectible markers and highlighted shortest-route rooms.
+  with collectible markers, persistent strawberry collection status, optional
+  edge markers for strawberries in adjacent rooms, and highlighted shortest-route rooms.
 - Cached room-graph shortest distance and route to the heart/end room.
 - Optional reflection-only MiaoNet player positions, avatars, names and map count.
 - `/qol watch`, `/qol unwatch` and `/qol list` inside MiaoNet's own chat box

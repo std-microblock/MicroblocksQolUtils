@@ -50,7 +50,7 @@ public static class MiniMapRenderer {
         }
         DrawSolids(solids, player.Center, center, radius, pixelsPerWorld, settings.MiniMapShape, terrainColor);
         if (settings.MiniMapCollectibles && level.Session.MapData is MapData map)
-            DrawCollectibles(map, level.Session, player.Center, center, radius, pixelsPerWorld, settings.MiniMapShape);
+            DrawCollectibles(map, level, player.Center, center, radius, pixelsPerWorld, settings);
         foreach (RemotePlayer remote in MiaoNetBridge.Players) {
             if (!settings.ShowMiaoNetPlayers) break;
             DrawRemote(remote, player.Center, center, radius, pixelsPerWorld, settings);
@@ -242,22 +242,29 @@ public static class MiniMapRenderer {
 
     private static void DrawCollectibles(
         MapData map,
-        Session session,
+        Level level,
         Vector2 player,
         Vector2 center,
         float radius,
         float scale,
-        MiniMapShape shape
+        QolSettings settings
     ) {
+        IReadOnlySet<string>? nearbyRooms = settings.MiniMapShowNearbyRoomStrawberries
+            ? RoomRouteCache.NearbyRooms(level)
+            : null;
         foreach (MiniMapCollectible collectible in MapCollectibleCache.Get(map)) {
             Vector2 point = center + (collectible.Position - player) * scale;
-            if (!Inside(point, center, radius - 8f, shape)) continue;
-            float alpha = collectible.IsCollected(session) ? 0.34f : 1f;
-            DrawCollectible(point, collectible.Kind, alpha);
+            bool offscreen = !Inside(point, center, radius - 14f, settings.MiniMapShape);
+            if (offscreen) {
+                if (!IsStrawberry(collectible.Kind) || nearbyRooms?.Contains(collectible.Room) != true) continue;
+                point = ClampToEdge(point, center, radius - 14f, settings.MiniMapShape);
+            }
+            DrawCollectible(point, collectible.Kind, collectible.IsCollected(level.Session));
         }
     }
 
-    private static void DrawCollectible(Vector2 point, MiniMapCollectibleKind kind, float alpha) {
+    private static void DrawCollectible(Vector2 point, MiniMapCollectibleKind kind, bool collected) {
+        float alpha = collected ? 0.42f : 1f;
         Color shadow = Color.Black * (0.82f * alpha);
         MaterialUi.Circle(point, 7f, shadow);
         switch (kind) {
@@ -300,6 +307,20 @@ public static class MiniMapRenderer {
                 DrawDiamond(point, 5.5f, gem, 2f);
                 break;
         }
+
+        if (collected && IsStrawberry(kind)) DrawCollectedBadge(point + new Vector2(5f, 5f));
+    }
+
+    private static bool IsStrawberry(MiniMapCollectibleKind kind) =>
+        kind is MiniMapCollectibleKind.Strawberry
+            or MiniMapCollectibleKind.GoldenBerry
+            or MiniMapCollectibleKind.MoonBerry;
+
+    private static void DrawCollectedBadge(Vector2 center) {
+        MaterialUi.Circle(center, 4.25f, Color.Black * 0.9f);
+        MaterialUi.Circle(center, 3.25f, new Color(76, 210, 120));
+        MaterialUi.Line(center + new Vector2(-1.8f, 0f), center + new Vector2(-0.4f, 1.5f), 1.25f, Color.White);
+        MaterialUi.Line(center + new Vector2(-0.4f, 1.5f), center + new Vector2(2f, -1.7f), 1.25f, Color.White);
     }
 
     private static void DrawDiamond(Vector2 center, float radius, Color color, float thickness) {

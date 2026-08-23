@@ -19,12 +19,19 @@ public static class RoomRouteCache {
         return Graphs.GetValue(map, static value => new RoomGraph(value)).RouteFrom(level.Session.Level);
     }
 
+    public static IReadOnlySet<string> NearbyRooms(Level level) {
+        MapData? map = level.Session.MapData;
+        if (map is null || string.IsNullOrEmpty(level.Session.Level)) return EmptyRoute;
+        return Graphs.GetValue(map, static value => new RoomGraph(value)).NearbyFrom(level.Session.Level);
+    }
+
     private sealed class RoomGraph {
         private readonly Dictionary<string, int> distance = new(StringComparer.Ordinal);
         private readonly Dictionary<string, int> fallbackDistance = new(StringComparer.Ordinal);
         private readonly Dictionary<string, List<string>> edges;
         private readonly Dictionary<string, int> levelOrder;
         private readonly Dictionary<string, IReadOnlySet<string>> routes = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, IReadOnlySet<string>> nearbyRooms = new(StringComparer.Ordinal);
         private readonly List<LevelData> levels;
         private readonly int fallbackGoalIndex;
 
@@ -96,6 +103,15 @@ public static class RoomRouteCache {
 
             routes[room] = route;
             return route;
+        }
+
+        public IReadOnlySet<string> NearbyFrom(string room) {
+            if (nearbyRooms.TryGetValue(room, out IReadOnlySet<string>? cached)) return cached;
+            if (!edges.TryGetValue(room, out List<string>? adjacent)) return EmptyRoute;
+
+            HashSet<string> nearby = new(adjacent, StringComparer.Ordinal) { room };
+            nearbyRooms[room] = nearby;
+            return nearby;
         }
 
         private static bool TouchAlongEdge(Rectangle first, Rectangle second) {
