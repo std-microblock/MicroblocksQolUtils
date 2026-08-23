@@ -33,7 +33,7 @@ const ERR_CAPTURE: i32 = -6;
 const ERR_PANIC: i32 = -127;
 const AUDIO_QUEUE_CAPACITY: usize = 32;
 const AUDIO_MAX_SAMPLES_PER_CHUNK: usize = 16_384;
-const AUDIO_BUS_COUNT: usize = 2;
+const AUDIO_BUS_COUNT: usize = 3;
 
 static NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
 static SESSIONS: OnceLock<Mutex<HashMap<u64, Arc<CaptureSession>>>> = OnceLock::new();
@@ -399,7 +399,11 @@ impl CaptureSession {
         Self {
             queue: Arc::new(LatestFrameQueue::new(config.queue_capacity)),
             audio_queue: Arc::new(AudioChunkQueue::new()),
-            audio_clocks: [AudioBusClock::new(), AudioBusClock::new()],
+            audio_clocks: [
+                AudioBusClock::new(),
+                AudioBusClock::new(),
+                AudioBusClock::new(),
+            ],
             config,
             running: AtomicBool::new(false),
             stop_requested: AtomicBool::new(false),

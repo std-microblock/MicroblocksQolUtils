@@ -42,35 +42,42 @@ Implemented:
 - Streaming H.264 encoding through FFmpeg shared libraries, with automatic
   NVENC, QSV, AMF, Media Foundation, then OpenH264 fallback. No `ffmpeg.exe`,
   `gdigrab`, managed frame buffer, or subprocess is used.
-- One WGC/encoder session remains alive for the whole room. Deaths,
-  SpeedrunTool loads, and respawn changes only move logical start/end markers;
-  they never restart capture or grow an in-memory recording buffer.
+- One WGC/encoder session remains alive for the complete area run, including
+  every room transition. Deaths, SpeedrunTool loads, and respawn changes only
+  move logical start/end markers; they never restart capture or grow an
+  in-memory recording buffer.
 - A top-right recording badge can independently show a blinking red capture
   dot and the elapsed recording time.
 - Native background finalization decodes only the retained ranges from the
-  continuous room file and re-encodes them into a gapless MP4. This permits
+  continuous run file and re-encodes them into one gapless MP4 at area
+  completion. This permits
   exact non-keyframe cuts while failed attempts and load freezes are omitted.
 - Completed recordings are pruned oldest-first at startup and after finalization;
   the recording settings can change the retention count, disable the limit,
   or run cleanup immediately.
-- Pass-through FMOD DSP taps capture `bus:/gameplay_sfx` and optionally
-  `bus:/ui_sfx`, while deliberately excluding `bus:/music`. Mixer callbacks
-  feed a fixed pool of 32 native PCM chunks with non-blocking `try_lock`
+- Pass-through FMOD DSP taps capture `bus:/gameplay_sfx`, `bus:/music`, and
+  optionally `bus:/ui_sfx`. Mixer callbacks feed a fixed pool of 32 native PCM
+  chunks with non-blocking `try_lock`
   semantics, and a writer thread streams them to a timestamped `.sfxchunks`
-  sidecar instead of buffering room audio in managed or native memory. Exact
+  sidecar instead of buffering run audio in managed or native memory. Exact
   zero-filled idle blocks are represented as timestamp gaps rather than stored.
-- Timeline cuts for SpeedrunTool save/load and respawn-point triggers. A saved
-  prefix is trimmed at its exact timestamp, so deaths and load freezes are not
+- Timeline cuts for SpeedrunTool save/load and respawn-point triggers. Each
+  room transition becomes the next death-reset anchor only after its animation
+  has fully finished; custom respawn-point changes and SpeedrunTool snapshots
+  preserve the exact successful prefix, so deaths and load freezes are not
   included in the final video.
-- The finalizer applies those same retained ranges to both SFX buses, mixes
-  overlapping gameplay/UI chunks at their timestamps, fills sparse gaps with
+- The finalizer applies those same retained ranges to gameplay, UI, and music
+  buses, mixes overlapping chunks at their timestamps, fills sparse gaps with
   silence, streams the result through FFmpeg's native AAC encoder, then remuxes
   H.264 + AAC into the completed MP4 without launching an executable.
-- In `SfxOnlyWithPostMix` mode, each retained segment also stores its FMOD
-  music event and timeline position. Event changes, loops, seeks, and other
-  timeline discontinuities split only the logical edit list; the finalizer
-  decodes the mapped clean BGM file, seeks to each saved position, resamples it
-  to the captured SFX format, and mixes it before AAC encoding.
+- Every retained segment stores its FMOD music event and timeline position.
+  The captured music bus is automatically cut with the same successful-run
+  timeline, so the completed video always keeps its BGM. In
+  `SfxOnlyWithPostMix` mode, event changes, loops, seeks, and other timeline
+  discontinuities additionally split the logical edit list; when an event has
+  a configured clean BGM mapping, the finalizer replaces that segment's
+  captured music with the mapped file at the saved timeline position before
+  AAC encoding.
 
 Planned/in progress:
 
@@ -100,8 +107,9 @@ resolved against the JSON file's directory, for example:
 }
 ```
 
-The music bus itself is never captured, so deaths cannot bake an interrupted or
-restarted BGM track into the continuous room recording.
+When no clean mapping exists, the captured music bus is trimmed by the same
+death, respawn-trigger, and SpeedrunTool edit list as video and SFX. A mapped
+event replaces only its own captured segment, avoiding doubled music.
 
 ## Build and install
 

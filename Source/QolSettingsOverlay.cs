@@ -1435,10 +1435,10 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         MiniMapNameMode.None => "不显示",
         MiniMapNameMode.WatchedOnly => "仅关心的人",
         MiniMapNameMode.Everyone => "所有人",
-        RecordingPolicy.EveryRoom => "每一面",
+        RecordingPolicy.EveryRoom => "完整流程",
         RecordingPolicy.GoldenRunsOnly => "仅金草莓",
-        BgmRecordingMode.CaptureGameMix => "直接录制混音",
-        BgmRecordingMode.SfxOnlyWithPostMix => "仅音效，后期对齐 BGM",
+        BgmRecordingMode.CaptureGameMix => "直接拼接游戏 BGM",
+        BgmRecordingMode.SfxOnlyWithPostMix => "自动拼接（优先映射 BGM）",
         _ => value.ToString()
     };
 

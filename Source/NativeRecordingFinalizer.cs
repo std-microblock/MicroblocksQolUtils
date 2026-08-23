@@ -28,7 +28,7 @@ internal static class NativeRecordingFinalizer {
                 output + ".timeline.json",
                 JsonSerializer.Serialize(new { clips }, new JsonSerializerOptions { WriteIndented = true })
             ).ConfigureAwait(false);
-            Logger.Log(LogLevel.Info, "MicroblocksQolUtils/Recorder", $"Saved successful room recording: {output}");
+            Logger.Log(LogLevel.Info, "MicroblocksQolUtils/Recorder", $"Saved successful run recording: {output}");
             completed = true;
             AutoRecorder.CleanupRecordings();
         } catch (Exception exception) {
