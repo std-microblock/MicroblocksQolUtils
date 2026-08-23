@@ -131,41 +131,38 @@ internal sealed class MaterialScrollController {
 }
 
 internal sealed class MaterialScrollViewport : IDisposable {
-    private readonly string name;
-    private VirtualRenderTarget? target;
+    // Changing render targets while drawing a page can discard everything already batched on
+    // the backbuffer. Scissoring keeps the existing page intact while still clipping scrolling
+    // content to its viewport.
+    private static readonly RasterizerState ScissorRasterizer = new() {
+        CullMode = CullMode.None,
+        ScissorTestEnable = true
+    };
 
     public MaterialScrollViewport(string name) {
-        this.name = name;
+        _ = name;
     }
 
     public void Render(MaterialRect bounds, System.Action drawContents) {
-        int width = Math.Max(1, (int)MathF.Ceiling(bounds.Width));
-        int height = Math.Max(1, (int)MathF.Ceiling(bounds.Height));
-        EnsureTarget(width, height);
-        if (target is null) return;
-
         GraphicsDevice graphics = Engine.Graphics.GraphicsDevice;
-        RenderTargetBinding[] previousTargets = graphics.GetRenderTargets();
-        Viewport previousViewport = graphics.Viewport;
+        Rectangle previousScissor = graphics.ScissorRectangle;
+        Rectangle scissor = ScreenScissor(bounds, graphics.Viewport);
+        if (scissor.Width <= 0 || scissor.Height <= 0) return;
+
         Draw.SpriteBatch.End();
-        graphics.SetRenderTarget(target);
-        graphics.Viewport = new Viewport(0, 0, width, height);
-        graphics.Clear(Color.Transparent);
+        graphics.ScissorRectangle = scissor;
         Draw.SpriteBatch.Begin(
             SpriteSortMode.Deferred,
             BlendState.AlphaBlend,
             SamplerState.LinearClamp,
             DepthStencilState.None,
-            RasterizerState.CullNone,
+            ScissorRasterizer,
             null,
-            Matrix.CreateTranslation(-bounds.X, -bounds.Y, 0f)
+            Engine.ScreenMatrix
         );
         drawContents();
         Draw.SpriteBatch.End();
-
-        if (previousTargets.Length == 0) graphics.SetRenderTarget(null);
-        else graphics.SetRenderTargets(previousTargets);
-        graphics.Viewport = previousViewport;
+        graphics.ScissorRectangle = previousScissor;
         Draw.SpriteBatch.Begin(
             SpriteSortMode.Deferred,
             BlendState.AlphaBlend,
@@ -175,23 +172,20 @@ internal sealed class MaterialScrollViewport : IDisposable {
             null,
             Engine.ScreenMatrix
         );
-        Draw.SpriteBatch.Draw(target, new Rectangle(
-            (int)MathF.Round(bounds.X),
-            (int)MathF.Round(bounds.Y),
-            width,
-            height
-        ), Color.White);
     }
 
-    public void Dispose() {
-        target?.Dispose();
-        target = null;
-    }
+    public void Dispose() { }
 
-    private void EnsureTarget(int width, int height) {
-        if (target?.Width == width && target.Height == height) return;
-        target?.Dispose();
-        target = VirtualContent.CreateRenderTarget(name, width, height);
+    private static Rectangle ScreenScissor(MaterialRect bounds, Viewport viewport) {
+        Vector2 first = Vector2.Transform(new Vector2(bounds.X, bounds.Y), Engine.ScreenMatrix);
+        Vector2 second = Vector2.Transform(new Vector2(bounds.Right, bounds.Bottom), Engine.ScreenMatrix);
+        int viewportRight = viewport.X + viewport.Width;
+        int viewportBottom = viewport.Y + viewport.Height;
+        int left = Math.Clamp((int)MathF.Floor(Math.Min(first.X, second.X)), viewport.X, viewportRight);
+        int top = Math.Clamp((int)MathF.Floor(Math.Min(first.Y, second.Y)), viewport.Y, viewportBottom);
+        int right = Math.Clamp((int)MathF.Ceiling(Math.Max(first.X, second.X)), viewport.X, viewportRight);
+        int bottom = Math.Clamp((int)MathF.Ceiling(Math.Max(first.Y, second.Y)), viewport.Y, viewportBottom);
+        return new Rectangle(left, top, Math.Max(0, right - left), Math.Max(0, bottom - top));
     }
 }
 
