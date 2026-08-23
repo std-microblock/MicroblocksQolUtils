@@ -29,6 +29,12 @@ public enum BgmRecordingMode {
     SfxOnlyWithPostMix
 }
 
+public enum CollisionBoxDisplayMode {
+    Hidden,
+    Visible,
+    Only
+}
+
 public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue(true)]
     public bool Enabled { get; set; } = true;
@@ -173,6 +179,9 @@ public sealed class QolSettings : EverestModuleSettings {
 
     [DefaultValue(false)]
     public bool RemoveDeathAnimation { get; set; }
+
+    [DefaultValue(CollisionBoxDisplayMode.Hidden)]
+    public CollisionBoxDisplayMode CollisionBoxes { get; set; } = CollisionBoxDisplayMode.Hidden;
 
     [DefaultValue(true)]
     public bool ShowFps { get; set; } = true;
