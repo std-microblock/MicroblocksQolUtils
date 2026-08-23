@@ -47,6 +47,10 @@ internal static class MaterialUiSmoke {
                     passed = true;
                     throw new InvalidOperationException("Material acrylic renderer did not composite any frames");
                 }
+                if (!MaterialAcrylicRenderer.CapturedSceneLooksVisible()) {
+                    passed = true;
+                    throw new InvalidOperationException("Material acrylic renderer captured an empty or black scene");
+                }
                 if (ModuleInstalled("CollabUtils2") && !CollabUtils2Bridge.Available) {
                     passed = true;
                     throw new InvalidOperationException("CollabUtils2 is installed but its LobbyHelper interop is unavailable");
