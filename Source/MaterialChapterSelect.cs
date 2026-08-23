@@ -130,6 +130,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         SetSearchFocused(false);
         cardViewport.Dispose();
         levelSetViewport.Dispose();
+        motion.Dispose();
         base.Removed(scene);
     }
 
@@ -509,7 +510,6 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
                 string key = $"chapter.levelset.{levelSets[index].Id}";
                 MaterialRect item = layout.SidebarItem(index, levelSetScroll.Offset);
                 if (item.Bottom < layout.SidebarItems.Y || item.Y > layout.SidebarItems.Bottom) continue;
-                item = motion.Animate(key, item, hoverScale: 0.010f, pressedScale: 0.018f, hoverLift: 1f);
                 bool selected = index == selectedLevelSet;
                 MaterialUiKit.NavigationPill(item, palette, selected, alpha);
                 motion.RenderStateLayer(key, item, item.Height / 2f,
@@ -538,8 +538,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
                 if (placement.Rect.Bottom < layout.Cards.Y || placement.Rect.Y > layout.Cards.Bottom) continue;
                 ChapterSection section = sections[placement.SectionIndex];
                 string key = $"chapter.section.{section.Id}";
-                MaterialRect header = motion.Animate(key, placement.Rect,
-                    hoverScale: 0.005f, pressedScale: 0.010f, hoverLift: 1.5f);
+                MaterialRect header = placement.Rect;
                 RenderSectionHeader(section, header,
                     collapsedSections.GetValueOrDefault(section.Id), palette, alpha, key);
             }
@@ -548,7 +547,6 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
                 string key = $"chapter.card.{entries[index].Sid}";
                 MaterialRect card = placement.Rect;
                 if (card.Bottom < layout.Cards.Y || card.Y > layout.Cards.Bottom) continue;
-                card = motion.Animate(key, card, hoverScale: 0.014f, pressedScale: 0.024f, hoverLift: 3f);
                 bool selected = index == selectedIndex;
                 Color surface = selected ? palette.SurfaceHighest : palette.SurfaceHigh;
                 MaterialUiKit.Card(card,
@@ -915,8 +913,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
     }
 
     private void RenderSearchBox(MaterialPalette palette, ChapterLayout layout, float alpha) {
-        MaterialRect search = motion.Animate("chapter.search", layout.Search,
-            hoverScale: 0.004f, pressedScale: 0.008f, hoverLift: 1f);
+        MaterialRect search = layout.Search;
         Color fill = searchFocused ? palette.SurfaceHighest : palette.SurfaceHigh;
         MaterialUi.RoundedRect(search.X, search.Y, search.Width, search.Height,
             search.Height / 2f, fill * alpha);

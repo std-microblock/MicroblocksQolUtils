@@ -87,6 +87,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         bindingConfig = null;
         ReleaseFocusedInput();
         rowViewport.Dispose();
+        motion.Dispose();
         base.Removed(scene);
     }
 
@@ -219,8 +220,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
         for (int index = 0; index < tabs.Count; index++) {
             string key = $"settings.tab.{index}";
-            MaterialRect tab = motion.Animate(key, layout.Tab(index, tabs.Count),
-                hoverScale: 0.008f, pressedScale: 0.014f, hoverLift: 1f);
+            MaterialRect tab = layout.Tab(index, tabs.Count);
             bool selected = index == selectedTab;
             SettingsTab settingsTab = tabs[index];
             motion.RenderStateLayer(key, tab, 22f,
@@ -338,7 +338,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private void RenderRecorderButton(MaterialRect rect, string text, bool enabled,
         MaterialPalette palette, float alpha, string key, bool primary = false, bool danger = false) {
-        rect = motion.Animate(key, rect, hoverScale: 0.018f, pressedScale: 0.032f, hoverLift: 2f);
         float emphasis = motion.Emphasis(key);
         Color dangerColor = new(205, 78, 92);
         Color fill = danger
@@ -406,7 +405,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             string key = $"settings.recorder.file.{file.Path}";
             MaterialRect rect = RecorderFileRect(layout, index);
             if (rect.Bottom < layout.Rows.Y || rect.Y > layout.Rows.Bottom) continue;
-            rect = motion.Animate(key, rect, hoverScale: 0.006f, pressedScale: 0.012f, hoverLift: 1.5f);
             bool selected = recorderSelectedItem == CurrentRows.Count + index;
             float emphasis = Math.Max(selected ? 1f : 0f, motion.Emphasis(key));
             Color fill = Color.Lerp(palette.SurfaceHigh * 0.72f, palette.SurfaceHighest, emphasis);
@@ -441,7 +439,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         float alpha,
         string key
     ) {
-        rect = motion.Animate(key, rect, hoverScale: 0.012f, pressedScale: 0.022f, hoverLift: 1.5f);
         float emphasis = motion.Emphasis(key);
         Color fill = selected ? palette.Primary : Color.Lerp(palette.SurfaceHigh, palette.SurfaceHighest, emphasis);
         MaterialUi.RoundedRect(rect.X, rect.Y, rect.Width, rect.Height, 18f,
@@ -457,7 +454,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private void RenderFileAction(MaterialRect rect, string text, bool danger,
         MaterialPalette palette, float alpha, string key) {
-        rect = motion.Animate(key, rect, hoverScale: 0.025f, pressedScale: 0.040f, hoverLift: 1.5f);
         float emphasis = motion.Emphasis(key);
         Color dangerColor = new(205, 78, 92);
         Color fill = danger ? dangerColor : palette.Primary;
@@ -495,7 +491,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private void RenderRow(SettingRow row, MaterialRect rect, MaterialPalette palette, float alpha, string key) {
         bool enabled = row.Enabled();
-        rect = motion.Animate(key, rect, hoverScale: 0.006f, pressedScale: 0.012f, hoverLift: 1.2f);
         float emphasis = Math.Max(row.Pulse * 0.42f,
             Math.Max(motion.Emphasis(key), Math.Max(row.FocusAnimation, row.HoverAnimation * 0.72f)));
         Color fill = Color.Lerp(palette.SurfaceHigh * 0.72f, palette.SurfaceHighest, emphasis);
@@ -616,8 +611,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         for (int visibleIndex = 0; visibleIndex < visibleCount; visibleIndex++) {
             int optionIndex = dropdownFirstVisible + visibleIndex;
             string key = $"settings.dropdown.{optionIndex}";
-            MaterialRect item = motion.Animate(key, DropdownItemRect(menu, visibleIndex),
-                hoverScale: 0.006f, pressedScale: 0.012f, hoverLift: 0.5f);
+            MaterialRect item = DropdownItemRect(menu, visibleIndex);
             bool highlighted = optionIndex == dropdownHighlight;
             bool current = optionIndex == selected;
             if (highlighted) {
@@ -1743,8 +1737,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                 MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.27f);
         }
 
-        MaterialRect button = motion.Animate("settings.profiler.start", ProfilerStartRect(layout),
-            hoverScale: 0.018f, pressedScale: 0.030f, hoverLift: 2f);
+        MaterialRect button = ProfilerStartRect(layout);
         bool busy = ManagedCpuSampler.IsBusy;
         float buttonEmphasis = motion.Emphasis("settings.profiler.start");
         MaterialUi.RoundedRect(button.X, button.Y, button.Width, button.Height, 18f,
@@ -1767,10 +1760,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         MaterialRect mode = ProfilerModeRect(layout);
         MaterialUi.RoundedRect(mode.X, mode.Y, mode.Width, mode.Height, 16f,
             palette.SurfaceHigh * (0.72f * alpha));
-        MaterialRect simpleRect = motion.Animate("settings.profiler.simple", ProfilerSimpleModeRect(layout),
-            hoverScale: 0.010f, pressedScale: 0.018f, hoverLift: 1f);
-        MaterialRect professionalRect = motion.Animate("settings.profiler.professional",
-            ProfilerProfessionalModeRect(layout), hoverScale: 0.010f, pressedScale: 0.018f, hoverLift: 1f);
+        MaterialRect simpleRect = ProfilerSimpleModeRect(layout);
+        MaterialRect professionalRect = ProfilerProfessionalModeRect(layout);
         MaterialRect selectedMode = simpleMode ? simpleRect : professionalRect;
         MaterialUi.RoundedRect(selectedMode.X, selectedMode.Y, selectedMode.Width, selectedMode.Height, 14f,
             palette.Primary * (0.88f * alpha));
