@@ -27,4 +27,9 @@
     <Reference Include="MonoMod.Utils"><HintPath>$(CelesteRoot)\MonoMod.Utils.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="System.Drawing.Common"><HintPath>$(CelesteRoot)\System.Drawing.Common.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="MaterialSymbols\Rounded\*.svg"
+                      LogicalName="Celeste.Mod.MicroblocksQolUtils.MaterialSymbols.Rounded.%(Filename)%(Extension)" />
+  </ItemGroup>
 </Project>
