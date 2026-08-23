@@ -15,6 +15,9 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private const float RecorderSettingHeight = 92f;
     private const float DropdownItemHeight = 42f;
     private const int DropdownMaxVisibleItems = 7;
+    private const float NavigationTitleScale = 0.34f;
+    private const float NavigationSummaryScale = 0.23f;
+    private const float NavigationTextGap = 8f;
 
     private static QolSettingsOverlay? activePage;
 
@@ -229,13 +232,22 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         for (int index = 0; index < tabs.Count; index++) {
             MaterialRect tab = layout.Tab(index, tabs.Count);
             bool selected = index == selectedTab;
-            MaterialUiKit.Text(tabs[index].Title, new Vector2(tab.X + 24f, tab.Center.Y - 9f),
+            SettingsTab settingsTab = tabs[index];
+            float titleHeight = SystemTtfFont.MeasureVisible(
+                settingsTab.Title, NavigationTitleScale, UiFontWeight.Bold).Y;
+            float summaryHeight = SystemTtfFont.MeasureVisible(
+                settingsTab.Summary, NavigationSummaryScale).Y;
+            float titleY = tab.Center.Y
+                - (titleHeight + NavigationTextGap + summaryHeight) / 2f;
+            float summaryY = titleY + titleHeight + NavigationTextGap;
+            MaterialUiKit.Text(settingsTab.Title, new Vector2(tab.X + 24f, titleY),
                 Vector2.Zero, MaterialTextRole.Label,
-                selected ? palette.OnPrimary : palette.OnSurfaceVariant, ease, scaleOverride: 0.34f);
-            MaterialUiKit.Text(tabs[index].Summary, new Vector2(tab.X + 24f, tab.Center.Y + 16f),
+                selected ? palette.OnPrimary : palette.OnSurfaceVariant, ease,
+                scaleOverride: NavigationTitleScale);
+            MaterialUiKit.Text(settingsTab.Summary, new Vector2(tab.X + 24f, summaryY),
                 Vector2.Zero, MaterialTextRole.Caption,
                 selected ? palette.OnPrimary * 0.72f : palette.OnSurfaceVariant * 0.62f,
-                ease, scaleOverride: 0.23f);
+                ease, scaleOverride: NavigationSummaryScale);
         }
 
         MaterialUiKit.Text("操作方式", new Vector2(layout.Navigation.X + 24f, layout.Navigation.Bottom - 126f),
