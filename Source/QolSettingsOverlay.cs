@@ -328,6 +328,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                 Status("当前片段", () => AutoRecorder.IsRecording ? $"{AutoRecorder.CurrentSeconds:0.0} 秒" : "—"),
                 Status("当前文件", () => ShortPath(AutoRecorder.CurrentPath)),
                 Status("最后输出", () => ShortPath(AutoRecorder.LastOutput)),
+                Status("清理状态", () => AutoRecorder.IsCleaning ? "清理中" : AutoRecorder.LastCleanupStatus),
                 Action("开始手动录制", () => AutoRecorder.StartManual(), () => !AutoRecorder.ManualMode),
                 Action("停止并保存", () => AutoRecorder.StopManual(level, save: true),
                     () => AutoRecorder.ManualMode || AutoRecorder.IsRecording),
@@ -340,7 +341,12 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                 Range("录制帧率", () => settings.RecordingFrameRate, value => settings.RecordingFrameRate = value,
                     30, 120, 30, value => $"{value} FPS"),
                 Range("录制码率", () => settings.RecordingBitrateKbps, value => settings.RecordingBitrateKbps = value,
-                    2000, 50000, 1000, value => $"{value / 1000f:0.#} Mbps")
+                    2000, 50000, 1000, value => $"{value / 1000f:0.#} Mbps"),
+                Range("最多保留录像", () => settings.RecordingRetentionCount,
+                    value => settings.RecordingRetentionCount = value,
+                    0, 500, 10, value => value == 0 ? "不限" : $"{value} 个"),
+                Action("立即清理旧录像", AutoRecorder.CleanupRecordings,
+                    () => settings.RecordingRetentionCount > 0 && !AutoRecorder.IsCleaning)
             ]),
             new SettingsTab("界面与系统", [
                 Toggle("亚克力模糊背景", () => settings.MaterialAcrylicBackground,

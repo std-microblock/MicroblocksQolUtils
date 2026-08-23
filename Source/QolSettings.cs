@@ -148,6 +148,10 @@ public sealed class QolSettings : EverestModuleSettings {
     [SettingRange(2000, 50000)]
     public int RecordingBitrateKbps { get; set; } = 12000;
 
+    [DefaultValue(100)]
+    [SettingRange(0, 500)]
+    public int RecordingRetentionCount { get; set; } = 100;
+
     [DefaultValue("")]
     public string RecordingDirectory { get; set; } = "";
 

@@ -230,6 +230,11 @@ pub fn create_capturer(
             MinimumUpdateIntervalSettings::Default
         };
 
+    // Let WGC provide the actual pixel dimensions when the caller did not request a crop.
+    // GetWindowRect can be DPI-virtualized, so treating the whole window as an explicit crop
+    // cuts a scaled window down to its logical size and records only its top-left portion.
+    let crop = options.crop_area.as_ref().map(|_| get_crop_area(options));
+
     let settings = match target {
         Target::Display(display) => Settings::Display(WCSettings::new(
             WCMonitor::from_raw_hmonitor(display.raw_handle.0),
@@ -241,7 +246,7 @@ pub fn create_capturer(
             color_format,
             FlagStruct {
                 tx: tx.clone(),
-                crop: Some(get_crop_area(options)),
+                crop: crop.clone(),
                 target_fps: options.fps.max(1),
             },
         )),
@@ -255,7 +260,7 @@ pub fn create_capturer(
             color_format,
             FlagStruct {
                 tx: tx.clone(),
-                crop: Some(get_crop_area(options)),
+                crop,
                 target_fps: options.fps.max(1),
             },
         )),
