@@ -75,7 +75,7 @@ public sealed class QolHud : Entity {
             ManagedSamplingStage.WarmingUp => "Profiler 即将开始",
             ManagedSamplingStage.Sampling => $"Profiler 采样中  {ManagedCpuSampler.RemainingSeconds:0.0}s",
             ManagedSamplingStage.Analyzing => "Profiler 正在生成报告",
-            ManagedSamplingStage.Complete => "Profiler 报告已生成  ·  设置 > Profiler",
+            ManagedSamplingStage.Complete => "Profiler 报告已生成",
             _ => "Profiler"
         };
         float progress = ManagedCpuSampler.Progress;

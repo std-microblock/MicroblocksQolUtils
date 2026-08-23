@@ -16,8 +16,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private const float DropdownItemHeight = 42f;
     private const int DropdownMaxVisibleItems = 7;
     private const float NavigationTitleScale = 0.34f;
-    private const float NavigationSummaryScale = 0.23f;
-    private const float NavigationTextGap = 8f;
     private const float ProfilerRowHeight = 76f;
     private const float ProfilerRowGap = 10f;
 
@@ -203,28 +201,10 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
         MaterialUiKit.Text("Microblock 的 QOL 工具", new Vector2(layout.Header.X, layout.Header.Y),
             Vector2.Zero, MaterialTextRole.Display, palette.OnSurface, ease, scaleOverride: 0.76f);
-        MaterialUiKit.Text("设置会即时生效并在离开时保存", new Vector2(layout.Header.X + 2f, layout.Header.Y + 50f),
-            Vector2.Zero, MaterialTextRole.Body, palette.OnSurfaceVariant, ease, scaleOverride: 0.32f);
 
         RenderNavigation(layout, palette);
         RenderContent(layout, palette);
         if (dropdownRow is not null) RenderDropdown(layout, palette);
-
-        string footer = IsProfilerTab
-            ? "←→ 切换模式  ·  ↑↓ / 滚轮浏览完整报告  ·  Enter 开始 10 秒采样"
-            : dropdownRow is not null
-                ? "↑↓ 选择  ·  Enter 确认  ·  Esc 关闭下拉框"
-            : editingRow is not null
-            ? "输入后按 Enter 保存，Esc 取消"
-            : IsRecorderTab
-                ? "↑↓ 选择  ·  ←→ 切换列表/调整  ·  Enter 打开/编辑  ·  Delete 删除  ·  R 录制  ·  F 文件夹"
-                : "↑↓ 选择  ·  ←→ 调整  ·  Enter 编辑  ·  Tab 分页  ·  鼠标可拖动滑杆";
-        MaterialUiKit.Text(footer, new Vector2(layout.Footer.X, layout.Footer.Y), Vector2.Zero,
-            MaterialTextRole.Caption, palette.OnSurfaceVariant, ease, scaleOverride: 0.28f);
-        string compatibility = MotionSmoothingBridge.Available ? "MotionSmoothing 已连接" : "MotionSmoothing 未安装";
-        MaterialUiKit.Text(compatibility, new Vector2(layout.Footer.Right, layout.Footer.Y),
-            new Vector2(1f, 0f), MaterialTextRole.Caption, palette.OnSurfaceVariant, ease,
-            scaleOverride: 0.28f);
 
         if (pendingRecordingDelete is not null) RenderRecordingDeleteModal(palette);
         MaterialUiKit.Cursor(MInput.Mouse.Position, palette, ease);
@@ -245,28 +225,11 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             SettingsTab settingsTab = tabs[index];
             motion.RenderStateLayer(key, tab, 22f,
                 selected ? palette.OnPrimary : palette.Primary, ease);
-            float titleHeight = SystemTtfFont.MeasureVisible(
-                settingsTab.Title, NavigationTitleScale, UiFontWeight.Bold).Y;
-            float summaryHeight = SystemTtfFont.MeasureVisible(
-                settingsTab.Summary, NavigationSummaryScale).Y;
-            float titleY = tab.Center.Y
-                - (titleHeight + NavigationTextGap + summaryHeight) / 2f;
-            float summaryY = titleY + titleHeight + NavigationTextGap;
-            MaterialUiKit.Text(settingsTab.Title, new Vector2(tab.X + 24f, titleY),
-                Vector2.Zero, MaterialTextRole.Label,
+            MaterialUiKit.Text(settingsTab.Title, new Vector2(tab.X + 24f, tab.Center.Y),
+                new Vector2(0f, 0.5f), MaterialTextRole.Label,
                 selected ? palette.OnPrimary : palette.OnSurfaceVariant, ease,
                 scaleOverride: NavigationTitleScale);
-            MaterialUiKit.Text(settingsTab.Summary, new Vector2(tab.X + 24f, summaryY),
-                Vector2.Zero, MaterialTextRole.Caption,
-                selected ? palette.OnPrimary * 0.72f : palette.OnSurfaceVariant * 0.62f,
-                ease, scaleOverride: NavigationSummaryScale);
         }
-
-        MaterialUiKit.Text("操作方式", new Vector2(layout.Navigation.X + 24f, layout.Navigation.Bottom - 126f),
-            Vector2.Zero, MaterialTextRole.Label, palette.OnSurfaceVariant, ease, scaleOverride: 0.28f);
-        MaterialUiKit.Text("开关可直接点击\n数值可拖动或输入\n文字栏支持中文输入",
-            new Vector2(layout.Navigation.X + 24f, layout.Navigation.Bottom - 92f), Vector2.Zero,
-            MaterialTextRole.Caption, palette.OnSurfaceVariant, ease, scaleOverride: 0.25f);
     }
 
     private void RenderContent(OverlayLayout layout, MaterialPalette palette) {
@@ -281,9 +244,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         MaterialUiKit.Text(tabs[selectedTab].Title, new Vector2(layout.ContentHeader.X, layout.ContentHeader.Y),
             Vector2.Zero, MaterialTextRole.Title, palette.OnSurface, ease * contentEase,
             scaleOverride: 0.48f);
-        MaterialUiKit.Text($"{CurrentRows.Count} 项", new Vector2(layout.ContentHeader.Right, layout.ContentHeader.Y + 8f),
-            new Vector2(1f, 0f), MaterialTextRole.Caption, palette.OnSurfaceVariant,
-            ease * contentEase, scaleOverride: 0.28f);
         RenderRows(layout, palette);
 
         float maximum = MaxRowScroll(layout);
@@ -304,15 +264,15 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             Vector2.Zero, MaterialTextRole.Title, palette.OnSurface, alpha, scaleOverride: 0.48f);
         string summary = recordingNoticeTimer > 0f
             ? recordingNotice
-            : recordingFiles.Count == 0
-                ? recordingLibraryKind == RecordingLibraryKind.DeathReplay
-                    ? "还没有死亡回放"
-                    : "还没有完整录像"
-                : $"{RecordingLibraryTitle} {recordingFiles.Count} 个  ·  {FormatBytes(recordingFiles.Sum(file => file.SizeBytes))}";
-        MaterialUiKit.Text(Trim(summary, 48), new Vector2(layout.ContentHeader.Right, layout.ContentHeader.Y + 8f),
-            new Vector2(1f, 0f), MaterialTextRole.Caption,
-            recordingNoticeTimer > 0f ? palette.Primary : palette.OnSurfaceVariant,
-            alpha, scaleOverride: 0.28f);
+            : recordingFiles.Count > 0
+                ? $"{RecordingLibraryTitle} {recordingFiles.Count} 个  ·  {FormatBytes(recordingFiles.Sum(file => file.SizeBytes))}"
+                : "";
+        if (summary.Length > 0) {
+            MaterialUiKit.Text(Trim(summary, 48), new Vector2(layout.ContentHeader.Right, layout.ContentHeader.Y + 8f),
+                new Vector2(1f, 0f), MaterialTextRole.Caption,
+                recordingNoticeTimer > 0f ? palette.Primary : palette.OnSurfaceVariant,
+                alpha, scaleOverride: 0.28f);
+        }
 
         rowViewport.Render(layout.Rows, () => {
             RenderRecorderHero(RecorderHeroRect(layout), palette, alpha);
@@ -348,15 +308,17 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             MaterialTextRole.Display, active ? palette.Primary : palette.OnSurfaceVariant,
             alpha, scaleOverride: 0.52f);
         double finalizationProgress = AutoRecorder.FinalizationProgress;
-        string detail = AutoRecorder.IsFinalizing
+        string? detail = AutoRecorder.IsFinalizing
             ? $"正在生成{AutoRecorder.FinalizationDescription} · {finalizationProgress:P0}"
             : AutoRecorder.IsRecording
                 ? AutoRecorder.IsFullRecordingEnabled || AutoRecorder.ManualMode
                     ? $"当前片段：{ShortPath(AutoRecorder.CurrentPath)}"
                     : $"滚动缓冲：始终保留最近 {MicroblocksQolUtilsModule.Settings.DeathReplayBufferSeconds} 秒"
-                : "可以手动录制，也可以在下方启用自动录制";
-        MaterialUiKit.Text(Trim(detail, 48), new Vector2(hero.X + 190f, hero.Y + 75f), Vector2.Zero,
-            MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.26f);
+                : null;
+        if (detail is not null) {
+            MaterialUiKit.Text(Trim(detail, 48), new Vector2(hero.X + 190f, hero.Y + 75f), Vector2.Zero,
+                MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.26f);
+        }
         if (AutoRecorder.IsFinalizing) {
             MaterialRect firstButton = RecorderButtonRect(hero, 0);
             float progressWidth = Math.Max(120f, firstButton.X - hero.X - 214f);
@@ -404,8 +366,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         float headerY = RecorderLibraryHeaderY(layout);
         MaterialUiKit.Text("录像库", new Vector2(layout.Rows.X + 4f, headerY), Vector2.Zero,
             MaterialTextRole.Section, palette.OnSurface, alpha, scaleOverride: 0.36f);
-        MaterialUiKit.Text("点击录像即可使用系统播放器打开", new Vector2(layout.Rows.X + 150f, headerY + 5f),
-            Vector2.Zero, MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.25f);
 
         RenderRecordingLibraryTab(
             RecorderLibraryTabRect(layout, 0),
@@ -437,15 +397,9 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             string emptyTitle = recordingLibraryKind == RecordingLibraryKind.DeathReplay
                 ? "暂无死亡回放"
                 : "暂无完整录像";
-            string emptyDetail = recordingLibraryKind == RecordingLibraryKind.DeathReplay
-                ? "启用后会持续录制，并在死亡时自动保存最近一段"
-                : "完成一次录制后，文件会自动出现在这里";
-            MaterialUiKit.Text(emptyTitle, new Vector2(empty.Center.X, empty.Center.Y - 20f),
+            MaterialUiKit.Text(emptyTitle, empty.Center,
                 new Vector2(0.5f), MaterialTextRole.Section, palette.OnSurfaceVariant, alpha,
                 scaleOverride: 0.34f);
-            MaterialUiKit.Text(emptyDetail, new Vector2(empty.Center.X, empty.Center.Y + 16f),
-                new Vector2(0.5f), MaterialTextRole.Caption, palette.OnSurfaceVariant * 0.72f,
-                alpha, scaleOverride: 0.26f);
             return;
         }
 
@@ -521,8 +475,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         float headerY = RecorderSettingsHeaderY(layout);
         MaterialUiKit.Text("录制设置", new Vector2(layout.Rows.X + 4f, headerY), Vector2.Zero,
             MaterialTextRole.Section, palette.OnSurface, alpha, scaleOverride: 0.36f);
-        MaterialUiKit.Text("常用参数两栏显示，修改后立即生效", new Vector2(layout.Rows.X + 150f, headerY + 5f),
-            Vector2.Zero, MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.25f);
         for (int index = 0; index < CurrentRows.Count; index++) {
             MaterialRect rect = RecorderSettingRect(layout, index);
             if (rect.Bottom < layout.Rows.Y || rect.Y > layout.Rows.Bottom) continue;
@@ -1502,7 +1454,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private List<SettingsTab> BuildTabs() {
         QolSettings settings = MicroblocksQolUtilsModule.Settings;
         return [
-            new SettingsTab("HUD", "帧率与状态信息", [
+            new SettingsTab("HUD", [
                 Toggle("启用 QOL 工具", () => settings.Enabled, value => settings.Enabled = value),
                 Toggle("HUD 信息卡阴影、背景与边框", () => settings.HudMaterialSurfaces,
                     value => settings.HudMaterialSurfaces = value),
@@ -1518,8 +1470,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                 Toggle("显示地图人数", () => settings.ShowMapPlayerCount, value => settings.ShowMapPlayerCount = value),
                 Toggle("显示当前时间", () => settings.ShowClock, value => settings.ShowClock = value)
             ]),
-            new SettingsTab("Profiler", "10 秒托管 CPU 采样", [], ProfilerPage: true),
-            new SettingsTab("小地图", "尺寸、玩家与外观", [
+            new SettingsTab("Profiler", [], ProfilerPage: true),
+            new SettingsTab("小地图", [
                 Toggle("启用小地图", () => settings.MiniMapEnabled, value => settings.MiniMapEnabled = value),
                 EnumRow("裁剪形状", () => settings.MiniMapShape, value => settings.MiniMapShape = value),
                 Range("地图尺寸", () => settings.MiniMapSize, value => settings.MiniMapSize = value,
@@ -1555,7 +1507,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                 Toggle("隐藏原生越界名字", () => settings.HideMiaoNetOffscreenNames,
                     value => settings.HideMiaoNetOffscreenNames = value)
             ]),
-            new SettingsTab("录制", "录制中心与文件管理", [
+            new SettingsTab("录制", [
                 Toggle("自动录制", () => settings.AutoRecorderEnabled, value => settings.AutoRecorderEnabled = value),
                 Toggle("保存死亡回放", () => settings.DeathReplayEnabled,
                     value => settings.DeathReplayEnabled = value),
@@ -1589,7 +1541,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                 Text("编码器", () => settings.RecordingEncoder, value => settings.RecordingEncoder = value,
                     "auto / nvenc / qsv / amf…", 48)
             ], RecorderPage: true),
-            new SettingsTab("界面与系统", "外观、字体与兼容项", [
+            new SettingsTab("界面与系统", [
                 Toggle("亚克力模糊背景", () => settings.MaterialAcrylicBackground,
                     value => settings.MaterialAcrylicBackground = value),
                 Range("模糊强度", () => settings.MaterialAcrylicBlurStrength,
@@ -1772,27 +1724,26 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             palette.Outline * (0.42f * alpha));
 
         string headline;
-        string detail;
+        string? detail = null;
         if (stage == ManagedSamplingStage.Failed) {
             headline = "无法启动 .NET 采样器";
             detail = Trim(ManagedCpuSampler.Failure, 96);
         } else if (stage is ManagedSamplingStage.WarmingUp or ManagedSamplingStage.Sampling) {
             headline = "正在记录主线程 Update / Render 调用栈";
-            detail = "采样期间正常游玩并复现卡顿；不要停在暂停菜单。";
         } else if (stage == ManagedSamplingStage.Analyzing) {
             headline = "采样完成，正在生成报告";
-            detail = "正在解析方法、程序集以及 MonoMod hook 目标。";
         } else if (report is not null) {
             headline = $"{report.DurationSeconds:0} 秒 · {report.StackSamples} 个主循环样本 · 最慢帧 {report.MaximumFrameMilliseconds:0.0} ms";
             detail = $"平均帧 {report.AverageFrameMilliseconds:0.0} ms · Update 峰值 {report.MaximumUpdateMilliseconds:0.0} ms · Render 峰值 {report.MaximumRenderMilliseconds:0.0} ms";
         } else {
-            headline = "采样真实托管调用栈，包括其他 Mod 安装的 hook";
-            detail = "点击后自动返回游戏，等待约 1 秒再开始连续采样 10 秒。";
+            headline = "尚未生成报告";
         }
         MaterialUiKit.Text(headline, new Vector2(summary.X + 24f, summary.Y + 24f), Vector2.Zero,
             MaterialTextRole.Label, palette.OnSurface, alpha, scaleOverride: 0.34f);
-        MaterialUiKit.Text(detail, new Vector2(summary.X + 24f, summary.Y + 62f), Vector2.Zero,
-            MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.27f);
+        if (detail is not null) {
+            MaterialUiKit.Text(detail, new Vector2(summary.X + 24f, summary.Y + 62f), Vector2.Zero,
+                MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.27f);
+        }
 
         MaterialRect button = motion.Animate("settings.profiler.start", ProfilerStartRect(layout),
             hoverScale: 0.018f, pressedScale: 0.030f, hoverLift: 2f);
@@ -1835,16 +1786,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         MaterialUiKit.Text("专业 · 全部", professionalRect.Center + new Vector2(0f, -7f),
             new Vector2(0.5f), MaterialTextRole.Label,
             simpleMode ? palette.OnSurfaceVariant : palette.OnPrimary, alpha, scaleOverride: 0.25f);
-        MaterialUiKit.Text("百分比为阶段总 CPU 的独占（自身）耗时", new Vector2(layout.Rows.Right, mode.Y + 11f),
-            new Vector2(1f, 0f), MaterialTextRole.Caption, palette.OnSurfaceVariant,
-            alpha, scaleOverride: 0.23f);
 
-        if (report is null) {
-            MaterialUiKit.Text("报告会分别列出 Update 与 Render 中最常占用 CPU 的方法。\n若方法是 MonoMod detour，下面会额外显示 hook 的目标方法。",
-                new Vector2(layout.Rows.X + 18f, mode.Bottom + 28f), Vector2.Zero,
-                MaterialTextRole.Body, palette.OnSurfaceVariant, alpha, scaleOverride: 0.31f);
-            return;
-        }
+        if (report is null) return;
 
         float gap = 16f;
         MaterialRect reportViewport = ProfilerReportViewport(layout);
@@ -2276,7 +2219,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private sealed record SettingsTab(
         string Title,
-        string Summary,
         List<SettingRow> Rows,
         bool RecorderPage = false,
         bool ProfilerPage = false
@@ -2355,8 +2297,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         MaterialRect Navigation,
         MaterialRect Body,
         MaterialRect ContentHeader,
-        MaterialRect Rows,
-        MaterialRect Footer
+        MaterialRect Rows
     ) {
         public const float TabHeight = 64f;
         private const float TabGap = 10f;
@@ -2370,8 +2311,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                 MaterialAxis.Vertical,
                 MaterialSpacing.Md,
                 MaterialTrack.Fixed(82f),
-                MaterialTrack.Flex(),
-                MaterialTrack.Fixed(32f)
+                MaterialTrack.Flex()
             );
             MaterialRect[] main = MaterialLayout.Split(
                 vertical[1],
@@ -2389,7 +2329,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                 MaterialTrack.Flex()
             );
             MaterialRect rows = content[1].Inset(0f, 0f, 16f, 0f);
-            return new OverlayLayout(panel, vertical[0], main[0], body, content[0], rows, vertical[2]);
+            return new OverlayLayout(panel, vertical[0], main[0], body, content[0], rows);
         }
 
         public MaterialRect Tab(int index, int count) {

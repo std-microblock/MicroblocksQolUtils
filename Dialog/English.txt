@@ -29,5 +29,3 @@ microblocks_qol_chapter_no_available=No available chapters
 microblocks_qol_chapter_group_maps=maps
 microblocks_qol_chapter_author=By {0}
 microblocks_qol_chapter_no_description=No map description provided
-microblocks_qol_chapter_controls=Enter / Click: open   Esc: back   Tab: level set   Wheel: scroll
-microblocks_qol_chapter_controls_grouped=Open: Enter / Click   Groups: click title to fold   Esc: back   Tab: set   Wheel: scroll

@@ -158,7 +158,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         RenderLevelSets(palette, layout, eased);
         RenderCards(palette, layout, eased);
         RenderSelectedMetadata(palette, selected, layout, eased);
-        RenderFooter(palette, selected, sections.Count > 0, layout, eased);
+        RenderFooter(palette, selected, layout, eased);
         RenderMouseCursor(palette, eased);
     }
 
@@ -800,26 +800,16 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
     private static void RenderFooter(
         MaterialPalette palette,
         ChapterEntry? selected,
-        bool grouped,
         ChapterLayout layout,
         float alpha
     ) {
         string detail = selected is null
             ? UiText("microblocks_qol_chapter_no_available", "没有可用章节")
             : selected.Sid;
-        string controls = grouped
-            ? UiText("microblocks_qol_chapter_controls_grouped",
-                "打开：Enter / 左键   分组：点击标题展开/收起   Esc：返回   Tab：地图集   滚轮：滚动")
-            : UiText("microblocks_qol_chapter_controls",
-                "Enter / 左键：打开   Esc：返回   Tab：切换地图集   滚轮：滚动");
-        float controlsWidth = SystemTtfFont.MeasureVisible(controls, 0.31f).X;
         string shownDetail = MaterialTextUtil.Ellipsize(
-            detail, Math.Max(0f, layout.Footer.Width - controlsWidth - 40f), 0.31f);
+            detail, layout.Footer.Width, 0.31f);
         SystemTtfFont.DrawVisual(shownDetail, new Vector2(layout.Footer.X, layout.Footer.Center.Y),
             new Vector2(0f, 0.5f), 0.31f,
-            palette.OnSurfaceVariant * alpha);
-        SystemTtfFont.DrawVisual(controls,
-            new Vector2(layout.Footer.Right, layout.Footer.Center.Y), new Vector2(1f, 0.5f), 0.31f,
             palette.OnSurfaceVariant * alpha);
     }
 
