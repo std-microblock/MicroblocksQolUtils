@@ -94,6 +94,12 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue(true)]
     public bool MiniMapRoomBounds { get; set; } = true;
 
+    [DefaultValue(true)]
+    public bool MiniMapHighlightRoute { get; set; } = true;
+
+    [DefaultValue(true)]
+    public bool MiniMapCollectibles { get; set; } = true;
+
     [SettingRange(0, 10)]
     [DefaultValue(6)]
     public int MiniMapBackgroundOpacity { get; set; } = 6;

@@ -38,10 +38,16 @@ public static class MiniMapRenderer {
         Color terrainColor = settings.MiniMapAdaptiveColors
             ? AdaptiveForeground(mapBackdrop) * 0.9f
             : Color.SlateGray * 0.9f;
-        if (settings.MiniMapRoomBounds)
+        if (settings.MiniMapRoomBounds) {
+            IReadOnlySet<string>? route = settings.MiniMapHighlightRoute
+                ? RoomRouteCache.RouteToGoal(level)
+                : null;
             DrawRoomBounds(level, player.Center, center, radius, pixelsPerWorld, settings.MiniMapShape,
-                terrainColor * 0.52f, palette.Primary * 0.9f);
+                terrainColor * 0.52f, palette.Primary * 0.9f, new Color(255, 190, 64) * 0.95f, route);
+        }
         DrawSolids(solids, player.Center, center, radius, pixelsPerWorld, settings.MiniMapShape, terrainColor);
+        if (settings.MiniMapCollectibles && level.Session.MapData is MapData map)
+            DrawCollectibles(map, level.Session, player.Center, center, radius, pixelsPerWorld, settings.MiniMapShape);
         foreach (RemotePlayer remote in MiaoNetBridge.Players) {
             if (!settings.ShowMiaoNetPlayers) break;
             DrawRemote(remote, player.Center, center, radius, pixelsPerWorld, settings);
@@ -102,7 +108,9 @@ public static class MiniMapRenderer {
         float scale,
         MiniMapShape shape,
         Color color,
-        Color currentColor
+        Color currentColor,
+        Color routeColor,
+        IReadOnlySet<string>? route
     ) {
         MapData? map = level.Session.MapData;
         if (map is null) return;
@@ -113,13 +121,16 @@ public static class MiniMapRenderer {
             Vector2 topRight = center + (new Vector2(bounds.Right, bounds.Top) - player) * scale;
             Vector2 bottomRight = center + (new Vector2(bounds.Right, bounds.Bottom) - player) * scale;
             Vector2 bottomLeft = center + (new Vector2(bounds.Left, bounds.Bottom) - player) * scale;
-            Color lineColor = string.Equals(room.Name, level.Session.Level, StringComparison.Ordinal)
-                ? currentColor
-                : color;
-            DrawClippedLine(topLeft, topRight, center, radius - 2f, shape, lineColor, 1.5f);
-            DrawClippedLine(topRight, bottomRight, center, radius - 2f, shape, lineColor, 1.5f);
-            DrawClippedLine(bottomRight, bottomLeft, center, radius - 2f, shape, lineColor, 1.5f);
-            DrawClippedLine(bottomLeft, topLeft, center, radius - 2f, shape, lineColor, 1.5f);
+            bool current = string.Equals(room.Name, level.Session.Level, StringComparison.Ordinal);
+            bool onRoute = route?.Contains(room.Name) == true;
+            Color lineColor = onRoute
+                ? current ? Color.Lerp(routeColor, Color.White, 0.35f) : routeColor
+                : current ? currentColor : color;
+            float thickness = onRoute ? 3f : current ? 2.25f : 1.5f;
+            DrawClippedLine(topLeft, topRight, center, radius - 2f, shape, lineColor, thickness);
+            DrawClippedLine(topRight, bottomRight, center, radius - 2f, shape, lineColor, thickness);
+            DrawClippedLine(bottomRight, bottomLeft, center, radius - 2f, shape, lineColor, thickness);
+            DrawClippedLine(bottomLeft, topLeft, center, radius - 2f, shape, lineColor, thickness);
         }
     }
 
@@ -138,6 +149,79 @@ public static class MiniMapRenderer {
             if (!Inside(point, center, radius - tileSize, shape)) continue;
             Draw.Rect(point.X - tileSize / 2f, point.Y - tileSize / 2f, tileSize + 0.5f, tileSize + 0.5f, color);
         }
+    }
+
+    private static void DrawCollectibles(
+        MapData map,
+        Session session,
+        Vector2 player,
+        Vector2 center,
+        float radius,
+        float scale,
+        MiniMapShape shape
+    ) {
+        foreach (MiniMapCollectible collectible in MapCollectibleCache.Get(map)) {
+            Vector2 point = center + (collectible.Position - player) * scale;
+            if (!Inside(point, center, radius - 8f, shape)) continue;
+            float alpha = collectible.IsCollected(session) ? 0.34f : 1f;
+            DrawCollectible(point, collectible.Kind, alpha);
+        }
+    }
+
+    private static void DrawCollectible(Vector2 point, MiniMapCollectibleKind kind, float alpha) {
+        Color shadow = Color.Black * (0.82f * alpha);
+        MaterialUi.Circle(point, 7f, shadow);
+        switch (kind) {
+            case MiniMapCollectibleKind.Strawberry:
+                MaterialUi.Circle(point + new Vector2(0f, 1f), 4.5f, new Color(244, 67, 83) * alpha);
+                MaterialUi.Line(point + new Vector2(-3f, -3f), point + new Vector2(0f, -5f), 2f,
+                    new Color(105, 220, 120) * alpha);
+                MaterialUi.Line(point + new Vector2(3f, -3f), point + new Vector2(0f, -5f), 2f,
+                    new Color(105, 220, 120) * alpha);
+                break;
+            case MiniMapCollectibleKind.GoldenBerry:
+                MaterialUi.Circle(point, 5f, new Color(255, 193, 7) * alpha);
+                MaterialUi.CircleOutline(point, 5f, 1.25f, new Color(255, 245, 185) * alpha);
+                break;
+            case MiniMapCollectibleKind.MoonBerry:
+                MaterialUi.Circle(point, 5f, new Color(156, 115, 255) * alpha);
+                MaterialUi.CircleOutline(point, 5f, 1.25f, new Color(112, 230, 255) * alpha);
+                break;
+            case MiniMapCollectibleKind.Heart:
+                Color heart = new Color(255, 96, 180) * alpha;
+                MaterialUi.Circle(point + new Vector2(-2.2f, -1.7f), 3.2f, heart);
+                MaterialUi.Circle(point + new Vector2(2.2f, -1.7f), 3.2f, heart);
+                MaterialUi.Line(point + new Vector2(-4f, 0f), point + new Vector2(0f, 5f), 3.5f, heart);
+                MaterialUi.Line(point + new Vector2(4f, 0f), point + new Vector2(0f, 5f), 3.5f, heart);
+                break;
+            case MiniMapCollectibleKind.Cassette:
+                Color cassette = new Color(78, 178, 255) * alpha;
+                Draw.Rect(point.X - 5f, point.Y - 4f, 10f, 8f, cassette);
+                MaterialUi.Circle(point + new Vector2(-2.5f, 0f), 1.3f, Color.White * alpha);
+                MaterialUi.Circle(point + new Vector2(2.5f, 0f), 1.3f, Color.White * alpha);
+                break;
+            case MiniMapCollectibleKind.Key:
+                Color key = new Color(255, 224, 92) * alpha;
+                MaterialUi.CircleOutline(point + new Vector2(-2f, -1.5f), 3f, 1.8f, key);
+                MaterialUi.Line(point, point + new Vector2(5f, 4.5f), 2f, key);
+                MaterialUi.Line(point + new Vector2(3f, 2.5f), point + new Vector2(5f, 0.5f), 1.5f, key);
+                break;
+            case MiniMapCollectibleKind.Gem:
+                Color gem = new Color(80, 224, 230) * alpha;
+                DrawDiamond(point, 5.5f, gem, 2f);
+                break;
+        }
+    }
+
+    private static void DrawDiamond(Vector2 center, float radius, Color color, float thickness) {
+        Vector2 top = center + new Vector2(0f, -radius);
+        Vector2 right = center + new Vector2(radius, 0f);
+        Vector2 bottom = center + new Vector2(0f, radius);
+        Vector2 left = center + new Vector2(-radius, 0f);
+        MaterialUi.Line(top, right, thickness, color);
+        MaterialUi.Line(right, bottom, thickness, color);
+        MaterialUi.Line(bottom, left, thickness, color);
+        MaterialUi.Line(left, top, thickness, color);
     }
 
     private static void DrawRemote(
