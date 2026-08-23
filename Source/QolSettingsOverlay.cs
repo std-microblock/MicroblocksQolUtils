@@ -29,8 +29,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private float ease;
     private float contentEase = 1f;
     private float tabIndicatorY;
-    private bool capturingKey;
-    private SettingRow? keyRow;
+    private Entity? bindingConfig;
     private SettingRow? editingRow;
     private string editBuffer = "";
     private string imeText = "";
@@ -72,6 +71,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     public override void Removed(Scene scene) {
         if (activePage == this) activePage = null;
+        bindingConfig?.RemoveSelf();
+        bindingConfig = null;
         ReleaseFocusedInput();
         rowViewport.Dispose();
         base.Removed(scene);
@@ -86,6 +87,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         recordingNoticeTimer = Math.Max(0f, recordingNoticeTimer - Engine.RawDeltaTime);
         recordingRefreshTimer -= Engine.RawDeltaTime;
         if (IsRecorderTab && recordingRefreshTimer <= 0f) RefreshRecordingFiles();
+
+        if (bindingConfig is not null) return;
 
         OverlayLayout layout = OverlayLayout.Create(ease);
         rowScroll.Update(MaxRowScroll(layout));
@@ -105,10 +108,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         }
 
         inputDelay -= Engine.DeltaTime;
-        if (capturingKey) {
-            UpdateKeyCapture();
-            return;
-        }
         if (editingRow is not null) {
             UpdateTextEdit(layout);
             return;
@@ -180,11 +179,9 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
         string footer = editingRow is not null
             ? "输入后按 Enter 保存，Esc 取消"
-            : capturingKey
-                ? "按下新的按键，Esc 取消"
-                : IsRecorderTab
-                    ? "↑↓ 选择  ·  Enter 打开/编辑  ·  Delete 删除录像  ·  R 开始或保存  ·  F 打开文件夹"
-                    : "↑↓ 选择  ·  ←→ 调整  ·  Enter 编辑  ·  Tab 分页  ·  鼠标可拖动滑杆";
+            : IsRecorderTab
+                ? "↑↓ 选择  ·  Enter 打开/编辑  ·  Delete 删除录像  ·  R 开始或保存  ·  F 打开文件夹"
+                : "↑↓ 选择  ·  ←→ 调整  ·  Enter 编辑  ·  Tab 分页  ·  鼠标可拖动滑杆";
         MaterialUiKit.Text(footer, new Vector2(layout.Footer.X, layout.Footer.Y), Vector2.Zero,
             MaterialTextRole.Caption, palette.OnSurfaceVariant, ease, scaleOverride: 0.28f);
         string compatibility = MotionSmoothingBridge.Available ? "MotionSmoothing 已连接" : "MotionSmoothing 未安装";
@@ -192,7 +189,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             new Vector2(1f, 0f), MaterialTextRole.Caption, palette.OnSurfaceVariant, ease,
             scaleOverride: 0.28f);
 
-        if (capturingKey) RenderKeyCaptureModal(palette);
         if (pendingRecordingDelete is not null) RenderRecordingDeleteModal(palette);
         MaterialUiKit.Cursor(MInput.Mouse.Position, palette, ease);
     }
@@ -448,9 +444,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             case SettingKind.Text:
                 RenderTextField(row, rect, palette, alpha, enabled);
                 break;
-            case SettingKind.Key:
-                RenderKey(row, rect, palette, alpha, enabled);
-                break;
             case SettingKind.Action:
                 RenderAction(row, rect, palette, alpha, enabled);
                 break;
@@ -550,16 +543,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         if (editing) SetTextInputRectangle(control);
     }
 
-    private static void RenderKey(SettingRow row, MaterialRect rect, MaterialPalette palette,
-        float alpha, bool enabled) {
-        MaterialRect control = WideControlRect(rect);
-        MaterialUi.RoundedRect(control.X, control.Y, control.Width, control.Height, 16f,
-            palette.Surface * (0.74f * alpha));
-        MaterialUiKit.Text(row.Value(), control.Center + new Vector2(0f, -7f), new Vector2(0.5f),
-            MaterialTextRole.Label, enabled ? palette.OnSurface : palette.OnSurfaceVariant * 0.5f,
-            alpha, scaleOverride: 0.28f);
-    }
-
     private static void RenderAction(SettingRow row, MaterialRect rect, MaterialPalette palette,
         float alpha, bool enabled) {
         MaterialRect control = WideControlRect(rect);
@@ -573,19 +556,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private static void RenderStatus(SettingRow row, MaterialRect rect, MaterialPalette palette, float alpha) {
         MaterialUiKit.Text(Trim(row.Value(), 42), new Vector2(rect.X + 18f, rect.Bottom - 31f),
             Vector2.Zero, MaterialTextRole.Body, palette.Primary, alpha, scaleOverride: 0.30f);
-    }
-
-    private void RenderKeyCaptureModal(MaterialPalette palette) {
-        MaterialRect modal = new(610f, 410f, 700f, 260f);
-        Draw.Rect(0f, 0f, ScreenWidth, ScreenHeight, Color.Black * (0.52f * ease));
-        MaterialUiKit.Surface(modal, 34f, palette, ease);
-        MaterialUiKit.Text("设置快捷键", new Vector2(modal.Center.X, modal.Y + 46f),
-            new Vector2(0.5f, 0f), MaterialTextRole.Title, palette.OnSurface, ease);
-        MaterialUiKit.Text(keyRow?.Label ?? "", modal.Center + new Vector2(0f, -4f),
-            new Vector2(0.5f), MaterialTextRole.Body, palette.OnSurfaceVariant, ease);
-        MaterialUiKit.Text("请按下新的按键  ·  Esc 取消", new Vector2(modal.Center.X, modal.Bottom - 58f),
-            new Vector2(0.5f, 0f), MaterialTextRole.Caption, palette.Primary, ease,
-            scaleOverride: 0.29f);
     }
 
     private void RenderRecordingDeleteModal(MaterialPalette palette) {
@@ -712,7 +682,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private void AdjustRecorderSetting(SettingRow row, int direction) {
         if (!row.Enabled() || row.Change is null
-            || row.Kind is SettingKind.Action or SettingKind.Status or SettingKind.Key or SettingKind.Text) {
+            || row.Kind is SettingKind.Action or SettingKind.Status or SettingKind.Text) {
             Audio.Play("event:/ui/main/button_invalid");
             return;
         }
@@ -940,26 +910,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         if (editingRow is not null) imeText = text ?? "";
     }
 
-    private void UpdateKeyCapture() {
-        if (MaterialTextInputFocus.Pressed(Keys.Escape)) {
-            capturingKey = false;
-            keyRow = null;
-            ReleaseFocusedInput();
-            Audio.Play("event:/ui/main/button_back");
-            return;
-        }
-        foreach (Keys key in MaterialTextInputFocus.GetPressedKeys()) {
-            if (!MaterialTextInputFocus.Pressed(key) || key is Keys.None or Keys.Escape) continue;
-            keyRow?.AssignKey?.Invoke(key);
-            if (keyRow is not null) keyRow.Pulse = 1f;
-            capturingKey = false;
-            keyRow = null;
-            ReleaseFocusedInput();
-            Audio.Play("event:/ui/main/button_select");
-            return;
-        }
-    }
-
     private void ActivateSelected() {
         if (CurrentRows.Count == 0) return;
         Activate(CurrentRows[Math.Clamp(selectedRow, 0, CurrentRows.Count - 1)]);
@@ -982,12 +932,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             case SettingKind.Action:
                 row.Change?.Invoke(1);
                 break;
-            case SettingKind.Key:
-                capturingKey = true;
-                keyRow = row;
-                MaterialTextInputFocus.Focus(this);
-                Audio.Play("event:/ui/main/button_select");
-                return;
             case SettingKind.Status:
                 return;
         }
@@ -999,7 +943,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         if (CurrentRows.Count == 0) return;
         SettingRow row = CurrentRows[Math.Clamp(selectedRow, 0, CurrentRows.Count - 1)];
         if (!row.Enabled() || row.Change is null
-            || row.Kind is SettingKind.Action or SettingKind.Status or SettingKind.Key or SettingKind.Text) {
+            || row.Kind is SettingKind.Action or SettingKind.Status or SettingKind.Text) {
             Audio.Play("event:/ui/main/button_invalid");
             return;
         }
@@ -1072,14 +1016,30 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         return Math.Max(0f, contentHeight - layout.Rows.Height);
     }
 
+    private void OpenBindingConfig(bool controller) {
+        if (bindingConfig is not null) return;
+
+        void OnClose() {
+            bindingConfig = null;
+            Visible = true;
+            inputDelay = 0.16f;
+            MicroblocksQolUtilsModule.Instance.SaveSettings();
+        }
+
+        bindingConfig = controller
+            ? new ModuleSettingsButtonConfigUI(MicroblocksQolUtilsModule.Instance) { OnClose = OnClose }
+            : new ModuleSettingsKeyboardConfigUI(MicroblocksQolUtilsModule.Instance) { OnClose = OnClose };
+        Visible = false;
+        level.Add(bindingConfig);
+        level.OnEndOfFrame += () => level.Entities.UpdateLists();
+    }
+
     private void BeginClose(CloseDestination destination) {
         if (closeDestination != CloseDestination.None) return;
         if (editingRow is not null) editingRow.CommitEdit!(editBuffer);
         editingRow = null;
         closeDestination = destination;
         draggedSlider = null;
-        capturingKey = false;
-        keyRow = null;
         ReleaseFocusedInput();
         Audio.Play("event:/ui/main/button_back");
     }
@@ -1119,6 +1079,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         return [
             new SettingsTab("HUD", "帧率与状态信息", [
                 Toggle("启用 QOL 工具", () => settings.Enabled, value => settings.Enabled = value),
+                Toggle("HUD 信息卡阴影、背景与边框", () => settings.HudMaterialSurfaces,
+                    value => settings.HudMaterialSurfaces = value),
                 Toggle("显示帧率", () => settings.ShowFps, value => settings.ShowFps = value),
                 Toggle("显示 CPU 帧耗时", () => settings.ShowFrameTime, value => settings.ShowFrameTime = value),
                 Toggle("物理与渲染帧率", () => settings.ShowPhysicalAndRenderFps,
@@ -1138,12 +1100,16 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                     96, 384, 16, value => $"{value} px"),
                 Range("缩放档位", () => settings.MiniMapZoom, value => settings.MiniMapZoom = value,
                     0, 12, 1, value => value == 0 ? "当前房间" : value.ToString()),
-                Key("放大快捷键", () => settings.MiniMapZoomInKey, value => settings.MiniMapZoomInKey = value),
-                Key("缩小快捷键", () => settings.MiniMapZoomOutKey, value => settings.MiniMapZoomOutKey = value),
+                Action("键盘快捷键", "使用 Everest 设置", () => OpenBindingConfig(controller: false)),
+                Action("手柄按键", "使用 Everest 设置", () => OpenBindingConfig(controller: true)),
                 Toggle("显示背景", () => settings.MiniMapBackground, value => settings.MiniMapBackground = value),
                 Range("背景不透明度", () => settings.MiniMapBackgroundOpacity,
                     value => settings.MiniMapBackgroundOpacity = value, 0, 10, 1, value => $"{value * 10}%"),
                 Toggle("显示地图边框", () => settings.MiniMapBorder, value => settings.MiniMapBorder = value),
+                Toggle("显示房间背景", () => settings.MiniMapRoomBackgrounds,
+                    value => settings.MiniMapRoomBackgrounds = value),
+                Range("房间背景不透明度", () => settings.MiniMapRoomBackgroundOpacity,
+                    value => settings.MiniMapRoomBackgroundOpacity = value, 0, 10, 1, value => $"{value * 10}%"),
                 Toggle("显示房间边缘线", () => settings.MiniMapRoomBounds, value => settings.MiniMapRoomBounds = value),
                 Toggle("高亮正路房间", () => settings.MiniMapHighlightRoute,
                     value => settings.MiniMapHighlightRoute = value),
@@ -1155,6 +1121,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                     value => settings.ShowMiaoNetPlayers = value),
                 Toggle("边框显示越界玩家", () => settings.MiniMapShowOffscreenPlayers,
                     value => settings.MiniMapShowOffscreenPlayers = value),
+                EnumRow("头像裁剪形状", () => settings.MiniMapAvatarShape,
+                    value => settings.MiniMapAvatarShape = value),
                 EnumRow("玩家名字", () => settings.MiniMapNames, value => settings.MiniMapNames = value),
                 Toggle("隐藏原生越界名字", () => settings.HideMiaoNetOffscreenNames,
                     value => settings.HideMiaoNetOffscreenNames = value)
@@ -1290,13 +1258,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         index = (index + Math.Sign(direction) + values.Count) % values.Count;
         set(values[index]);
     });
-
-    private static SettingRow Key(string label, Func<Keys> get, Action<Keys> set) => new(
-        label,
-        SettingKind.Key,
-        () => get().ToString(),
-        assignKey: set
-    );
 
     private static SettingRow Action(string label, string buttonText, System.Action action,
         Func<bool>? enabled = null) => new(
@@ -1466,6 +1427,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private static string FormatEnum<T>(T value) where T : struct, Enum => value switch {
         MiniMapShape.Circle => "圆形",
         MiniMapShape.Square => "方形",
+        MiniMapAvatarShape.Circle => "圆形",
+        MiniMapAvatarShape.Square => "方形",
         MiniMapNameMode.None => "不显示",
         MiniMapNameMode.WatchedOnly => "仅关心的人",
         MiniMapNameMode.Everyone => "所有人",
@@ -1510,7 +1473,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         Range,
         Enum,
         Text,
-        Key,
         Action,
         Status
     }
@@ -1533,7 +1495,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         public SettingKind Kind { get; }
         public Func<string> Value { get; }
         public Action<int>? Change { get; }
-        public Action<Keys>? AssignKey { get; }
         public Func<bool>? IsEnabled { get; }
         public Func<bool>? ToggleValue { get; }
         public Func<float>? Normalized { get; }
@@ -1554,7 +1515,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             SettingKind kind,
             Func<string> value,
             Action<int>? change = null,
-            Action<Keys>? assignKey = null,
             Func<bool>? isEnabled = null,
             Func<bool>? toggleValue = null,
             Func<float>? normalized = null,
@@ -1569,7 +1529,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             Kind = kind;
             Value = value;
             Change = change;
-            AssignKey = assignKey;
             IsEnabled = isEnabled;
             ToggleValue = toggleValue;
             Normalized = normalized;

@@ -13,6 +13,11 @@ public sealed class MicroblocksQolUtilsModule : EverestModule {
         Instance = this;
     }
 
+    public override void OnInputInitialize() {
+        base.OnInputInitialize();
+        Settings.MigrateMiniMapBindings();
+    }
+
     public override void Load() {
         Logger.Log(LogLevel.Info, "MicroblocksQolUtils", "Loading microblock's QoL Utils");
         FrameRateCounter.Reset();
