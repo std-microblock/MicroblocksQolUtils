@@ -482,7 +482,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
                 if (item.Bottom < layout.SidebarItems.Y || item.Y > layout.SidebarItems.Bottom) continue;
                 bool selected = index == selectedLevelSet;
                 MaterialUiKit.NavigationPill(item, palette, selected, alpha);
-                SystemTtfFont.Draw(
+                SystemTtfFont.DrawVisual(
                     Trim(levelSets[index].Title, 20),
                     new Vector2(item.X + 20f, item.Center.Y),
                     new Vector2(0f, 0.5f),
@@ -521,7 +521,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
                 string emptyText = levelSets.Count > 0 && levelSets[selectedLevelSet].Id == RecentGroupId
                     ? UiText("microblocks_qol_chapter_recent_empty", "还没有最近游玩的章节")
                     : UiText("microblocks_qol_chapter_empty", "这个地图集中没有可选章节");
-                SystemTtfFont.Draw(emptyText,
+                SystemTtfFont.DrawVisual(emptyText,
                     layout.Cards.Center, new Vector2(0.5f), 0.56f, palette.OnSurfaceVariant * alpha);
             }
         });
@@ -550,14 +550,14 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
                 iconSize, iconSize, 12f, palette.Primary * 0.42f * alpha);
         }
 
-        SystemTtfFont.Draw(Trim(section.Lobby.Title, 34),
-            new Vector2(header.X + 54f, header.Y + 10f), Vector2.Zero, 0.39f,
+        SystemTtfFont.DrawVisual(Trim(section.Lobby.Title, 34),
+            new Vector2(header.X + 54f, header.Center.Y), new Vector2(0f, 0.5f), 0.39f,
             palette.OnSurface * alpha, weight: UiFontWeight.Bold);
         string count = string.Format(
             UiText("microblocks_qol_chapter_group_count", "{0} 张地图"), section.TotalMapCount
         );
-        SystemTtfFont.Draw(count, new Vector2(header.Right - 54f, header.Y + 15f),
-            new Vector2(1f, 0f), 0.29f, palette.OnSurfaceVariant * alpha);
+        SystemTtfFont.DrawVisual(count, new Vector2(header.Right - 54f, header.Center.Y),
+            new Vector2(1f, 0.5f), 0.29f, palette.OnSurfaceVariant * alpha);
 
         Vector2 arrow = new(header.Right - 25f, header.Center.Y);
         if (collapsed) {
@@ -592,9 +592,9 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
                 palette.Primary * 0.42f * alpha);
         }
         float textX = content.X + iconSize + 14f;
-        SystemTtfFont.Draw(Trim(entry.Title, 17), new Vector2(textX, content.Y - 3f),
+        SystemTtfFont.DrawVisual(Trim(entry.Title, 17), new Vector2(textX, content.Y),
             Vector2.Zero, 0.40f, palette.OnSurface * alpha, weight: UiFontWeight.Bold);
-        SystemTtfFont.Draw(Trim(entry.LevelSetTitle, 22), new Vector2(textX, content.Y + 34f),
+        SystemTtfFont.DrawVisual(Trim(entry.LevelSetTitle, 22), new Vector2(textX, content.Y + 34f),
             Vector2.Zero, 0.27f, palette.OnSurfaceVariant * alpha);
 
         AreaStats? stats = SaveData.Instance?.GetAreaStatsFor(entry.Area.ToKey());
@@ -641,7 +641,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
             MaterialUi.RoundedOutline(rect.X, rect.Y, rect.Width, rect.Height, rect.Height / 2f,
                 inProgress ? 2f : 1f, (inProgress ? palette.Primary : palette.Outline) * alpha);
         }
-        SystemTtfFont.Draw(text, rect.Center, new Vector2(0.5f), 0.29f, foreground * alpha,
+        SystemTtfFont.DrawVisual(text, rect.Center, new Vector2(0.5f), 0.29f, foreground * alpha,
             weight: completed || inProgress ? UiFontWeight.Bold : UiFontWeight.Regular);
     }
 
@@ -649,7 +649,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         MTexture icon = GFX.Gui[texture];
         float scale = 20f / Math.Max(icon.Width, icon.Height);
         icon.DrawCentered(position, Color.White * alpha, scale);
-        SystemTtfFont.Draw(value.ToString(), position + new Vector2(16f, 0f), new Vector2(0f, 0.5f), 0.27f,
+        SystemTtfFont.DrawVisual(value.ToString(), position + new Vector2(16f, 0f), new Vector2(0f, 0.5f), 0.27f,
             color * alpha);
     }
 
@@ -663,7 +663,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         string detail = selected is null
             ? UiText("microblocks_qol_chapter_no_available", "没有可用章节")
             : selected.Sid;
-        SystemTtfFont.Draw(Trim(detail, 72), new Vector2(layout.Footer.X, layout.Footer.Center.Y),
+        SystemTtfFont.DrawVisual(Trim(detail, 72), new Vector2(layout.Footer.X, layout.Footer.Center.Y),
             new Vector2(0f, 0.5f), 0.31f,
             palette.OnSurfaceVariant * alpha);
         string controls = grouped
@@ -671,7 +671,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
                 "打开：Enter / 左键   分组：点击标题或大厅卡 ←→   Esc：返回   Tab：地图集   滚轮：滚动")
             : UiText("microblocks_qol_chapter_controls",
                 "Enter / 左键：打开   Esc：返回   Tab：切换地图集   滚轮：滚动");
-        SystemTtfFont.Draw(controls,
+        SystemTtfFont.DrawVisual(controls,
             new Vector2(layout.Footer.Right, layout.Footer.Center.Y), new Vector2(1f, 0.5f), 0.31f,
             palette.OnSurfaceVariant * alpha);
     }
@@ -789,9 +789,9 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         string text = shown.Length == 0 ? "搜索地图、地图集或 SID…" : shown;
         Color color = shown.Length == 0 ? palette.OnSurfaceVariant * 0.68f : palette.OnSurface;
         Vector2 textPosition = new(layout.Search.X + 24f, layout.Search.Center.Y);
-        SystemTtfFont.Draw(Trim(text, 46), textPosition, new Vector2(0f, 0.5f), 0.36f, color * alpha);
+        SystemTtfFont.DrawVisual(Trim(text, 46), textPosition, new Vector2(0f, 0.5f), 0.36f, color * alpha);
         if (searchFocused && Scene.BetweenInterval(0.5f)) {
-            float caretX = textPosition.X + SystemTtfFont.Measure(Trim(shown, 46), 0.36f).X + 2f;
+            float caretX = textPosition.X + SystemTtfFont.MeasureVisible(Trim(shown, 46), 0.36f).X + 2f;
             MaterialUi.Line(new Vector2(caretX, layout.Search.Y + 11f),
                 new Vector2(caretX, layout.Search.Bottom - 11f), 2f, palette.Primary * alpha);
         }

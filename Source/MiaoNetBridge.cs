@@ -1,9 +1,11 @@
 using System.Collections;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Reflection.Emit;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Monocle;
+using MonoMod.RuntimeDetour;
 
 namespace Celeste.Mod.MicroblocksQolUtils;
 
@@ -26,7 +28,10 @@ public static class MiaoNetBridge {
     private static Assembly? assembly;
     private static bool commandInstalled;
     private static int retryFrames;
-    private static int? originalOffscreenOpacity;
+    private static Hook? offscreenNameHook;
+    private static bool offscreenNameHookAttempted;
+    private static PropertyInfo? ghostNameTagEntityProperty;
+    private static PropertyInfo? ghostNameTagIsOnSelfProperty;
     private static PixelFont? avatarFont;
     private static float avatarBaseSize;
     private static Type? emojiType;
@@ -58,12 +63,16 @@ public static class MiaoNetBridge {
             retryFrames = 0;
             TryInstallChatCommand();
         }
-        ApplyOffscreenNameSetting();
+        TryInstallOffscreenNameHook();
         ReadPlayers(level);
     }
 
     public static void Unload() {
-        RestoreOffscreenNameSetting();
+        offscreenNameHook?.Dispose();
+        offscreenNameHook = null;
+        offscreenNameHookAttempted = false;
+        ghostNameTagEntityProperty = null;
+        ghostNameTagIsOnSelfProperty = null;
         CurrentPlayers.Clear();
         LocalPlayer = null;
         LoggedIn = false;
@@ -294,33 +303,68 @@ public static class MiaoNetBridge {
         LastRooms[id] = room;
     }
 
-    private static void ApplyOffscreenNameSetting() {
+    private static void TryInstallOffscreenNameHook() {
+        if (offscreenNameHook is not null || offscreenNameHookAttempted || assembly is null) return;
+        offscreenNameHookAttempted = true;
         try {
-            Type? moduleType = assembly?.GetType("Celeste.Mod.MiaoNet.MiaoNetModule");
-            object? settings = moduleType?.GetProperty("Settings", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
-            PropertyInfo? property = settings?.GetType().GetProperty("OffScreenPlayerNameOpacity");
-            if (settings is null || property is null) return;
-            int current = (int)property.GetValue(settings)!;
-            if (MicroblocksQolUtilsModule.Settings.HideMiaoNetOffscreenNames) {
-                originalOffscreenOpacity ??= current;
-                if (current != 0) property.SetValue(settings, 0);
-            } else if (originalOffscreenOpacity is int restore) {
-                property.SetValue(settings, restore);
-                originalOffscreenOpacity = null;
-            }
+            Type nameTagType = assembly.GetType("Celeste.Mod.MiaoNet.GhostNameTag", throwOnError: true)!;
+            MethodInfo render = nameTagType.GetMethod(
+                nameof(Entity.Render),
+                BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly,
+                binder: null,
+                Type.EmptyTypes,
+                modifiers: null
+            ) ?? throw new MissingMethodException(nameTagType.FullName, nameof(Entity.Render));
+
+            ghostNameTagEntityProperty = nameTagType.GetProperty("Entity", BindingFlags.Public | BindingFlags.Instance)
+                ?? throw new MissingMemberException(nameTagType.FullName, "Entity");
+            ghostNameTagIsOnSelfProperty = nameTagType.GetProperty("IsOnSelf", BindingFlags.Public | BindingFlags.Instance);
+
+            Type originalDelegateType = Expression.GetDelegateType(nameTagType, typeof(void));
+            Type detourDelegateType = Expression.GetDelegateType(originalDelegateType, nameTagType, typeof(void));
+            MethodInfo shouldRender = typeof(MiaoNetBridge).GetMethod(
+                nameof(ShouldRenderGhostNameTag),
+                BindingFlags.NonPublic | BindingFlags.Static
+            )!;
+            DynamicMethod detourMethod = new(
+                "MicroblocksQolUtils_MiaoNetGhostNameTagRender",
+                typeof(void),
+                [originalDelegateType, nameTagType],
+                typeof(MiaoNetBridge).Module,
+                skipVisibility: true
+            );
+            ILGenerator il = detourMethod.GetILGenerator();
+            Label done = il.DefineLabel();
+            il.Emit(OpCodes.Ldarg_1);
+            il.Emit(OpCodes.Call, shouldRender);
+            il.Emit(OpCodes.Brfalse_S, done);
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldarg_1);
+            il.Emit(OpCodes.Callvirt, originalDelegateType.GetMethod(nameof(Action.Invoke))!);
+            il.MarkLabel(done);
+            il.Emit(OpCodes.Ret);
+            Delegate detour = detourMethod.CreateDelegate(detourDelegateType);
+
+            offscreenNameHook = new Hook(render, detour);
+            Logger.Log(LogLevel.Info, "MicroblocksQolUtils", "MiaoNet off-screen name filtering enabled");
         } catch (Exception exception) {
-            Logger.Log(LogLevel.Warn, "MicroblocksQolUtils/MiaoNet", $"Cannot update offscreen-name opacity: {exception.Message}");
+            ghostNameTagEntityProperty = null;
+            ghostNameTagIsOnSelfProperty = null;
+            Logger.Log(LogLevel.Warn, "MicroblocksQolUtils/MiaoNet", $"Cannot hook off-screen names: {exception.Message}");
         }
     }
 
-    private static void RestoreOffscreenNameSetting() {
-        if (originalOffscreenOpacity is not int restore || assembly is null) return;
+    private static bool ShouldRenderGhostNameTag(object nameTag) {
+        if (!MicroblocksQolUtilsModule.Settings.HideMiaoNetOffscreenNames) return true;
         try {
-            Type? moduleType = assembly.GetType("Celeste.Mod.MiaoNet.MiaoNetModule");
-            object? settings = moduleType?.GetProperty("Settings", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
-            settings?.GetType().GetProperty("OffScreenPlayerNameOpacity")?.SetValue(settings, restore);
-        } catch { }
-        originalOffscreenOpacity = null;
+            if (ghostNameTagIsOnSelfProperty?.GetValue(nameTag) is true) return true;
+            if (ghostNameTagEntityProperty?.GetValue(nameTag) is not Entity player
+                || player.Scene is not Level level) return true;
+            return level.InsideCamera(player.Position);
+        } catch {
+            // A MiaoNet update should never make its normal name rendering disappear.
+            return true;
+        }
     }
 
     private static bool TryResolveAvatarFont() {

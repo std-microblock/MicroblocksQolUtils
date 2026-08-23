@@ -323,7 +323,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         Color textColor = enabled
             ? primary || danger ? palette.OnPrimary : palette.OnSurface
             : palette.OnSurfaceVariant * 0.50f;
-        MaterialUiKit.Text(text, rect.Center + new Vector2(0f, -7f), new Vector2(0.5f),
+        MaterialUiKit.Text(text, rect.Center, new Vector2(0.5f),
             MaterialTextRole.Label, textColor, alpha, scaleOverride: 0.28f);
     }
 
@@ -382,7 +382,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         Color fill = danger ? dangerColor : palette.Primary;
         MaterialUi.RoundedRect(rect.X, rect.Y, rect.Width, rect.Height, 15f,
             fill * (alpha * (hovered ? 0.92f : 0.30f)));
-        MaterialUiKit.Text(text, rect.Center + new Vector2(0f, -6f), new Vector2(0.5f),
+        MaterialUiKit.Text(text, rect.Center, new Vector2(0.5f),
             MaterialTextRole.Label, hovered ? palette.OnPrimary : danger ? new Color(255, 205, 210) : palette.Primary,
             alpha, scaleOverride: 0.25f);
     }
@@ -464,7 +464,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         MaterialUi.Circle(new Vector2(knobX, control.Center.Y), 10f,
             Color.Lerp(palette.OnSurfaceVariant, palette.OnPrimary, state) * alpha);
         MaterialUiKit.Text(row.ToggleValue?.Invoke() == true ? "开" : "关",
-            new Vector2(control.X - 14f, control.Center.Y - 8f), new Vector2(1f, 0f),
+            new Vector2(control.X - 14f, control.Center.Y), new Vector2(1f, 0.5f),
             MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.27f);
     }
 
@@ -487,13 +487,14 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         MaterialUi.RoundedOutline(valueRect.X, valueRect.Y, valueRect.Width, valueRect.Height, 15f,
             editing ? 2f : 1f, outline * (alpha * (editing ? 1f : 0.48f)));
         string shown = editing ? editBuffer + imeText : row.Value();
-        MaterialUiKit.Text(Trim(shown, 13), valueRect.Center + new Vector2(0f, -7f),
+        MaterialUiKit.Text(Trim(shown, 13), valueRect.Center,
             new Vector2(0.5f), MaterialTextRole.Label,
             enabled ? palette.OnSurface : palette.OnSurfaceVariant * 0.5f,
             alpha, scaleOverride: 0.26f);
         if (editing && Scene.BetweenInterval(0.5f)) {
             float caretX = Math.Min(valueRect.Right - 8f,
-                valueRect.Center.X + SystemTtfFont.Measure(Trim(shown, 13), 0.26f).X / 2f + 2f);
+                valueRect.Center.X + SystemTtfFont.MeasureVisible(Trim(shown, 13), 0.26f,
+                    UiFontWeight.Bold).X / 2f + 2f);
             MaterialUi.Line(new Vector2(caretX, valueRect.Y + 7f),
                 new Vector2(caretX, valueRect.Bottom - 7f), 2f, palette.Primary * alpha);
             SetTextInputRectangle(valueRect);
@@ -507,13 +508,13 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             palette.Surface * (0.72f * alpha));
         MaterialUi.RoundedOutline(control.X, control.Y, control.Width, control.Height, 16f, 1f,
             palette.Outline * (0.48f * alpha));
-        MaterialUiKit.Text("<", new Vector2(control.X + 18f, control.Center.Y - 8f), Vector2.Zero,
+        MaterialUiKit.Text("<", new Vector2(control.X + 18f, control.Center.Y), new Vector2(0f, 0.5f),
             MaterialTextRole.Label, palette.OnSurfaceVariant, alpha, scaleOverride: 0.27f);
-        MaterialUiKit.Text(Trim(row.Value(), 28), control.Center + new Vector2(0f, -7f),
+        MaterialUiKit.Text(Trim(row.Value(), 28), control.Center,
             new Vector2(0.5f), MaterialTextRole.Label,
             enabled ? palette.OnSurface : palette.OnSurfaceVariant * 0.5f, alpha, scaleOverride: 0.28f);
-        MaterialUiKit.Text(">", new Vector2(control.Right - 18f, control.Center.Y - 8f),
-            new Vector2(1f, 0f), MaterialTextRole.Label, palette.OnSurfaceVariant, alpha,
+        MaterialUiKit.Text(">", new Vector2(control.Right - 18f, control.Center.Y),
+            new Vector2(1f, 0.5f), MaterialTextRole.Label, palette.OnSurfaceVariant, alpha,
             scaleOverride: 0.27f);
     }
 
@@ -530,13 +531,13 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         string placeholder = row.Placeholder ?? "点击输入";
         string text = shown.Length == 0 ? placeholder : shown;
         Color color = shown.Length == 0 ? palette.OnSurfaceVariant * 0.55f : palette.OnSurface;
-        MaterialUiKit.Text(TrimFromLeft(text, 46), new Vector2(control.X + 14f, control.Y + 8f),
-            Vector2.Zero, MaterialTextRole.Caption, enabled ? color : color * 0.45f, alpha,
+        MaterialUiKit.Text(TrimFromLeft(text, 46), new Vector2(control.X + 14f, control.Center.Y),
+            new Vector2(0f, 0.5f), MaterialTextRole.Caption, enabled ? color : color * 0.45f, alpha,
             scaleOverride: 0.27f);
         if (editing && Scene.BetweenInterval(0.5f)) {
             string visible = TrimFromLeft(shown, 46);
             float caretX = Math.Min(control.Right - 12f,
-                control.X + 14f + SystemTtfFont.Measure(visible, 0.27f).X + 2f);
+                control.X + 14f + SystemTtfFont.MeasureVisible(visible, 0.27f).X + 2f);
             MaterialUi.Line(new Vector2(caretX, control.Y + 7f),
                 new Vector2(caretX, control.Bottom - 7f), 2f, palette.Primary * alpha);
         }
@@ -548,7 +549,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         MaterialRect control = WideControlRect(rect);
         MaterialUi.RoundedRect(control.X, control.Y, control.Width, control.Height, 16f,
             (enabled ? palette.Primary : palette.Outline) * (alpha * (enabled ? 0.88f : 0.25f)));
-        MaterialUiKit.Text(row.Value(), control.Center + new Vector2(0f, -7f), new Vector2(0.5f),
+        MaterialUiKit.Text(row.Value(), control.Center, new Vector2(0.5f),
             MaterialTextRole.Label, enabled ? palette.OnPrimary : palette.OnSurfaceVariant * 0.55f,
             alpha, scaleOverride: 0.28f);
     }
