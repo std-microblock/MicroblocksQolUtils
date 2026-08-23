@@ -48,7 +48,6 @@ internal static class MaterialUi {
     private static readonly Dictionary<int, Texture2D> CircleMasks = [];
     private static readonly Dictionary<(int Diameter, int Thickness), Texture2D> CircleOutlineMasks = [];
     private static readonly Dictionary<(int Length, int ThicknessQuarterPixels), Texture2D> LineMasks = [];
-    private static Texture2D? noise;
     private const int CoverageSamples = 4;
 
     public static void RoundedRect(float x, float y, float width, float height, float radius, Color color) {
@@ -119,12 +118,10 @@ internal static class MaterialUi {
         float height,
         float radius,
         Color tint,
-        Color outline,
-        bool grain = true
+        Color outline
     ) {
         RoundedRect(x, y + 8f, width, height, radius, Color.Black * 0.24f);
         RoundedRect(x, y, width, height, radius, tint);
-        if (grain) DrawNoise(x, y, width, height, radius);
         RoundedOutline(x, y, width, height, radius, 2f, outline);
     }
 
@@ -142,8 +139,6 @@ internal static class MaterialUi {
         CircleOutlineMasks.Clear();
         foreach (Texture2D texture in LineMasks.Values) texture.Dispose();
         LineMasks.Clear();
-        noise?.Dispose();
-        noise = null;
     }
 
     private static Texture2D GetRoundedMask(int width, int height, int radius) {
@@ -298,32 +293,4 @@ internal static class MaterialUi {
         return new Color(alpha, alpha, alpha, alpha);
     }
 
-    private static void DrawNoise(float x, float y, float width, float height, float radius) {
-        noise ??= CreateNoise();
-        // The rounded tint beneath it provides the actual clip silhouette; very low alpha keeps
-        // the tiled grain from making the corners visibly rectangular.
-        Draw.SpriteBatch.Draw(
-            noise,
-            new Rectangle((int)(x + radius / 2f), (int)(y + radius / 2f),
-                Math.Max(1, (int)(width - radius)), Math.Max(1, (int)(height - radius))),
-            new Rectangle(0, 0, noise.Width, noise.Height),
-            Color.White * 0.035f
-        );
-    }
-
-    private static Texture2D CreateNoise() {
-        const int size = 96;
-        Color[] pixels = new Color[size * size];
-        uint state = 0xA341316Cu;
-        for (int index = 0; index < pixels.Length; index++) {
-            state ^= state << 13;
-            state ^= state >> 17;
-            state ^= state << 5;
-            byte value = (byte)(100 + state % 156);
-            pixels[index] = new Color(value, value, value, 255);
-        }
-        Texture2D texture = new(Engine.Graphics.GraphicsDevice, size, size);
-        texture.SetData(pixels);
-        return texture;
-    }
 }
