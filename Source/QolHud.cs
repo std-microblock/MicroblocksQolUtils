@@ -13,7 +13,6 @@ public sealed class QolHud : Entity {
 
     public override void Update() {
         base.Update();
-        FrameRateCounter.TickUpdate();
         if (!MicroblocksQolUtilsModule.Settings.Enabled) return;
         MiaoNetBridge.Update(Scene as Level);
         if (Scene is Level level) {
@@ -24,7 +23,6 @@ public sealed class QolHud : Entity {
 
     public override void Render() {
         base.Render();
-        FrameRateCounter.TickRender();
         QolSettings settings = MicroblocksQolUtilsModule.Settings;
         if (!settings.Enabled) return;
 

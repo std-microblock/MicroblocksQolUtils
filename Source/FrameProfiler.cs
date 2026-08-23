@@ -9,41 +9,63 @@ using Monocle;
 namespace Celeste.Mod.MicroblocksQolUtils;
 
 public static class FrameProfiler {
-    private static readonly Stopwatch FrameWatch = new();
+    private static readonly Stopwatch UpdateWatch = new();
+    private static readonly Stopwatch RenderWatch = new();
     private static readonly Dictionary<string, long> UpdateTicks = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, long> RenderTicks = new(StringComparer.Ordinal);
+    private static readonly Dictionary<Type, string> OwnerNames = [];
     private static long sampleStart;
     private static string? sampleOwner;
     private static Dictionary<string, long>? sampleTarget;
-    private static double smoothedMilliseconds = 16.6667;
+    private static bool samplingUpdate;
+    private static double pendingUpdateMilliseconds;
     private static DateTime lastWrittenAt = DateTime.MinValue;
     private static SpikeReport? latestSpike;
 
     public static double LastFrameMilliseconds { get; private set; } = 16.6667;
-    public static double FramesPerSecond => smoothedMilliseconds <= 0.0001 ? 0 : 1000.0 / smoothedMilliseconds;
 
     public static void Load() {
+        // Motion Smoothing also rewrites EntityList.Render. Profiling that call site added work to
+        // every interpolated draw and made the two IL manipulators order-dependent, so only the
+        // 60 Hz update list is sampled per entity. Render cost is measured once at Engine.Draw.
         IL.Monocle.EntityList.Update += InstrumentEntityUpdate;
-        IL.Monocle.EntityList.Render += InstrumentEntityRender;
-        IL.Monocle.Engine.RenderCore += InstrumentFrameEnd;
     }
 
     public static void Unload() {
-        IL.Monocle.Engine.RenderCore -= InstrumentFrameEnd;
         IL.Monocle.EntityList.Update -= InstrumentEntityUpdate;
-        IL.Monocle.EntityList.Render -= InstrumentEntityRender;
-    }
-
-    public static void BeginFrame() {
+        UpdateWatch.Reset();
+        RenderWatch.Reset();
         UpdateTicks.Clear();
         RenderTicks.Clear();
-        FrameWatch.Restart();
+        OwnerNames.Clear();
+        pendingUpdateMilliseconds = 0;
+        samplingUpdate = false;
+        sampleOwner = null;
+        sampleTarget = null;
     }
 
-    public static void EndFrame() {
-        FrameWatch.Stop();
-        LastFrameMilliseconds = FrameWatch.Elapsed.TotalMilliseconds;
-        smoothedMilliseconds += (LastFrameMilliseconds - smoothedMilliseconds) * 0.08;
+    public static void BeginUpdate() {
+        samplingUpdate = MicroblocksQolUtilsModule.Settings.EnableFrameProfiler;
+        if (samplingUpdate) UpdateTicks.Clear();
+        UpdateWatch.Restart();
+    }
+
+    public static void EndUpdate() {
+        UpdateWatch.Stop();
+        pendingUpdateMilliseconds += UpdateWatch.Elapsed.TotalMilliseconds;
+    }
+
+    public static void BeginRender() {
+        RenderTicks.Clear();
+        RenderWatch.Restart();
+    }
+
+    public static void EndRender() {
+        RenderWatch.Stop();
+        double renderMilliseconds = RenderWatch.Elapsed.TotalMilliseconds;
+        LastFrameMilliseconds = pendingUpdateMilliseconds + renderMilliseconds;
+        pendingUpdateMilliseconds = 0;
+        RenderTicks["Engine.Draw"] = (long)(renderMilliseconds * Stopwatch.Frequency / 1000.0);
         QolSettings settings = MicroblocksQolUtilsModule.Settings;
         if (!settings.EnableFrameProfiler || LastFrameMilliseconds < settings.FrameSpikeThresholdMs) return;
 
@@ -69,17 +91,6 @@ public static class FrameProfiler {
     }
 
     private static void InstrumentEntityUpdate(ILContext il) => Instrument(il, "Update", BeginUpdateSample);
-    private static void InstrumentEntityRender(ILContext il) => Instrument(il, "Render", BeginRenderSample);
-
-    private static void InstrumentFrameEnd(ILContext il) {
-        ILCursor cursor = new(il);
-        if (!cursor.TryGotoNext(MoveType.Before, instruction => instruction.MatchRet())) {
-            Logger.Log(LogLevel.Warn, "MicroblocksQolUtils/Profiler", "Could not instrument Engine.RenderCore");
-            return;
-        }
-        cursor.EmitDelegate(EndFrame);
-    }
-
     private static void Instrument(ILContext il, string method, Action<Entity> begin) {
         ILCursor cursor = new(il);
         if (!cursor.TryGotoNext(MoveType.Before, instruction => instruction.MatchCallvirt<Entity>(method))) {
@@ -88,16 +99,22 @@ public static class FrameProfiler {
         }
         cursor.Emit(OpCodes.Dup);
         cursor.EmitDelegate(begin);
-        cursor.Index++;
+        if (!cursor.TryGotoNext(MoveType.After, instruction => instruction.MatchCallvirt<Entity>(method))) {
+            Logger.Log(LogLevel.Warn, "MicroblocksQolUtils/Profiler", $"Could not finish instrumenting Entity.{method}");
+            return;
+        }
         cursor.EmitDelegate(EndEntitySample);
     }
 
     private static void BeginUpdateSample(Entity entity) => BeginEntitySample(entity, UpdateTicks);
-    private static void BeginRenderSample(Entity entity) => BeginEntitySample(entity, RenderTicks);
 
     private static void BeginEntitySample(Entity entity, Dictionary<string, long> target) {
-        if (!MicroblocksQolUtilsModule.Settings.EnableFrameProfiler) return;
-        sampleOwner = entity.GetType().Assembly.GetName().Name ?? entity.GetType().Namespace ?? "unknown";
+        if (!samplingUpdate) return;
+        Type type = entity.GetType();
+        if (!OwnerNames.TryGetValue(type, out sampleOwner)) {
+            sampleOwner = type.Assembly.GetName().Name ?? type.Namespace ?? "unknown";
+            OwnerNames[type] = sampleOwner;
+        }
         sampleTarget = target;
         sampleStart = Stopwatch.GetTimestamp();
     }

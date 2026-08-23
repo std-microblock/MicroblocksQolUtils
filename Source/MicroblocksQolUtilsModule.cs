@@ -14,6 +14,7 @@ public sealed class MicroblocksQolUtilsModule : EverestModule {
 
     public override void Load() {
         Logger.Log(LogLevel.Info, "MicroblocksQolUtils", "Loading microblock's QoL Utils");
+        FrameRateCounter.Reset();
         CollabUtils2Bridge.Load();
         MaterialChapterSelect.Load();
         QolPauseMenu.Load();
@@ -27,9 +28,11 @@ public sealed class MicroblocksQolUtilsModule : EverestModule {
         AutoRecorder.Load(Path.GetDirectoryName(Metadata.DLL) ?? "");
         Everest.Events.Level.OnLoadLevel += OnLoadLevel;
         On.Monocle.Engine.Update += EngineUpdate;
+        On.Monocle.Engine.Draw += EngineDraw;
     }
 
     public override void Unload() {
+        On.Monocle.Engine.Draw -= EngineDraw;
         On.Monocle.Engine.Update -= EngineUpdate;
         Everest.Events.Level.OnLoadLevel -= OnLoadLevel;
         NativeCaptureSmoke.Unload();
@@ -44,6 +47,7 @@ public sealed class MicroblocksQolUtilsModule : EverestModule {
         FrameProfiler.Unload();
         MiaoNetBridge.Unload();
         MotionSmoothingBridge.Unload();
+        FrameRateCounter.Reset();
         MaterialUi.Dispose();
         SystemTtfFont.Dispose();
     }
@@ -53,8 +57,23 @@ public sealed class MicroblocksQolUtilsModule : EverestModule {
     }
 
     private static void EngineUpdate(On.Monocle.Engine.orig_Update orig, Engine self, Microsoft.Xna.Framework.GameTime gameTime) {
-        FrameProfiler.BeginFrame();
-        orig(self, gameTime);
-        MaterialUiSmoke.Update();
+        FrameProfiler.BeginUpdate();
+        try {
+            orig(self, gameTime);
+            MaterialUiSmoke.Update();
+        } finally {
+            FrameProfiler.EndUpdate();
+            FrameRateCounter.TickUpdate();
+        }
+    }
+
+    private static void EngineDraw(On.Monocle.Engine.orig_Draw orig, Engine self, Microsoft.Xna.Framework.GameTime gameTime) {
+        FrameProfiler.BeginRender();
+        try {
+            orig(self, gameTime);
+        } finally {
+            FrameProfiler.EndRender();
+            FrameRateCounter.TickRender();
+        }
     }
 }
