@@ -701,6 +701,10 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                 Range("背景不透明度", () => settings.MiniMapBackgroundOpacity,
                     value => settings.MiniMapBackgroundOpacity = value, 0, 10, 1, value => $"{value * 10}%"),
                 Toggle("显示地图边框", () => settings.MiniMapBorder, value => settings.MiniMapBorder = value),
+                Toggle("显示房间背景", () => settings.MiniMapRoomBackgrounds,
+                    value => settings.MiniMapRoomBackgrounds = value),
+                Range("房间背景不透明度", () => settings.MiniMapRoomBackgroundOpacity,
+                    value => settings.MiniMapRoomBackgroundOpacity = value, 0, 10, 1, value => $"{value * 10}%"),
                 Toggle("显示房间边缘线", () => settings.MiniMapRoomBounds, value => settings.MiniMapRoomBounds = value),
                 Toggle("高亮正路房间", () => settings.MiniMapHighlightRoute,
                     value => settings.MiniMapHighlightRoute = value),
@@ -712,6 +716,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                     value => settings.ShowMiaoNetPlayers = value),
                 Toggle("边框显示越界玩家", () => settings.MiniMapShowOffscreenPlayers,
                     value => settings.MiniMapShowOffscreenPlayers = value),
+                EnumRow("头像裁剪形状", () => settings.MiniMapAvatarShape,
+                    value => settings.MiniMapAvatarShape = value),
                 EnumRow("玩家名字", () => settings.MiniMapNames, value => settings.MiniMapNames = value),
                 Toggle("隐藏原生越界名字", () => settings.HideMiaoNetOffscreenNames,
                     value => settings.HideMiaoNetOffscreenNames = value)
@@ -887,6 +893,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private static string FormatEnum<T>(T value) where T : struct, Enum => value switch {
         MiniMapShape.Circle => "圆形",
         MiniMapShape.Square => "方形",
+        MiniMapAvatarShape.Circle => "圆形",
+        MiniMapAvatarShape.Square => "方形",
         MiniMapNameMode.None => "不显示",
         MiniMapNameMode.WatchedOnly => "仅关心的人",
         MiniMapNameMode.Everyone => "所有人",

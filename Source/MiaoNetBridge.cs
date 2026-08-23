@@ -2,6 +2,7 @@ using System.Collections;
 using System.Linq.Expressions;
 using System.Reflection;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
 using Monocle;
 
 namespace Celeste.Mod.MicroblocksQolUtils;
@@ -74,7 +75,13 @@ public static class MiaoNetBridge {
         commandInstalled = false;
     }
 
-    public static bool TryDrawAvatar(int playerId, Vector2 center, float size, Color color) {
+    public static bool TryDrawAvatar(
+        int playerId,
+        Vector2 center,
+        float size,
+        Color color,
+        MiniMapAvatarShape cropShape
+    ) {
         try {
             if (!TryResolveAvatarFont() || emojiType is null || avatarFont is null) return false;
             string key = $"\0mn_avt_{playerId}";
@@ -88,11 +95,89 @@ public static class MiaoNetBridge {
             if (get?.Invoke(null, [key]) is not int index || startValue is null) return false;
             int start = Convert.ToInt32(startValue);
             char character = (char)(start + index);
-            float scale = size / Math.Max(1f, avatarBaseSize);
-            avatarFont.Draw(avatarBaseSize, character, center, new Vector2(0.5f), new Vector2(scale), color);
+            float requestedScale = size / Math.Max(1f, avatarBaseSize);
+            PixelFontSize fontSize = avatarFont.Get(avatarBaseSize * requestedScale);
+            if (!fontSize.Characters.TryGetValue(character, out PixelFontCharacter? glyph)) return false;
+            float scale = requestedScale * avatarBaseSize / Math.Max(1f, fontSize.Size);
+            Vector2 glyphScale = new(scale);
+            Vector2 measure = fontSize.Measure(character);
+            Vector2 drawPosition = Calc.Floor(
+                center + (new Vector2(glyph.XOffset, glyph.YOffset) - measure * 0.5f) * glyphScale
+            );
+            MTexture glyphTexture = glyph.Texture;
+            float scaleFix = glyphTexture.ScaleFix;
+            Vector2 renderedTopLeft = drawPosition + glyphTexture.DrawOffset * glyphScale;
+            Vector2 renderedSize = new(
+                glyphTexture.Width * glyphScale.X * scaleFix,
+                glyphTexture.Height * glyphScale.Y * scaleFix
+            );
+            if (renderedSize.X <= 0f || renderedSize.Y <= 0f) return false;
+            DrawCroppedAvatar(
+                glyphTexture.Texture.Texture_Safe,
+                glyphTexture.ClipRect,
+                renderedTopLeft,
+                renderedSize,
+                center,
+                size,
+                color,
+                cropShape
+            );
             return true;
         } catch {
             return false;
+        }
+    }
+
+    private static void DrawCroppedAvatar(
+        Texture2D texture,
+        Rectangle source,
+        Vector2 renderedTopLeft,
+        Vector2 renderedSize,
+        Vector2 center,
+        float size,
+        Color color,
+        MiniMapAvatarShape cropShape
+    ) {
+        float radius = size / 2f;
+        float frameLeft = center.X - radius;
+        float frameTop = center.Y - radius;
+        float frameRight = center.X + radius;
+        float frameBottom = center.Y + radius;
+        float renderedRight = renderedTopLeft.X + renderedSize.X;
+        float renderedBottom = renderedTopLeft.Y + renderedSize.Y;
+        int firstRow = (int)MathF.Ceiling(Math.Max(frameTop, renderedTopLeft.Y));
+        int lastRow = (int)MathF.Floor(Math.Min(frameBottom, renderedBottom));
+
+        for (int y = firstRow; y < lastRow; y++) {
+            float sampleY = y + 0.5f;
+            float halfWidth = radius;
+            if (cropShape == MiniMapAvatarShape.Circle) {
+                float deltaY = sampleY - center.Y;
+                float remaining = radius * radius - deltaY * deltaY;
+                if (remaining <= 0f) continue;
+                halfWidth = MathF.Sqrt(remaining);
+            }
+
+            float allowedLeft = Math.Max(frameLeft, center.X - halfWidth);
+            float allowedRight = Math.Min(frameRight, center.X + halfWidth);
+            int destinationLeft = (int)MathF.Ceiling(Math.Max(allowedLeft, renderedTopLeft.X));
+            int destinationRight = (int)MathF.Floor(Math.Min(allowedRight, renderedRight));
+            if (destinationRight <= destinationLeft) continue;
+
+            float u0 = (destinationLeft - renderedTopLeft.X) / renderedSize.X;
+            float u1 = (destinationRight - renderedTopLeft.X) / renderedSize.X;
+            float v0 = (y - renderedTopLeft.Y) / renderedSize.Y;
+            float v1 = (y + 1f - renderedTopLeft.Y) / renderedSize.Y;
+            int sourceLeft = Math.Clamp(source.Left + (int)MathF.Floor(u0 * source.Width), source.Left, source.Right - 1);
+            int sourceRight = Math.Clamp(source.Left + (int)MathF.Ceiling(u1 * source.Width), sourceLeft + 1, source.Right);
+            int sourceTop = Math.Clamp(source.Top + (int)MathF.Floor(v0 * source.Height), source.Top, source.Bottom - 1);
+            int sourceBottom = Math.Clamp(source.Top + (int)MathF.Ceiling(v1 * source.Height), sourceTop + 1, source.Bottom);
+            Draw.SpriteBatch.Draw(
+                texture,
+                new Rectangle(destinationLeft, y, destinationRight - destinationLeft, 1),
+                new Rectangle(sourceLeft, sourceTop, sourceRight - sourceLeft, sourceBottom - sourceTop),
+                color
+            );
         }
     }
 
