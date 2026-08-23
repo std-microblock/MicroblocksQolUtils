@@ -41,6 +41,8 @@ Implemented:
 - One WGC/encoder session remains alive for the whole room. Deaths,
   SpeedrunTool loads, and respawn changes only move logical start/end markers;
   they never restart capture or grow an in-memory recording buffer.
+- A top-right recording badge can independently show a blinking red capture
+  dot and the elapsed recording time.
 - Native background finalization decodes only the retained ranges from the
   continuous room file and re-encodes them into a gapless MP4. This permits
   exact non-keyframe cuts while failed attempts and load freezes are omitted.

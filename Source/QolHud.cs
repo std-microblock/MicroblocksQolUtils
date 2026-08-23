@@ -29,6 +29,7 @@ public sealed class QolHud : Entity {
         if (!settings.Enabled) return;
 
         if (Scene is Level level) MiniMapRenderer.Render(level);
+        RecordingHudRenderer.Render();
 
         if (settings.ShowFps) {
             bool dualFps = settings.ShowPhysicalAndRenderFps && MotionSmoothingBridge.Enabled;

@@ -134,6 +134,12 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue(false)]
     public bool AutoRecorderEnabled { get; set; }
 
+    [DefaultValue(true)]
+    public bool ShowRecordingIndicator { get; set; } = true;
+
+    [DefaultValue(true)]
+    public bool ShowRecordingDuration { get; set; } = true;
+
     [DefaultValue(RecordingPolicy.EveryRoom)]
     public RecordingPolicy RecordingPolicy { get; set; } = RecordingPolicy.EveryRoom;
 
