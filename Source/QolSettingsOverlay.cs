@@ -16,8 +16,9 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private const float DropdownItemHeight = 42f;
     private const int DropdownMaxVisibleItems = 7;
     private const float NavigationTitleScale = 0.34f;
-    private const float ProfilerRowHeight = 76f;
+    private const float ProfilerRowHeight = 84f;
     private const float ProfilerRowGap = 10f;
+    private const float ProfilerScrollStep = (ProfilerRowHeight + ProfilerRowGap) * 2f;
 
     private static QolSettingsOverlay? activePage;
 
@@ -160,8 +161,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         if (IsProfilerTab) {
             if (Input.MenuLeft.Pressed) SetProfilerSimpleMode(true);
             else if (Input.MenuRight.Pressed) SetProfilerSimpleMode(false);
-            if (Input.MenuUp.Pressed) rowScroll.Scroll(-172f, MaxRowScroll(layout));
-            else if (Input.MenuDown.Pressed) rowScroll.Scroll(172f, MaxRowScroll(layout));
+            if (Input.MenuUp.Pressed) rowScroll.Scroll(-ProfilerScrollStep, MaxRowScroll(layout));
+            else if (Input.MenuDown.Pressed) rowScroll.Scroll(ProfilerScrollStep, MaxRowScroll(layout));
             if (Input.MenuConfirm.Pressed
                 || MInput.Keyboard.Pressed(Keys.Enter)
                 || MInput.Keyboard.Pressed(Keys.Space)) StartProfilerSampling();
@@ -941,7 +942,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private void UpdateMouse(OverlayLayout layout) {
         Vector2 mouse = MInput.Mouse.Position;
         if (MInput.Mouse.WheelDelta != 0 && layout.Body.Contains(mouse)) {
-            rowScroll.Scroll(-Math.Sign(MInput.Mouse.WheelDelta) * 178f, MaxRowScroll(layout));
+            float step = IsProfilerTab ? ProfilerScrollStep : 178f;
+            rowScroll.Scroll(-Math.Sign(MInput.Mouse.WheelDelta) * step, MaxRowScroll(layout));
         }
         if (!MInput.Mouse.WasMoved && !MInput.Mouse.PressedLeftButton) return;
 
@@ -1710,7 +1712,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             ManagedSamplingStage.Failed => "采样失败",
             _ => report is null ? "尚未采样" : "上次报告"
         };
-        MaterialUiKit.Text(status, new Vector2(layout.ContentHeader.Right, layout.ContentHeader.Y + 8f),
+        MaterialUiKit.Text(status, new Vector2(layout.Rows.Right, layout.ContentHeader.Y + 8f),
             new Vector2(1f, 0f), MaterialTextRole.Caption,
             stage == ManagedSamplingStage.Failed ? Color.OrangeRed : palette.Primary,
             alpha, scaleOverride: 0.29f);
@@ -1736,10 +1738,15 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         } else {
             headline = "尚未生成报告";
         }
-        MaterialUiKit.Text(headline, new Vector2(summary.X + 24f, summary.Y + 24f), Vector2.Zero,
+        MaterialRect startButtonBounds = ProfilerStartRect(layout);
+        float summaryTextWidth = Math.Max(0f, startButtonBounds.X - summary.X - 48f);
+        string visibleHeadline = MaterialTextUtil.Ellipsize(
+            headline, summaryTextWidth, 0.34f, UiFontWeight.Bold);
+        MaterialUiKit.Text(visibleHeadline, new Vector2(summary.X + 24f, summary.Y + 24f), Vector2.Zero,
             MaterialTextRole.Label, palette.OnSurface, alpha, scaleOverride: 0.34f);
         if (detail is not null) {
-            MaterialUiKit.Text(detail, new Vector2(summary.X + 24f, summary.Y + 62f), Vector2.Zero,
+            string visibleDetail = MaterialTextUtil.Ellipsize(detail, summaryTextWidth, 0.27f);
+            MaterialUiKit.Text(visibleDetail, new Vector2(summary.X + 24f, summary.Y + 62f), Vector2.Zero,
                 MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.27f);
         }
 
@@ -1787,6 +1794,13 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
         if (report is null) return;
 
+        float traceWidth = Math.Max(0f, layout.Rows.Right - mode.Right - 32f);
+        string trace = MaterialTextUtil.Ellipsize(
+            $"原始 trace · {Path.GetFileName(report.TracePath)}", traceWidth, 0.22f);
+        MaterialUiKit.Text(trace, new Vector2(layout.Rows.Right, mode.Y + 11f),
+            new Vector2(1f, 0f), MaterialTextRole.Caption,
+            palette.OnSurfaceVariant * 0.72f, alpha, scaleOverride: 0.22f);
+
         float gap = 16f;
         MaterialRect reportViewport = ProfilerReportViewport(layout);
         float columnWidth = (layout.Rows.Width - gap) / 2f;
@@ -1804,10 +1818,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
         float maximum = ProfilerMaxScroll(layout);
         if (maximum > 0f) RenderProfilerScrollbar(listViewport, maximum, palette, alpha);
-
-        MaterialUiKit.Text($"原始 trace: {Path.GetFileName(report.TracePath)}",
-            new Vector2(layout.Rows.X + 4f, layout.Rows.Bottom - 22f), Vector2.Zero,
-            MaterialTextRole.Caption, palette.OnSurfaceVariant * 0.72f, alpha, scaleOverride: 0.22f);
     }
 
     private static void RenderProfileColumnHeader(
@@ -1819,7 +1829,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     ) {
         MaterialUiKit.Text(title, new Vector2(bounds.X + 4f, bounds.Y + 2f), Vector2.Zero,
             MaterialTextRole.Label, palette.Primary, alpha, scaleOverride: 0.30f);
-        MaterialUiKit.Text($"独占 CPU {totalMilliseconds:0} ms", new Vector2(bounds.Right - 4f, bounds.Y + 4f),
+        MaterialUiKit.Text($"独占 CPU · {totalMilliseconds:0} ms",
+            new Vector2(bounds.Right - 4f, bounds.Y + 4f),
             new Vector2(1f, 0f), MaterialTextRole.Caption, palette.OnSurfaceVariant,
             alpha, scaleOverride: 0.23f);
     }
@@ -1848,20 +1859,20 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                 palette.Primary * (0.82f * alpha));
             string owner = entry.HookTarget is null ? entry.Owner : entry.Owner + "  ·  HOOK";
             MaterialUiKit.Text(MaterialTextUtil.Ellipsize(owner, row.Width - 88f, 0.22f),
-                new Vector2(row.X + 12f, row.Y + 7f), Vector2.Zero,
+                new Vector2(row.X + 12f, row.Y + 9f), Vector2.Zero,
                 MaterialTextRole.Caption, entry.HookTarget is null ? palette.OnSurfaceVariant : Color.Orange,
                 alpha, scaleOverride: 0.22f);
             MaterialUiKit.Text(MaterialTextUtil.Ellipsize(
                     entry.Method, row.Width - 24f, 0.24f, UiFontWeight.Bold),
-                new Vector2(row.X + 12f, row.Y + 31f), Vector2.Zero,
+                new Vector2(row.X + 12f, row.Y + 34f), Vector2.Zero,
                 MaterialTextRole.Label, palette.OnSurface, alpha, scaleOverride: 0.24f);
-            MaterialUiKit.Text($"{entry.Percent:0.0}%", new Vector2(row.Right - 12f, row.Y + 7f),
+            MaterialUiKit.Text($"{entry.Percent:0.0}%", new Vector2(row.Right - 12f, row.Y + 9f),
                 new Vector2(1f, 0f), MaterialTextRole.Caption, palette.Primary,
                 alpha, scaleOverride: 0.22f);
             if (entry.HookTarget is not null) {
                 MaterialUiKit.Text(MaterialTextUtil.Ellipsize(
                         "→ " + entry.HookTarget, row.Width - 24f, 0.18f),
-                    new Vector2(row.X + 12f, row.Bottom - 20f),
+                    new Vector2(row.X + 12f, row.Bottom - 21f),
                     Vector2.Zero, MaterialTextRole.Caption, palette.OnSurfaceVariant,
                     alpha, scaleOverride: 0.18f);
             }
@@ -1918,13 +1929,18 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         MaterialRect mode = ProfilerModeRect(layout);
         float top = mode.Bottom + 12f;
         return new MaterialRect(layout.Rows.X, top, layout.Rows.Width,
-            Math.Max(0f, layout.Rows.Bottom - 30f - top));
+            Math.Max(0f, layout.Rows.Bottom - top));
     }
 
     private static MaterialRect ProfilerListViewport(OverlayLayout layout) {
         MaterialRect report = ProfilerReportViewport(layout);
-        return new MaterialRect(report.X, report.Y + 34f, report.Width,
-            Math.Max(0f, report.Height - 34f));
+        float availableHeight = Math.Max(0f, report.Height - 34f);
+        float rowStride = ProfilerRowHeight + ProfilerRowGap;
+        int visibleRows = Math.Max(1, (int)MathF.Floor(
+            (availableHeight + ProfilerRowGap) / rowStride));
+        float height = Math.Min(availableHeight,
+            visibleRows * ProfilerRowHeight + Math.Max(0, visibleRows - 1) * ProfilerRowGap);
+        return new MaterialRect(report.X, report.Y + 34f, report.Width, height);
     }
 
     private float ProfilerMaxScroll(OverlayLayout layout) {
