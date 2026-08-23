@@ -100,9 +100,11 @@ import libraries, and packages only the required DLLs and license beside the
 mod's native DLL. The FFmpeg executable in the development archive is not
 packaged or invoked.
 
-For automatic BGM reconstruction, `BgmEventMapFile` points to a JSON object
-that resolves FMOD event paths to clean music files. Relative paths are
-resolved against the JSON file's directory, for example:
+Normal recording does not require a BGM mapping file: the captured music bus is
+automatically cut and joined with the successful-run timeline. As an optional
+advanced override, `BgmEventMapFile` can point to a JSON object that replaces
+specific FMOD events with clean music files. Relative paths are resolved
+against the JSON file's directory, for example:
 
 ```json
 {

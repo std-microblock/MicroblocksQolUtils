@@ -274,8 +274,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
         rowViewport.Render(layout.Rows, () => {
             RenderRecorderHero(RecorderHeroRect(layout), palette, alpha);
-            RenderRecordingLibrary(layout, palette, alpha);
             RenderRecorderSettings(layout, palette, alpha);
+            RenderRecordingLibrary(layout, palette, alpha);
         });
 
         float maximum = MaxRowScroll(layout);
@@ -366,7 +366,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             RecordingLibraryEntry file = recordingFiles[index];
             MaterialRect rect = RecorderFileRect(layout, index);
             if (rect.Bottom < layout.Rows.Y || rect.Y > layout.Rows.Bottom) continue;
-            bool selected = recorderSelectedItem == index;
+            bool selected = recorderSelectedItem == CurrentRows.Count + index;
             bool hovered = rect.Contains(mouse);
             Color fill = selected || hovered ? palette.SurfaceHighest : palette.SurfaceHigh * 0.72f;
             MaterialUi.RoundedRect(rect.X, rect.Y + 2f, rect.Width, rect.Height, 20f,
@@ -405,7 +405,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         float headerY = RecorderSettingsHeaderY(layout);
         MaterialUiKit.Text("录制设置", new Vector2(layout.Rows.X + 4f, headerY), Vector2.Zero,
             MaterialTextRole.Section, palette.OnSurface, alpha, scaleOverride: 0.36f);
-        MaterialUiKit.Text("所有录制参数集中在一列，修改后立即生效", new Vector2(layout.Rows.X + 150f, headerY + 5f),
+        MaterialUiKit.Text("常用参数两栏显示，修改后立即生效", new Vector2(layout.Rows.X + 150f, headerY + 5f),
             Vector2.Zero, MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.25f);
         for (int index = 0; index < CurrentRows.Count; index++) {
             MaterialRect rect = RecorderSettingRect(layout, index);
@@ -648,10 +648,18 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             }
         }
 
+        for (int index = 0; index < CurrentRows.Count; index++) {
+            MaterialRect rect = RecorderSettingRect(layout, index);
+            if (!rect.Contains(mouse)) continue;
+            recorderSelectedItem = index;
+            if (MInput.Mouse.PressedLeftButton) ActivateMouse(CurrentRows[index], rect, mouse);
+            return;
+        }
+
         for (int index = 0; index < recordingFiles.Count; index++) {
             MaterialRect rect = RecorderFileRect(layout, index);
             if (!rect.Contains(mouse)) continue;
-            recorderSelectedItem = index;
+            recorderSelectedItem = CurrentRows.Count + index;
             if (!MInput.Mouse.PressedLeftButton) return;
             if (RecorderFileDeleteRect(rect).Contains(mouse)) {
                 pendingRecordingDelete = recordingFiles[index];
@@ -659,14 +667,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             } else {
                 OpenRecording(recordingFiles[index]);
             }
-            return;
-        }
-
-        for (int index = 0; index < CurrentRows.Count; index++) {
-            MaterialRect rect = RecorderSettingRect(layout, index);
-            if (!rect.Contains(mouse)) continue;
-            recorderSelectedItem = recordingFiles.Count + index;
-            if (MInput.Mouse.PressedLeftButton) ActivateMouse(CurrentRows[index], rect, mouse);
             return;
         }
     }
@@ -692,12 +692,13 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     }
 
     private void ActivateRecorderSelection() {
-        if (recorderSelectedItem < recordingFiles.Count) {
-            OpenRecording(recordingFiles[recorderSelectedItem]);
+        SettingRow? row = SelectedRecorderSetting();
+        if (row is not null) {
+            Activate(row);
             return;
         }
-        SettingRow? row = SelectedRecorderSetting();
-        if (row is not null) Activate(row);
+        int fileIndex = recorderSelectedItem - CurrentRows.Count;
+        if (fileIndex >= 0 && fileIndex < recordingFiles.Count) OpenRecording(recordingFiles[fileIndex]);
     }
 
     private void AdjustRecorderSetting(SettingRow row, int direction) {
@@ -712,16 +713,17 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     }
 
     private SettingRow? SelectedRecorderSetting() {
-        int index = recorderSelectedItem - recordingFiles.Count;
+        int index = recorderSelectedItem;
         return index >= 0 && index < CurrentRows.Count ? CurrentRows[index] : null;
     }
 
     private void RequestSelectedRecordingDelete() {
-        if (recorderSelectedItem < 0 || recorderSelectedItem >= recordingFiles.Count) {
+        int fileIndex = recorderSelectedItem - CurrentRows.Count;
+        if (fileIndex < 0 || fileIndex >= recordingFiles.Count) {
             Audio.Play("event:/ui/main/button_invalid");
             return;
         }
-        pendingRecordingDelete = recordingFiles[recorderSelectedItem];
+        pendingRecordingDelete = recordingFiles[fileIndex];
         Audio.Play("event:/ui/main/button_select");
     }
 
@@ -1000,7 +1002,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                 bool current = tabIndex == selectedTab;
                 bool recorder = current && tabs[tabIndex].RecorderPage;
                 bool selected = current && (recorder
-                    ? recorderSelectedItem == recordingFiles.Count + index
+                    ? recorderSelectedItem == index
                     : index == selectedRow);
                 bool hovered = current && layout.Rows.Contains(mouse) && (recorder
                     ? RecorderSettingRect(layout, index).Contains(mouse)
@@ -1159,7 +1161,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                 Toggle("显示录制时长", () => settings.ShowRecordingDuration,
                     value => settings.ShowRecordingDuration = value),
                 EnumRow("自动录制策略", () => settings.RecordingPolicy, value => settings.RecordingPolicy = value),
-                EnumRow("BGM 处理", () => settings.BgmMode, value => settings.BgmMode = value),
+                EnumRow("BGM 拼接", () => settings.BgmMode, value => settings.BgmMode = value),
                 Toggle("录制 UI 音效", () => settings.RecordingIncludeUiSfx,
                     value => settings.RecordingIncludeUiSfx = value),
                 Range("录制帧率", () => settings.RecordingFrameRate, value => settings.RecordingFrameRate = value,
@@ -1175,9 +1177,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                 Text("输出目录", () => settings.RecordingDirectory, value => settings.RecordingDirectory = value,
                     "留空使用默认目录", 240),
                 Text("编码器", () => settings.RecordingEncoder, value => settings.RecordingEncoder = value,
-                    "auto / nvenc / qsv / amf…", 48),
-                Text("BGM 映射文件", () => settings.BgmEventMapFile, value => settings.BgmEventMapFile = value,
-                    "JSON 文件路径", 240)
+                    "auto / nvenc / qsv / amf…", 48)
             ], RecorderPage: true),
             new SettingsTab("界面与系统", "外观、字体与兼容项", [
                 Toggle("亚克力模糊背景", () => settings.MaterialAcrylicBackground,
@@ -1465,11 +1465,12 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         bool firstRefresh = !recordingLibraryInitialized;
         int previousCount = recordingFiles.Count;
         int recorderSettingCount = RecorderRows.Count;
-        int selectedSetting = recorderSelectedItem >= previousCount
-            ? recorderSelectedItem - previousCount
+        int selectedSetting = recorderSelectedItem >= 0 && recorderSelectedItem < recorderSettingCount
+            ? recorderSelectedItem
             : -1;
-        string selectedPath = recorderSelectedItem >= 0 && recorderSelectedItem < previousCount
-            ? recordingFiles[recorderSelectedItem].Path
+        int selectedFile = recorderSelectedItem - recorderSettingCount;
+        string selectedPath = selectedFile >= 0 && selectedFile < previousCount
+            ? recordingFiles[selectedFile].Path
             : "";
         IReadOnlyList<RecordingLibraryEntry> refreshed = RecordingLibrary.Scan();
         recordingFiles.Clear();
@@ -1478,11 +1479,12 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             recorderSelectedItem = 0;
             recordingLibraryInitialized = true;
         } else if (selectedSetting >= 0) {
-            recorderSelectedItem = recordingFiles.Count + Math.Clamp(selectedSetting, 0, Math.Max(0, recorderSettingCount - 1));
+            recorderSelectedItem = Math.Clamp(selectedSetting, 0, Math.Max(0, recorderSettingCount - 1));
         } else if (selectedPath.Length > 0) {
             int matching = recordingFiles.FindIndex(file => string.Equals(file.Path, selectedPath,
                 StringComparison.OrdinalIgnoreCase));
-            recorderSelectedItem = matching >= 0 ? matching : Math.Min(recorderSelectedItem, recordingFiles.Count);
+            recorderSelectedItem = recorderSettingCount
+                + (matching >= 0 ? matching : Math.Min(Math.Max(0, selectedFile), recordingFiles.Count));
         }
         int itemCount = recordingFiles.Count + recorderSettingCount;
         recorderSelectedItem = itemCount == 0 ? 0 : Math.Clamp(recorderSelectedItem, 0, itemCount - 1);
@@ -1496,12 +1498,12 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private void EnsureRecorderItemVisible(OverlayLayout layout) {
         MaterialRect rect;
-        if (recorderSelectedItem < recordingFiles.Count) {
-            rect = RecorderFileRect(layout, recorderSelectedItem);
+        if (recorderSelectedItem < CurrentRows.Count) {
+            rect = RecorderSettingRect(layout, recorderSelectedItem);
         } else {
-            int settingIndex = recorderSelectedItem - recordingFiles.Count;
-            if (settingIndex < 0 || settingIndex >= CurrentRows.Count) return;
-            rect = RecorderSettingRect(layout, settingIndex);
+            int fileIndex = recorderSelectedItem - CurrentRows.Count;
+            if (fileIndex < 0 || fileIndex >= recordingFiles.Count) return;
+            rect = RecorderFileRect(layout, fileIndex);
         }
         float top = rect.Y - layout.Rows.Y + rowScroll.Offset;
         rowScroll.EnsureVisible(top, top + rect.Height, layout.Rows.Height, MaxRowScroll(layout));
@@ -1514,8 +1516,33 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         RecorderHeroHeight
     );
 
-    private float RecorderLibraryHeaderY(OverlayLayout layout) =>
+    private float RecorderSettingsHeaderY(OverlayLayout layout) =>
         layout.Rows.Y + RecorderHeroHeight + 22f - rowScroll.Offset;
+
+    private float RecorderSettingsStartY(OverlayLayout layout) => RecorderSettingsHeaderY(layout) + 44f;
+
+    private MaterialRect RecorderSettingRect(OverlayLayout layout, int index) {
+        const float columnGap = 12f;
+        int column = index % Columns;
+        int band = index / Columns;
+        float width = (layout.Rows.Width - columnGap) / Columns;
+        return new MaterialRect(
+            layout.Rows.X + column * (width + columnGap),
+            RecorderSettingsStartY(layout) + band * (RecorderSettingHeight + RowGap),
+            width,
+            RecorderSettingHeight
+        );
+    }
+
+    private float RecorderSettingsHeight {
+        get {
+            int bands = (CurrentRows.Count + Columns - 1) / Columns;
+            return bands == 0 ? 0f : bands * RecorderSettingHeight + (bands - 1) * RowGap;
+        }
+    }
+
+    private float RecorderLibraryHeaderY(OverlayLayout layout) =>
+        RecorderSettingsStartY(layout) + RecorderSettingsHeight + 26f;
 
     private float RecorderFilesStartY(OverlayLayout layout) => RecorderLibraryHeaderY(layout) + 44f;
 
@@ -1533,26 +1560,13 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         RecorderFileHeight
     );
 
-    private float RecorderSettingsHeaderY(OverlayLayout layout) =>
-        RecorderFilesStartY(layout) + RecorderHistoryHeight + 26f;
-
-    private MaterialRect RecorderSettingRect(OverlayLayout layout, int index) => new(
-        layout.Rows.X,
-        RecorderSettingsHeaderY(layout) + 44f + index * (RecorderSettingHeight + RowGap),
-        layout.Rows.Width,
-        RecorderSettingHeight
-    );
-
     private float RecorderHistoryHeight => recordingFiles.Count == 0
         ? 104f
         : recordingFiles.Count * RecorderFileHeight + Math.Max(0, recordingFiles.Count - 1) * 10f;
 
     private float RecorderContentHeight(OverlayLayout layout) {
-        float settingsStart = RecorderSettingsHeaderY(layout) + rowScroll.Offset + 44f;
-        float settingsHeight = CurrentRows.Count == 0
-            ? 0f
-            : CurrentRows.Count * RecorderSettingHeight + (CurrentRows.Count - 1) * RowGap;
-        return settingsStart - layout.Rows.Y + settingsHeight + 8f;
+        float filesStart = RecorderFilesStartY(layout) + rowScroll.Offset;
+        return filesStart - layout.Rows.Y + RecorderHistoryHeight + 8f;
     }
 
     private static MaterialRect RecorderButtonRect(MaterialRect hero, int index) {
@@ -1606,8 +1620,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         MiniMapNameMode.Everyone => "所有人",
         RecordingPolicy.EveryRoom => "完整流程",
         RecordingPolicy.GoldenRunsOnly => "仅金草莓",
-        BgmRecordingMode.CaptureGameMix => "直接拼接游戏 BGM",
-        BgmRecordingMode.SfxOnlyWithPostMix => "自动拼接（优先映射 BGM）",
+        BgmRecordingMode.CaptureGameMix => "跟随游戏现场",
+        BgmRecordingMode.SfxOnlyWithPostMix => "自动对齐与拼接",
         CollisionBoxDisplayMode.Hidden => "不显示碰撞箱",
         CollisionBoxDisplayMode.Visible => "显示碰撞箱",
         CollisionBoxDisplayMode.Only => "只显示碰撞箱",
