@@ -47,8 +47,13 @@ internal static class MaterialAcrylicRenderer {
     }
 
     private static void RenderCore(On.Monocle.Engine.orig_RenderCore orig, Engine self) {
-        IMaterialAcrylicPage? page = (IMaterialAcrylicPage?)MaterialChapterSelect.ActivePage
-            ?? QolSettingsOverlay.ActivePage;
+        // Scene.Render is the final composition point for Overworld, but Level overrides
+        // Render and never calls the base implementation. Trying to acrylic-composite the
+        // in-level settings overlay therefore suppresses its normal render without ever
+        // reaching RenderScene, leaving only the gameplay visible. Keep that overlay on its
+        // regular translucent rendering path; acrylic remains available for pages rendered
+        // through the Overworld composition path.
+        IMaterialAcrylicPage? page = MaterialChapterSelect.ActivePage;
         QolSettings settings = MicroblocksQolUtilsModule.Settings;
         if (rendering
             || failed
