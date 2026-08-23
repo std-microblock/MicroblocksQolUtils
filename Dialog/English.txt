@@ -7,9 +7,9 @@ modoptions_microblocksqolutils_fontfamily=Interface font
 modoptions_microblocksqolutils_minimapadaptivecolors=Minimap adaptive colors
 
 microblocks_qol_chapter_title=Select Chapter
-microblocks_qol_chapter_subtitle=Material You  ·  Keyboard / Mouse
-microblocks_qol_chapter_subtitle_collab=Material You  ·  Keyboard / Mouse  ·  CollabUtils2
 microblocks_qol_chapter_all_maps=All Maps
+microblocks_qol_chapter_recent=Recently Played
+microblocks_qol_chapter_recent_empty=No recently played chapters yet
 microblocks_qol_chapter_official=OFFICIAL
 microblocks_qol_chapter_level_sets=LEVEL SETS
 microblocks_qol_chapter_empty=No selectable chapters in this level set
@@ -19,4 +19,3 @@ microblocks_qol_chapter_uncleared=In progress
 microblocks_qol_chapter_berries=berries
 microblocks_qol_chapter_deaths=deaths
 microblocks_qol_chapter_no_available=No available chapters
-microblocks_qol_chapter_controls=Enter / Click: open   Esc: back   Tab: level set   Wheel: scroll

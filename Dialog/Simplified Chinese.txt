@@ -7,9 +7,9 @@ modoptions_microblocksqolutils_fontfamily=界面字体
 modoptions_microblocksqolutils_minimapadaptivecolors=小地图颜色自动适配背景
 
 microblocks_qol_chapter_title=选择章节
-microblocks_qol_chapter_subtitle=Material You  ·  键盘 / 鼠标
-microblocks_qol_chapter_subtitle_collab=Material You  ·  键盘 / 鼠标  ·  CollabUtils2
 microblocks_qol_chapter_all_maps=全部地图
+microblocks_qol_chapter_recent=最近游玩
+microblocks_qol_chapter_recent_empty=还没有最近游玩的章节
 microblocks_qol_chapter_official=官方
 microblocks_qol_chapter_level_sets=地图集
 microblocks_qol_chapter_empty=这个地图集中没有可选章节
@@ -19,4 +19,3 @@ microblocks_qol_chapter_uncleared=进行中
 microblocks_qol_chapter_berries=草莓
 microblocks_qol_chapter_deaths=死亡
 microblocks_qol_chapter_no_available=没有可用章节
-microblocks_qol_chapter_controls=Enter / 左键：打开   Esc：返回   Tab：切换地图集   滚轮：滚动

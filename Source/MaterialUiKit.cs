@@ -305,8 +305,8 @@ internal static class MaterialUiKit {
         float width = Math.Max(82f, SystemTtfFont.Measure(text, scale, UiFontWeight.Bold).X + 30f);
         MaterialUi.RoundedRect(rightTop.X - width, rightTop.Y, width, 32f, 16f,
             (selected ? palette.Primary : palette.SurfaceHighest) * alpha);
-        Text(text, new Vector2(rightTop.X - width / 2f, rightTop.Y + 5f),
-            new Vector2(0.5f, 0f), MaterialTextRole.Label,
+        Text(text, new Vector2(rightTop.X - width / 2f, rightTop.Y + 16f),
+            new Vector2(0.5f), MaterialTextRole.Label,
             selected ? palette.OnPrimary : palette.OnSurfaceVariant, alpha, scaleOverride: scale);
     }
 
