@@ -368,21 +368,11 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         foreach (ChapterSection section in sections) {
             section.VisibleStart = entries.Count;
             bool collapsed = !searching && collapsedSections.GetValueOrDefault(section.Id);
-            if (collapsed) {
-                ChapterEntry? lobby = section.Entries.FirstOrDefault(entry => entry.CollabLobby);
-                if (lobby is not null) entries.Add(lobby);
-            } else {
-                entries.AddRange(section.Entries);
-            }
+            if (!collapsed) entries.AddRange(section.Entries);
             section.VisibleCount = entries.Count - section.VisibleStart;
         }
 
         selectedIndex = entries.FindIndex(entry => entry.Sid == previousSid);
-        if (selectedIndex < 0 && previousSid is not null) {
-            string? lobbySid = allEntries.FirstOrDefault(entry => entry.Sid == previousSid)?.LobbySid;
-            if (lobbySid is not null)
-                selectedIndex = entries.FindIndex(entry => entry.Sid == lobbySid);
-        }
         selectedIndex = Math.Max(0, selectedIndex);
         if (entries.Count == 0) selectedIndex = 0;
         if (resetScroll) cardScroll.Reset();
@@ -401,20 +391,6 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
 
     private void MoveSelection(Vector2 direction) {
         if (entries.Count == 0) return;
-        int lobbySection = sections.FindIndex(section =>
-            string.Equals(section.Lobby.Sid, entries[selectedIndex].Sid, StringComparison.Ordinal));
-        if (lobbySection >= 0 && string.IsNullOrWhiteSpace(searchText)) {
-            bool collapsed = collapsedSections.GetValueOrDefault(sections[lobbySection].Id);
-            if (direction.X > 0f && collapsed) {
-                SetSectionCollapsed(lobbySection, collapsed: false,
-                    entries[selectedIndex].Sid, playSound: false);
-            } else if (direction.X < 0f && !collapsed) {
-                SetSectionCollapsed(lobbySection, collapsed: true,
-                    entries[selectedIndex].Sid, playSound: true);
-                return;
-            }
-        }
-
         ChapterLayout layout = ChapterLayout.Create(0f);
         List<CardPlacement> placements = BuildContentLayout(layout, 0f).Cards;
         CardPlacement? current = placements.FirstOrDefault(item => item.EntryIndex == selectedIndex);
@@ -531,7 +507,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
                     palette with { SurfaceHigh = surface * (selected ? 0.98f : 0.85f) }, selected, alpha);
                 RenderCard(entries[index], card, selected, palette, alpha);
             }
-            if (entries.Count == 0) {
+            if (entries.Count == 0 && sections.Count == 0) {
                 string emptyText = levelSets.Count > 0 && levelSets[selectedLevelSet].Id == RecentGroupId
                     ? UiText("microblocks_qol_chapter_recent_empty", "还没有最近游玩的章节")
                     : UiText("microblocks_qol_chapter_empty", "这个地图集中没有可选章节");
@@ -567,9 +543,8 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         SystemTtfFont.DrawVisual(Trim(section.Lobby.Title, 34),
             new Vector2(header.X + 54f, header.Center.Y), new Vector2(0f, 0.5f), 0.39f,
             palette.OnSurface * alpha, weight: UiFontWeight.Bold);
-        string count = string.Format(
-            UiText("microblocks_qol_chapter_group_count", "{0} 张地图"), section.TotalMapCount
-        );
+        string count = section.TotalMapCount + " "
+            + UiText("microblocks_qol_chapter_group_maps", "张地图");
         SystemTtfFont.DrawVisual(count, new Vector2(header.Right - 54f, header.Center.Y),
             new Vector2(1f, 0.5f), 0.29f, palette.OnSurfaceVariant * alpha);
 
@@ -776,7 +751,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
             palette.OnSurfaceVariant * alpha);
         string controls = grouped
             ? UiText("microblocks_qol_chapter_controls_grouped",
-                "打开：Enter / 左键   分组：点击标题或大厅卡 ←→   Esc：返回   Tab：地图集   滚轮：滚动")
+                "打开：Enter / 左键   分组：点击标题展开/收起   Esc：返回   Tab：地图集   滚轮：滚动")
             : UiText("microblocks_qol_chapter_controls",
                 "Enter / 左键：打开   Esc：返回   Tab：切换地图集   滚轮：滚动");
         SystemTtfFont.DrawVisual(controls,
@@ -819,18 +794,17 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         string? previousSid = entries.Count == 0 ? null : entries[selectedIndex].Sid;
         ChapterSection section = sections[sectionIndex];
         SetSectionCollapsed(sectionIndex, !collapsedSections.GetValueOrDefault(section.Id),
-            previousSid, playSound: true);
+            previousSid);
     }
 
     private void SetSectionCollapsed(
         int sectionIndex,
         bool collapsed,
-        string? previousSid,
-        bool playSound
+        string? previousSid
     ) {
         ChapterSection section = sections[sectionIndex];
         collapsedSections[section.Id] = collapsed;
-        if (playSound) Audio.Play(collapsed
+        Audio.Play(collapsed
             ? "event:/ui/world_map/icon/roll_left"
             : "event:/ui/world_map/icon/roll_right");
         RebuildVisibleEntries(previousSid, resetScroll: false);
