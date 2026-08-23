@@ -53,7 +53,6 @@ internal static class MaterialAcrylicRenderer {
         if (rendering
             || failed
             || page is null
-            || !settings.MaterialYouInterface
             || !settings.MaterialAcrylicBackground
             || Engine.Scene is not Scene) {
             orig(self);

@@ -11,8 +11,9 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
     private const float ScreenWidth = 1920f;
     private const float ScreenHeight = 1080f;
     private const int Columns = 4;
-    private const float CardHeight = 172f;
-    private const float CardGap = 14f;
+    private const float CardHeight = 164f;
+    private const float CardHorizontalGap = 18f;
+    private const float CardVerticalGap = 18f;
 
     private static Hook? gotoRoutineHook;
     private static bool hookFailed;
@@ -122,7 +123,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
     }
 
     public override void Render() {
-        if (SuppressNormalRender || !MicroblocksQolUtilsModule.Settings.MaterialYouInterface) return;
+        if (SuppressNormalRender) return;
         RenderMaterialContent(acrylicActive: false);
     }
 
@@ -317,7 +318,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
     private void EnsureSelectionVisible() {
         ChapterLayout layout = ChapterLayout.Create(0f);
         int row = selectedIndex / Columns;
-        float top = row * (CardHeight + CardGap);
+        float top = row * (CardHeight + CardVerticalGap);
         cardScroll.EnsureVisible(top, top + CardHeight, layout.Cards.Height, MaxCardScroll(layout));
     }
 
@@ -394,8 +395,8 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
     ) {
         float x = card.X;
         float y = card.Y;
-        MaterialRect content = card.Inset(18f);
-        float iconSize = 52f;
+        MaterialRect content = card.Inset(20f, 18f);
+        float iconSize = 48f;
         if (!string.IsNullOrWhiteSpace(entry.Area.Icon) && GFX.Gui.Has(entry.Area.Icon)) {
             MTexture icon = GFX.Gui[entry.Area.Icon];
             float scale = Math.Min(1f, iconSize / Math.Max(icon.Width, icon.Height));
@@ -405,7 +406,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
             MaterialUi.RoundedRect(content.X, content.Y, iconSize, iconSize, 17f,
                 palette.Primary * 0.42f * alpha);
         }
-        float textX = content.X + iconSize + 13f;
+        float textX = content.X + iconSize + 14f;
         SystemTtfFont.Draw(Trim(entry.Title, 17), new Vector2(textX, content.Y - 3f),
             Vector2.Zero, 0.40f, palette.OnSurface * alpha, weight: UiFontWeight.Bold);
         SystemTtfFont.Draw(Trim(entry.LevelSetTitle, 22), new Vector2(textX, content.Y + 34f),
@@ -480,7 +481,9 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
 
     private float MaxCardScroll(ChapterLayout layout) {
         int rows = (entries.Count + Columns - 1) / Columns;
-        float contentHeight = rows == 0 ? 0f : rows * CardHeight + (rows - 1) * CardGap;
+        float contentHeight = rows == 0
+            ? 0f
+            : rows * CardHeight + (rows - 1) * CardVerticalGap;
         return Math.Max(0f, contentHeight - layout.Cards.Height);
     }
 
@@ -564,7 +567,6 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
     private static IEnumerator DetourGotoRoutine(GotoRoutineOrig orig, Overworld self, Oui next) {
         if (next is OuiChapterSelect vanilla
             && MicroblocksQolUtilsModule.Settings.ReplaceChapterSelect
-            && MicroblocksQolUtilsModule.Settings.MaterialYouInterface
             && (replaceNextChapterSelect || materialSessionActive && self.Current is OuiChapterPanel)
             && !IsAutoAdvancing(vanilla)
             && self.GetUI<MaterialChapterSelect>() is { } material) {
@@ -625,7 +627,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
             MaterialRect[] body = MaterialLayout.Split(
                 rows[1],
                 MaterialAxis.Horizontal,
-                MaterialSpacing.Lg,
+                28f,
                 MaterialTrack.Fixed(296f),
                 MaterialTrack.Flex()
             );
@@ -647,12 +649,12 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         );
 
         public MaterialRect Card(int index, float scrollOffset) {
-            float width = (Cards.Width - CardGap * (Columns - 1)) / Columns;
+            float width = (Cards.Width - CardHorizontalGap * (Columns - 1)) / Columns;
             int column = index % Columns;
             int row = index / Columns;
             return new MaterialRect(
-                Cards.X + column * (width + CardGap),
-                Cards.Y + row * (CardHeight + CardGap) - scrollOffset,
+                Cards.X + column * (width + CardHorizontalGap),
+                Cards.Y + row * (CardHeight + CardVerticalGap) - scrollOffset,
                 width,
                 CardHeight
             );

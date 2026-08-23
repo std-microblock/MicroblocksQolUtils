@@ -26,14 +26,10 @@ public static class MiniMapRenderer {
                 ? levelBackground
                 : AreaData.Get(level.Session.Area)?.TitleBaseColor ?? new Color(126, 99, 184)
         );
-        Color background = settings.MaterialYouInterface
-            ? palette.SurfaceHigh * (settings.MiniMapBackgroundOpacity / 10f)
-            : Color.Black * (settings.MiniMapBackgroundOpacity / 10f);
+        Color background = palette.SurfaceHigh * (settings.MiniMapBackgroundOpacity / 10f);
         if (settings.MiniMapBackground) {
             if (settings.MiniMapShape == MiniMapShape.Circle) MaterialUi.Circle(center, radius, background);
-            else if (settings.MaterialYouInterface)
-                MaterialUi.RoundedRect(center.X - radius, center.Y - radius, size, size, 24f, background);
-            else Draw.Rect(center.X - radius, center.Y - radius, size, size, background);
+            else MaterialUi.RoundedRect(center.X - radius, center.Y - radius, size, size, 24f, background);
         }
 
         Color mapBackdrop = settings.MiniMapBackground
@@ -54,12 +50,10 @@ public static class MiniMapRenderer {
 
         Color border = settings.MiniMapAdaptiveColors
             ? AdaptiveForeground(mapBackdrop) * 0.8f
-            : settings.MaterialYouInterface ? palette.Outline : Color.White * 0.8f;
+            : palette.Outline;
         if (settings.MiniMapBorder) {
             if (settings.MiniMapShape == MiniMapShape.Circle) MaterialUi.CircleOutline(center, radius, 2f, border);
-            else if (settings.MaterialYouInterface)
-                MaterialUi.RoundedOutline(center.X - radius, center.Y - radius, size, size, 24f, 2f, border);
-            else Draw.HollowRect(center.X - radius, center.Y - radius, size, size, border);
+            else MaterialUi.RoundedOutline(center.X - radius, center.Y - radius, size, size, 24f, 2f, border);
         }
 
         List<string> data = [];
@@ -72,29 +66,23 @@ public static class MiniMapRenderer {
         if (data.Count > 0) {
             string text = string.Join("  ·  ", data);
             Vector2 textPosition = center + new Vector2(0f, radius + 10f);
-            Color textColor = Color.White;
-            float textOutline = 1.25f;
-            if (settings.MaterialYouInterface) {
-                Vector2 measured = SystemTtfFont.Measure(text, 0.42f);
-                MaterialUi.AcrylicSurface(
-                    textPosition.X - measured.X / 2f - 12f,
-                    textPosition.Y - 5f,
-                    measured.X + 24f,
-                    measured.Y + 10f,
-                    14f,
-                    palette.SurfaceHigh * 0.92f,
-                    palette.Outline
-                );
-                textColor = palette.OnSurface;
-                textOutline = 0f;
-            }
+            Vector2 measured = SystemTtfFont.Measure(text, 0.42f);
+            MaterialUi.AcrylicSurface(
+                textPosition.X - measured.X / 2f - 12f,
+                textPosition.Y - 5f,
+                measured.X + 24f,
+                measured.Y + 10f,
+                14f,
+                palette.SurfaceHigh * 0.92f,
+                palette.Outline
+            );
             SystemTtfFont.Draw(
                 text,
                 textPosition,
                 new Vector2(0.5f, 0f),
                 0.42f,
-                textColor,
-                textOutline
+                palette.OnSurface,
+                0f
             );
         }
     }

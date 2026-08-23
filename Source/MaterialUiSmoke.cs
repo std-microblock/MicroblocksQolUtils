@@ -29,7 +29,6 @@ internal static class MaterialUiSmoke {
         }
         if (!started && overworld.Current is not null) {
             QolSettings settings = MicroblocksQolUtilsModule.Settings;
-            settings.MaterialYouInterface = true;
             settings.MaterialAcrylicBackground = true;
             settings.ReplaceChapterSelect = true;
             overworld.Goto<MaterialChapterSelect>();

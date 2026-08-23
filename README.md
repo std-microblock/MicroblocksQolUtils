@@ -28,6 +28,7 @@ Implemented:
 - Background Windows balloon notifications when a watched player changes rooms.
 - Optional suppression of MiaoNet's off-screen name labels.
 - Near-instant room transitions (camera/player/light interpolation removed).
+- Optional instant respawns that skip the death animation and death screen wipe.
 - Opt-in frame-spike sampling grouped by owning assembly for entity Update and
   Render, with an on-screen top offender and CSV logs under LocalAppData.
 - A Rust `cdylib` capture backend built directly on `scap`/WGC. Captured BGRA
@@ -40,6 +41,8 @@ Implemented:
 - One WGC/encoder session remains alive for the whole room. Deaths,
   SpeedrunTool loads, and respawn changes only move logical start/end markers;
   they never restart capture or grow an in-memory recording buffer.
+- A top-right recording badge can independently show a blinking red capture
+  dot and the elapsed recording time.
 - Native background finalization decodes only the retained ranges from the
   continuous room file and re-encodes them into a gapless MP4. This permits
   exact non-keyframe cuts while failed attempts and load freezes are omitted.

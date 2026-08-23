@@ -29,9 +29,6 @@ public sealed class QolSettings : EverestModuleSettings {
     public bool Enabled { get; set; } = true;
 
     [DefaultValue(true)]
-    public bool MaterialYouInterface { get; set; } = true;
-
-    [DefaultValue(true)]
     public bool MaterialAcrylicBackground { get; set; } = true;
 
     [SettingRange(1, 12)]
@@ -47,8 +44,26 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue("Microsoft YaHei UI")]
     public string FontFamily { get; set; } = "Microsoft YaHei UI";
 
+    [SettingIgnore]
     [DefaultValue("")]
     public string FontFile { get; set; } = "";
+
+    public void CreateFontFamilyEntry(TextMenu menu, bool inGame) {
+        string current = string.IsNullOrWhiteSpace(FontFamily) ? "Microsoft YaHei UI" : FontFamily.Trim();
+        TextMenu.Option<string> fonts = new(Dialog.Clean("modoptions_microblocksqolutils_fontfamily"));
+
+        if (!UiFontCatalog.InstalledFamilies.Contains(current, StringComparer.OrdinalIgnoreCase))
+            fonts.Add(current, current, selected: true);
+
+        foreach (string family in UiFontCatalog.InstalledFamilies)
+            fonts.Add(family, family, string.Equals(family, current, StringComparison.OrdinalIgnoreCase));
+
+        fonts.Change(family => {
+            FontFamily = family;
+            FontFile = "";
+        });
+        menu.Add(fonts);
+    }
 
     [DefaultValue(true)]
     public bool MiniMapEnabled { get; set; } = true;
@@ -115,6 +130,9 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue(false)]
     public bool RemoveRoomTransitions { get; set; }
 
+    [DefaultValue(false)]
+    public bool RemoveDeathAnimation { get; set; }
+
     [DefaultValue(true)]
     public bool ShowFps { get; set; } = true;
 
@@ -133,6 +151,12 @@ public sealed class QolSettings : EverestModuleSettings {
 
     [DefaultValue(false)]
     public bool AutoRecorderEnabled { get; set; }
+
+    [DefaultValue(true)]
+    public bool ShowRecordingIndicator { get; set; } = true;
+
+    [DefaultValue(true)]
+    public bool ShowRecordingDuration { get; set; } = true;
 
     [DefaultValue(RecordingPolicy.EveryRoom)]
     public RecordingPolicy RecordingPolicy { get; set; } = RecordingPolicy.EveryRoom;
