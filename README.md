@@ -60,8 +60,8 @@ Implemented:
   dot and the elapsed recording time.
 - Native background finalization decodes only the retained ranges from the
   continuous run file and re-encodes them into one gapless MP4 at area
-  completion. The recording center displays native encode progress while the
-  final MP4 is being generated. This permits
+  completion. The recording library displays progress directly on the output
+  file row and disables playback/deletion until generation finishes. This permits
   exact non-keyframe cuts while failed attempts and load freezes are omitted.
 - Completed recordings are pruned oldest-first at startup and after finalization;
   the recording settings can change the retention count, disable the limit,

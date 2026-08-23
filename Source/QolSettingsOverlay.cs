@@ -88,6 +88,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         bindingConfig = null;
         ReleaseFocusedInput();
         rowViewport.Dispose();
+        motion.Dispose();
         base.Removed(scene);
     }
 
@@ -220,8 +221,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
         for (int index = 0; index < tabs.Count; index++) {
             string key = $"settings.tab.{index}";
-            MaterialRect tab = motion.Animate(key, layout.Tab(index, tabs.Count),
-                hoverScale: 0.008f, pressedScale: 0.014f, hoverLift: 1f);
+            MaterialRect tab = layout.Tab(index, tabs.Count);
             bool selected = index == selectedTab;
             SettingsTab settingsTab = tabs[index];
             motion.RenderStateLayer(key, tab, 22f,
@@ -308,24 +308,12 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         MaterialUiKit.Text(duration, new Vector2(hero.X + 54f, hero.Y + 65f), Vector2.Zero,
             MaterialTextRole.Display, active ? palette.Primary : palette.OnSurfaceVariant,
             alpha, scaleOverride: 0.52f);
-        double finalizationProgress = AutoRecorder.FinalizationProgress;
-        string? detail = AutoRecorder.IsFinalizing
-            ? $"正在生成{AutoRecorder.FinalizationDescription} · {finalizationProgress:P0}"
-            : AutoRecorder.IsRecording
-                ? $"当前片段：{ShortPath(AutoRecorder.CurrentPath)}"
-                : null;
+        string? detail = AutoRecorder.IsRecording
+            ? $"当前片段：{ShortPath(AutoRecorder.CurrentPath)}"
+            : null;
         if (detail is not null) {
             MaterialUiKit.Text(Trim(detail, 48), new Vector2(hero.X + 190f, hero.Y + 75f), Vector2.Zero,
                 MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.26f);
-        }
-        if (AutoRecorder.IsFinalizing) {
-            MaterialRect firstButton = RecorderButtonRect(hero, 0);
-            float progressWidth = Math.Max(120f, firstButton.X - hero.X - 214f);
-            MaterialUi.RoundedRect(hero.X + 190f, hero.Y + 112f, progressWidth, 7f, 3.5f,
-                palette.Outline * (0.28f * alpha));
-            MaterialUi.RoundedRect(hero.X + 190f, hero.Y + 112f,
-                progressWidth * (float)Math.Clamp(finalizationProgress, 0d, 1d), 7f, 3.5f,
-                palette.Primary * alpha);
         }
 
         RenderRecorderButton(RecorderButtonRect(hero, 0), "打开文件夹", true, palette, alpha,
@@ -339,7 +327,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private void RenderRecorderButton(MaterialRect rect, string text, bool enabled,
         MaterialPalette palette, float alpha, string key, bool primary = false, bool danger = false) {
-        rect = motion.Animate(key, rect, hoverScale: 0.018f, pressedScale: 0.032f, hoverLift: 2f);
         float emphasis = motion.Emphasis(key);
         Color dangerColor = new(205, 78, 92);
         Color fill = danger
@@ -404,10 +391,14 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
         for (int index = 0; index < recordingFiles.Count; index++) {
             RecordingLibraryEntry file = recordingFiles[index];
+            bool finalizing = AutoRecorder.TryGetFinalizationProgress(
+                file.Path,
+                out double finalizationProgress,
+                out string finalizationDescription
+            );
             string key = $"settings.recorder.file.{file.Path}";
             MaterialRect rect = RecorderFileRect(layout, index);
             if (rect.Bottom < layout.Rows.Y || rect.Y > layout.Rows.Bottom) continue;
-            rect = motion.Animate(key, rect, hoverScale: 0.006f, pressedScale: 0.012f, hoverLift: 1.5f);
             bool selected = recorderSelectedItem == CurrentRows.Count + index;
             float emphasis = Math.Max(selected ? 1f : 0f, motion.Emphasis(key));
             Color fill = Color.Lerp(palette.SurfaceHigh * 0.72f, palette.SurfaceHighest, emphasis);
@@ -420,17 +411,30 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                     1f + emphasis, palette.Primary * (alpha * MathHelper.Lerp(0.28f, 0.78f, emphasis)));
             }
 
-            MaterialUiKit.Text(Trim(file.FileName, 54), new Vector2(rect.X + 20f, rect.Y + 14f),
+            MaterialUiKit.Text(Trim(file.FileName, finalizing ? 40 : 54), new Vector2(rect.X + 20f, rect.Y + 14f),
                 Vector2.Zero, MaterialTextRole.Label, palette.OnSurface, alpha, scaleOverride: 0.30f);
             string metadata = $"{file.ModifiedAt:yyyy-MM-dd HH:mm}  ·  {FormatBytes(file.SizeBytes)}  ·  {file.RelativeDirectory}";
             MaterialUiKit.Text(Trim(metadata, 72), new Vector2(rect.X + 20f, rect.Y + 45f),
                 Vector2.Zero, MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha,
                 scaleOverride: 0.24f);
 
-            RenderFileAction(RecorderFileOpenRect(rect), "播放", false, palette, alpha,
-                key + ".open");
-            RenderFileAction(RecorderFileDeleteRect(rect), "删除", true, palette, alpha,
-                key + ".delete");
+            if (finalizing) {
+                MaterialUiKit.Text($"正在生成{finalizationDescription}  {finalizationProgress:P0}",
+                    new Vector2(rect.Right - 20f, rect.Y + 15f), new Vector2(1f, 0f),
+                    MaterialTextRole.Label, palette.Primary, alpha, scaleOverride: 0.27f);
+                const float progressMargin = 20f;
+                float progressWidth = rect.Width - progressMargin * 2f;
+                MaterialUi.RoundedRect(rect.X + progressMargin, rect.Bottom - 8f,
+                    progressWidth, 4f, 2f, palette.Outline * (0.28f * alpha));
+                MaterialUi.RoundedRect(rect.X + progressMargin, rect.Bottom - 8f,
+                    progressWidth * (float)Math.Clamp(finalizationProgress, 0d, 1d),
+                    4f, 2f, palette.Primary * alpha);
+            } else {
+                RenderFileAction(RecorderFileOpenRect(rect), "播放", false, palette, alpha,
+                    key + ".open");
+                RenderFileAction(RecorderFileDeleteRect(rect), "删除", true, palette, alpha,
+                    key + ".delete");
+            }
         }
     }
 
@@ -442,7 +446,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         float alpha,
         string key
     ) {
-        rect = motion.Animate(key, rect, hoverScale: 0.012f, pressedScale: 0.022f, hoverLift: 1.5f);
         float emphasis = motion.Emphasis(key);
         Color fill = selected ? palette.Primary : Color.Lerp(palette.SurfaceHigh, palette.SurfaceHighest, emphasis);
         MaterialUi.RoundedRect(rect.X, rect.Y, rect.Width, rect.Height, 18f,
@@ -458,7 +461,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private void RenderFileAction(MaterialRect rect, string text, bool danger,
         MaterialPalette palette, float alpha, string key) {
-        rect = motion.Animate(key, rect, hoverScale: 0.025f, pressedScale: 0.040f, hoverLift: 1.5f);
         float emphasis = motion.Emphasis(key);
         Color dangerColor = new(205, 78, 92);
         Color fill = danger ? dangerColor : palette.Primary;
@@ -496,7 +498,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private void RenderRow(SettingRow row, MaterialRect rect, MaterialPalette palette, float alpha, string key) {
         bool enabled = row.Enabled();
-        rect = motion.Animate(key, rect, hoverScale: 0.006f, pressedScale: 0.012f, hoverLift: 1.2f);
         float emphasis = Math.Max(row.Pulse * 0.42f,
             Math.Max(motion.Emphasis(key), Math.Max(row.FocusAnimation, row.HoverAnimation * 0.72f)));
         Color fill = Color.Lerp(palette.SurfaceHigh * 0.72f, palette.SurfaceHighest, emphasis);
@@ -617,8 +618,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         for (int visibleIndex = 0; visibleIndex < visibleCount; visibleIndex++) {
             int optionIndex = dropdownFirstVisible + visibleIndex;
             string key = $"settings.dropdown.{optionIndex}";
-            MaterialRect item = motion.Animate(key, DropdownItemRect(menu, visibleIndex),
-                hoverScale: 0.006f, pressedScale: 0.012f, hoverLift: 0.5f);
+            MaterialRect item = DropdownItemRect(menu, visibleIndex);
             bool highlighted = optionIndex == dropdownHighlight;
             bool current = optionIndex == selected;
             if (highlighted) {
@@ -793,6 +793,10 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             if (!rect.Contains(mouse)) continue;
             recorderSelectedItem = CurrentRows.Count + index;
             if (!MInput.Mouse.PressedLeftButton) return;
+            if (IsRecordingFinalizing(recordingFiles[index])) {
+                Audio.Play("event:/ui/main/button_invalid");
+                return;
+            }
             if (RecorderFileDeleteRect(rect).Contains(mouse)) {
                 pendingRecordingDelete = recordingFiles[index];
                 Audio.Play("event:/ui/main/button_select");
@@ -830,7 +834,12 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             return;
         }
         int fileIndex = recorderSelectedItem - CurrentRows.Count;
-        if (fileIndex >= 0 && fileIndex < recordingFiles.Count) OpenRecording(recordingFiles[fileIndex]);
+        if (fileIndex < 0 || fileIndex >= recordingFiles.Count) return;
+        if (IsRecordingFinalizing(recordingFiles[fileIndex])) {
+            Audio.Play("event:/ui/main/button_invalid");
+            return;
+        }
+        OpenRecording(recordingFiles[fileIndex]);
     }
 
     private void AdjustRecorderSetting(SettingRow row, int direction) {
@@ -852,6 +861,10 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private void RequestSelectedRecordingDelete() {
         int fileIndex = recorderSelectedItem - CurrentRows.Count;
         if (fileIndex < 0 || fileIndex >= recordingFiles.Count) {
+            Audio.Play("event:/ui/main/button_invalid");
+            return;
+        }
+        if (IsRecordingFinalizing(recordingFiles[fileIndex])) {
             Audio.Play("event:/ui/main/button_invalid");
             return;
         }
@@ -1317,13 +1330,14 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             }
             for (int index = 0; index < recordingFiles.Count; index++) {
                 RecordingLibraryEntry file = recordingFiles[index];
+                bool enabled = !IsRecordingFinalizing(file);
                 MaterialRect rect = RecorderFileRect(layout, index);
                 if (rect.Bottom < layout.Rows.Y || rect.Y > layout.Rows.Bottom) continue;
                 string key = $"settings.recorder.file.{file.Path}";
-                targets.Add(new MaterialInteractionTarget(key, rect,
+                targets.Add(new MaterialInteractionTarget(key, rect, Enabled: enabled,
                     Focused: recorderSelectedItem == CurrentRows.Count + index));
-                targets.Add(new MaterialInteractionTarget(key + ".open", RecorderFileOpenRect(rect)));
-                targets.Add(new MaterialInteractionTarget(key + ".delete", RecorderFileDeleteRect(rect)));
+                targets.Add(new MaterialInteractionTarget(key + ".open", RecorderFileOpenRect(rect), Enabled: enabled));
+                targets.Add(new MaterialInteractionTarget(key + ".delete", RecorderFileDeleteRect(rect), Enabled: enabled));
             }
         } else if (IsProfilerTab) {
             targets.Add(new MaterialInteractionTarget("settings.profiler.start", ProfilerStartRect(layout),
@@ -1750,8 +1764,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                 MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.27f);
         }
 
-        MaterialRect button = motion.Animate("settings.profiler.start", ProfilerStartRect(layout),
-            hoverScale: 0.018f, pressedScale: 0.030f, hoverLift: 2f);
+        MaterialRect button = ProfilerStartRect(layout);
         bool busy = ManagedCpuSampler.IsBusy;
         float buttonEmphasis = motion.Emphasis("settings.profiler.start");
         MaterialUi.RoundedRect(button.X, button.Y, button.Width, button.Height, 18f,
@@ -1774,10 +1787,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         MaterialRect mode = ProfilerModeRect(layout);
         MaterialUi.RoundedRect(mode.X, mode.Y, mode.Width, mode.Height, 16f,
             palette.SurfaceHigh * (0.72f * alpha));
-        MaterialRect simpleRect = motion.Animate("settings.profiler.simple", ProfilerSimpleModeRect(layout),
-            hoverScale: 0.010f, pressedScale: 0.018f, hoverLift: 1f);
-        MaterialRect professionalRect = motion.Animate("settings.profiler.professional",
-            ProfilerProfessionalModeRect(layout), hoverScale: 0.010f, pressedScale: 0.018f, hoverLift: 1f);
+        MaterialRect simpleRect = ProfilerSimpleModeRect(layout);
+        MaterialRect professionalRect = ProfilerProfessionalModeRect(layout);
         MaterialRect selectedMode = simpleMode ? simpleRect : professionalRect;
         MaterialUi.RoundedRect(selectedMode.X, selectedMode.Y, selectedMode.Width, selectedMode.Height, 14f,
             palette.Primary * (0.88f * alpha));
@@ -1968,6 +1979,9 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private bool IsRecorderTab => tabs[selectedTab].RecorderPage;
 
     private static bool RecorderActive => AutoRecorder.ManualMode || AutoRecorder.IsRecording;
+
+    private static bool IsRecordingFinalizing(RecordingLibraryEntry file) =>
+        AutoRecorder.TryGetFinalizationProgress(file.Path, out _, out _);
 
     private void RefreshRecordingFiles() {
         bool firstRefresh = !recordingLibraryInitialized;

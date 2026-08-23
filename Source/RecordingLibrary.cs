@@ -58,6 +58,10 @@ internal static class RecordingLibrary {
 
     public static bool OpenRecording(string path, out string error) {
         try {
+            if (AutoRecorder.TryGetFinalizationProgress(path, out _, out _)) {
+                error = "录像仍在生成中";
+                return false;
+            }
             if (!IsSafeRecording(path) || !File.Exists(path)) {
                 error = "录像文件不存在";
                 return false;
@@ -74,6 +78,10 @@ internal static class RecordingLibrary {
 
     public static bool DeleteRecording(string path, out string error) {
         try {
+            if (AutoRecorder.TryGetFinalizationProgress(path, out _, out _)) {
+                error = "录像仍在生成中";
+                return false;
+            }
             if (!IsSafeRecording(path)) {
                 error = "录像路径不在当前输出目录中";
                 return false;
