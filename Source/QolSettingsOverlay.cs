@@ -714,6 +714,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         return [
             new SettingsTab("HUD", "帧率与状态信息", [
                 Toggle("启用 QOL 工具", () => settings.Enabled, value => settings.Enabled = value),
+                Toggle("HUD 信息卡阴影、背景与边框", () => settings.HudMaterialSurfaces,
+                    value => settings.HudMaterialSurfaces = value),
                 Toggle("显示帧率", () => settings.ShowFps, value => settings.ShowFps = value),
                 Toggle("显示 CPU 帧耗时", () => settings.ShowFrameTime, value => settings.ShowFrameTime = value),
                 Toggle("物理与渲染帧率", () => settings.ShowPhysicalAndRenderFps,

@@ -31,6 +31,9 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue(true)]
     public bool MaterialAcrylicBackground { get; set; } = true;
 
+    [DefaultValue(true)]
+    public bool HudMaterialSurfaces { get; set; } = true;
+
     [SettingRange(1, 12)]
     [DefaultValue(7)]
     public int MaterialAcrylicBlurStrength { get; set; } = 7;
