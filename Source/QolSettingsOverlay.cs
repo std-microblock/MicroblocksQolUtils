@@ -1782,18 +1782,20 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             MaterialUi.RoundedRect(row.X, row.Bottom - 4f, row.Width * bar, 4f, 2f,
                 palette.Primary * (0.82f * alpha));
             string owner = entry.HookTarget is null ? entry.Owner : entry.Owner + "  ·  HOOK";
-            MaterialUiKit.Text(TrimToWidth(owner, row.Width - 88f, 0.22f),
+            MaterialUiKit.Text(MaterialTextUtil.Ellipsize(owner, row.Width - 88f, 0.22f),
                 new Vector2(row.X + 12f, row.Y + 7f), Vector2.Zero,
                 MaterialTextRole.Caption, entry.HookTarget is null ? palette.OnSurfaceVariant : Color.Orange,
                 alpha, scaleOverride: 0.22f);
-            MaterialUiKit.Text(TrimToWidth(entry.Method, row.Width - 24f, 0.24f, UiFontWeight.Bold),
+            MaterialUiKit.Text(MaterialTextUtil.Ellipsize(
+                    entry.Method, row.Width - 24f, 0.24f, UiFontWeight.Bold),
                 new Vector2(row.X + 12f, row.Y + 31f), Vector2.Zero,
                 MaterialTextRole.Label, palette.OnSurface, alpha, scaleOverride: 0.24f);
             MaterialUiKit.Text($"{entry.Percent:0.0}%", new Vector2(row.Right - 12f, row.Y + 7f),
                 new Vector2(1f, 0f), MaterialTextRole.Caption, palette.Primary,
                 alpha, scaleOverride: 0.22f);
             if (entry.HookTarget is not null) {
-                MaterialUiKit.Text(TrimToWidth("→ " + entry.HookTarget, row.Width - 24f, 0.18f),
+                MaterialUiKit.Text(MaterialTextUtil.Ellipsize(
+                        "→ " + entry.HookTarget, row.Width - 24f, 0.18f),
                     new Vector2(row.X + 12f, row.Bottom - 20f),
                     Vector2.Zero, MaterialTextRole.Caption, palette.OnSurfaceVariant,
                     alpha, scaleOverride: 0.18f);
@@ -2132,26 +2134,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private static string TrimFromLeft(string value, int maxCharacters) => value.Length <= maxCharacters
         ? value
         : "…" + value[^Math.Max(1, maxCharacters - 1)..];
-
-    private static string TrimToWidth(
-        string value,
-        float maxWidth,
-        float scale,
-        UiFontWeight weight = UiFontWeight.Regular
-    ) {
-        if (string.IsNullOrEmpty(value) || SystemTtfFont.MeasureVisible(value, scale, weight).X <= maxWidth)
-            return value;
-        const string ellipsis = "…";
-        int low = 0;
-        int high = value.Length;
-        while (low < high) {
-            int middle = (low + high + 1) / 2;
-            string candidate = value[..middle].TrimEnd() + ellipsis;
-            if (SystemTtfFont.MeasureVisible(candidate, scale, weight).X <= maxWidth) low = middle;
-            else high = middle - 1;
-        }
-        return value[..Math.Max(0, low)].TrimEnd() + ellipsis;
-    }
 
     private enum SettingKind {
         Toggle,

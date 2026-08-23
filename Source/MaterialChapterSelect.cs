@@ -473,7 +473,8 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
                 bool selected = index == selectedLevelSet;
                 MaterialUiKit.NavigationPill(item, palette, selected, alpha);
                 SystemTtfFont.DrawVisual(
-                    Trim(levelSets[index].Title, 20),
+                    MaterialTextUtil.Ellipsize(levelSets[index].Title, item.Width - 40f, 0.37f,
+                        selected ? UiFontWeight.Bold : UiFontWeight.Regular),
                     new Vector2(item.X + 20f, item.Center.Y),
                     new Vector2(0f, 0.5f),
                     0.37f,
@@ -540,11 +541,14 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
                 iconSize, iconSize, 12f, palette.Primary * 0.42f * alpha);
         }
 
-        SystemTtfFont.DrawVisual(Trim(section.Lobby.Title, 34),
-            new Vector2(header.X + 54f, header.Center.Y), new Vector2(0f, 0.5f), 0.39f,
-            palette.OnSurface * alpha, weight: UiFontWeight.Bold);
         string count = section.TotalMapCount + " "
             + UiText("microblocks_qol_chapter_group_maps", "张地图");
+        float countWidth = SystemTtfFont.MeasureVisible(count, 0.29f).X;
+        float titleWidth = Math.Max(0f, header.Width - countWidth - 128f);
+        SystemTtfFont.DrawVisual(MaterialTextUtil.Ellipsize(
+                section.Lobby.Title, titleWidth, 0.39f, UiFontWeight.Bold),
+            new Vector2(header.X + 54f, header.Center.Y), new Vector2(0f, 0.5f), 0.39f,
+            palette.OnSurface * alpha, weight: UiFontWeight.Bold);
         SystemTtfFont.DrawVisual(count, new Vector2(header.Right - 54f, header.Center.Y),
             new Vector2(1f, 0.5f), 0.29f, palette.OnSurfaceVariant * alpha);
 
@@ -581,14 +585,18 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
                 palette.Primary * 0.42f * alpha);
         }
         float textX = content.X + iconSize + 14f;
-        SystemTtfFont.DrawVisual(Trim(entry.Title, 17), new Vector2(textX, content.Y),
+        float primaryTextWidth = content.Right - textX;
+        SystemTtfFont.DrawVisual(MaterialTextUtil.Ellipsize(
+                entry.Title, primaryTextWidth, 0.40f, UiFontWeight.Bold), new Vector2(textX, content.Y),
             Vector2.Zero, 0.40f, palette.OnSurface * alpha, weight: UiFontWeight.Bold);
         string subtitle = entry.Author.Length > 0 ? entry.Author : entry.LevelSetTitle;
-        SystemTtfFont.DrawVisual(Trim(subtitle, 22), new Vector2(textX, content.Y + 34f),
+        SystemTtfFont.DrawVisual(MaterialTextUtil.Ellipsize(subtitle, primaryTextWidth, 0.27f),
+            new Vector2(textX, content.Y + 34f),
             Vector2.Zero, 0.27f, palette.OnSurfaceVariant * alpha);
         if (entry.Tags.Count > 0) {
             string tagSummary = string.Join(" · ", entry.Tags.Select(tag => tag.Text));
-            SystemTtfFont.DrawVisual(Trim(tagSummary, 28), new Vector2(content.X, content.Y + 68f),
+            SystemTtfFont.DrawVisual(MaterialTextUtil.Ellipsize(tagSummary, content.Width, 0.24f,
+                    UiFontWeight.Bold), new Vector2(content.X, content.Y + 68f),
                 Vector2.Zero, 0.24f, palette.Primary * alpha, weight: UiFontWeight.Bold);
         }
 
@@ -631,15 +639,16 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         }
 
         const float identityWidth = 360f;
-        SystemTtfFont.DrawVisual(TrimToWidth(selected.Title, identityWidth, 0.38f, UiFontWeight.Bold),
+        SystemTtfFont.DrawVisual(MaterialTextUtil.Ellipsize(
+                selected.Title, identityWidth, 0.38f, UiFontWeight.Bold),
             new Vector2(content.X, content.Y), Vector2.Zero, 0.38f, palette.OnSurface * alpha,
             weight: UiFontWeight.Bold);
-        SystemTtfFont.DrawVisual(TrimToWidth(selected.LevelSetTitle, identityWidth, 0.27f),
+        SystemTtfFont.DrawVisual(MaterialTextUtil.Ellipsize(selected.LevelSetTitle, identityWidth, 0.27f),
             new Vector2(content.X, content.Y + 34f), Vector2.Zero, 0.27f,
             palette.OnSurfaceVariant * alpha);
         if (selected.Author.Length > 0) {
             string author = string.Format(UiText("microblocks_qol_chapter_author", "作者：{0}"), selected.Author);
-            SystemTtfFont.DrawVisual(TrimToWidth(author, identityWidth, 0.27f),
+            SystemTtfFont.DrawVisual(MaterialTextUtil.Ellipsize(author, identityWidth, 0.27f),
                 new Vector2(content.X, content.Y + 64f), Vector2.Zero, 0.27f,
                 palette.Primary * alpha, weight: UiFontWeight.Bold);
         }
@@ -679,7 +688,8 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         float y = bounds.Y;
         float lastBottom = y;
         foreach (ChapterMetadataTag tag in tags) {
-            string text = TrimToWidth(tag.Text, Math.Min(280f, bounds.Width), scale, UiFontWeight.Bold);
+            string text = MaterialTextUtil.Ellipsize(
+                tag.Text, Math.Min(280f, bounds.Width), scale, UiFontWeight.Bold);
             float width = Math.Min(bounds.Width,
                 SystemTtfFont.MeasureVisible(text, scale, UiFontWeight.Bold).X + 24f);
             if (x > bounds.X && x + width > bounds.Right) {
@@ -746,14 +756,17 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         string detail = selected is null
             ? UiText("microblocks_qol_chapter_no_available", "没有可用章节")
             : selected.Sid;
-        SystemTtfFont.DrawVisual(Trim(detail, 72), new Vector2(layout.Footer.X, layout.Footer.Center.Y),
-            new Vector2(0f, 0.5f), 0.31f,
-            palette.OnSurfaceVariant * alpha);
         string controls = grouped
             ? UiText("microblocks_qol_chapter_controls_grouped",
                 "打开：Enter / 左键   分组：点击标题展开/收起   Esc：返回   Tab：地图集   滚轮：滚动")
             : UiText("microblocks_qol_chapter_controls",
                 "Enter / 左键：打开   Esc：返回   Tab：切换地图集   滚轮：滚动");
+        float controlsWidth = SystemTtfFont.MeasureVisible(controls, 0.31f).X;
+        string shownDetail = MaterialTextUtil.Ellipsize(
+            detail, Math.Max(0f, layout.Footer.Width - controlsWidth - 40f), 0.31f);
+        SystemTtfFont.DrawVisual(shownDetail, new Vector2(layout.Footer.X, layout.Footer.Center.Y),
+            new Vector2(0f, 0.5f), 0.31f,
+            palette.OnSurfaceVariant * alpha);
         SystemTtfFont.DrawVisual(controls,
             new Vector2(layout.Footer.Right, layout.Footer.Center.Y), new Vector2(1f, 0.5f), 0.31f,
             palette.OnSurfaceVariant * alpha);
@@ -871,9 +884,11 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         string text = shown.Length == 0 ? "搜索地图、地图集或 SID…" : shown;
         Color color = shown.Length == 0 ? palette.OnSurfaceVariant * 0.68f : palette.OnSurface;
         Vector2 textPosition = new(layout.Search.X + 24f, layout.Search.Center.Y);
-        SystemTtfFont.DrawVisual(Trim(text, 46), textPosition, new Vector2(0f, 0.5f), 0.36f, color * alpha);
+        string visibleText = MaterialTextUtil.Ellipsize(text, layout.Search.Width - 48f, 0.36f);
+        SystemTtfFont.DrawVisual(visibleText, textPosition, new Vector2(0f, 0.5f), 0.36f, color * alpha);
         if (searchFocused && Scene.BetweenInterval(0.5f)) {
-            float caretX = textPosition.X + SystemTtfFont.MeasureVisible(Trim(shown, 46), 0.36f).X + 2f;
+            string visibleInput = MaterialTextUtil.Ellipsize(shown, layout.Search.Width - 48f, 0.36f);
+            float caretX = textPosition.X + SystemTtfFont.MeasureVisible(visibleInput, 0.36f).X + 2f;
             MaterialUi.Line(new Vector2(caretX, layout.Search.Y + 11f),
                 new Vector2(caretX, layout.Search.Bottom - 11f), 2f, palette.Primary * alpha);
         }
@@ -1031,32 +1046,14 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
             if (truncated) break;
         }
         if (truncated && lines.Count > 0)
-            lines[^1] = TrimToWidth(lines[^1] + "…", maxWidth, scale);
+            lines[^1] = MaterialTextUtil.Ellipsize(lines[^1] + "…", maxWidth, scale);
         return lines;
-    }
-
-    private static string TrimToWidth(
-        string value,
-        float maxWidth,
-        float scale,
-        UiFontWeight weight = UiFontWeight.Regular
-    ) {
-        if (SystemTtfFont.MeasureVisible(value, scale, weight).X <= maxWidth) return value;
-        const string ellipsis = "…";
-        int length = value.Length;
-        while (length > 1
-               && SystemTtfFont.MeasureVisible(value[..length] + ellipsis, scale, weight).X > maxWidth) length--;
-        return value[..Math.Max(1, length)].TrimEnd() + ellipsis;
     }
 
     private static string UiText(string key, string fallback) {
         string value = Dialog.Clean(key);
         return string.IsNullOrWhiteSpace(value) || value == key ? fallback : value;
     }
-
-    private static string Trim(string value, int maxCharacters) => value.Length <= maxCharacters
-        ? value
-        : value[..Math.Max(1, maxCharacters - 1)] + "…";
 
     private static IEnumerator DetourGotoRoutine(GotoRoutineOrig orig, Overworld self, Oui next) {
         if (next is OuiChapterSelect vanilla
