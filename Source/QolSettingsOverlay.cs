@@ -319,17 +319,29 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         MaterialUi.Circle(new Vector2(hero.X + 34f, hero.Y + 39f), 8f, statusColor * alpha);
         MaterialUiKit.Text(RecordingStatus(), new Vector2(hero.X + 54f, hero.Y + 25f), Vector2.Zero,
             MaterialTextRole.Section, palette.OnSurface, alpha, scaleOverride: 0.39f);
-        string duration = AutoRecorder.IsRecording ? FormatDuration(AutoRecorder.CurrentSeconds) : "00:00";
+        string duration = AutoRecorder.IsRecording ? FormatDuration(AutoRecorder.DisplaySeconds) : "00:00";
         MaterialUiKit.Text(duration, new Vector2(hero.X + 54f, hero.Y + 65f), Vector2.Zero,
             MaterialTextRole.Display, active ? palette.Primary : palette.OnSurfaceVariant,
             alpha, scaleOverride: 0.52f);
+        double finalizationProgress = AutoRecorder.FinalizationProgress;
         string detail = AutoRecorder.IsFinalizing
-            ? "正在生成最终视频，完成后会自动出现在下方"
+            ? $"正在生成{AutoRecorder.FinalizationDescription} · {finalizationProgress:P0}"
             : AutoRecorder.IsRecording
-                ? $"当前片段：{ShortPath(AutoRecorder.CurrentPath)}"
+                ? AutoRecorder.IsFullRecordingEnabled || AutoRecorder.ManualMode
+                    ? $"当前片段：{ShortPath(AutoRecorder.CurrentPath)}"
+                    : $"滚动缓冲：始终保留最近 {MicroblocksQolUtilsModule.Settings.DeathReplayBufferSeconds} 秒"
                 : "可以手动录制，也可以在下方启用自动录制";
         MaterialUiKit.Text(Trim(detail, 48), new Vector2(hero.X + 190f, hero.Y + 75f), Vector2.Zero,
             MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.26f);
+        if (AutoRecorder.IsFinalizing) {
+            MaterialRect firstButton = RecorderButtonRect(hero, 0);
+            float progressWidth = Math.Max(120f, firstButton.X - hero.X - 214f);
+            MaterialUi.RoundedRect(hero.X + 190f, hero.Y + 112f, progressWidth, 7f, 3.5f,
+                palette.Outline * (0.28f * alpha));
+            MaterialUi.RoundedRect(hero.X + 190f, hero.Y + 112f,
+                progressWidth * (float)Math.Clamp(finalizationProgress, 0d, 1d), 7f, 3.5f,
+                palette.Primary * alpha);
+        }
 
         RenderRecorderButton(RecorderButtonRect(hero, 0), "打开文件夹", true, palette, alpha);
         RenderRecorderButton(RecorderButtonRect(hero, 1),
@@ -395,7 +407,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                 ? "暂无死亡回放"
                 : "暂无完整录像";
             string emptyDetail = recordingLibraryKind == RecordingLibraryKind.DeathReplay
-                ? "启用死亡回放后，死亡片段会在当前录制结束时保存"
+                ? "启用后会持续录制，并在死亡时自动保存最近一段"
                 : "完成一次录制后，文件会自动出现在这里";
             MaterialUiKit.Text(emptyTitle, new Vector2(empty.Center.X, empty.Center.Y - 20f),
                 new Vector2(0.5f), MaterialTextRole.Section, palette.OnSurfaceVariant, alpha,
@@ -1411,6 +1423,9 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                 Toggle("自动录制", () => settings.AutoRecorderEnabled, value => settings.AutoRecorderEnabled = value),
                 Toggle("保存死亡回放", () => settings.DeathReplayEnabled,
                     value => settings.DeathReplayEnabled = value),
+                Range("死亡回放时长", () => settings.DeathReplayBufferSeconds,
+                    value => settings.DeathReplayBufferSeconds = value,
+                    10, 60, 5, value => $"最近 {value} 秒"),
                 Toggle("显示录制红点", () => settings.ShowRecordingIndicator,
                     value => settings.ShowRecordingIndicator = value),
                 Toggle("显示录制时长", () => settings.ShowRecordingDuration,

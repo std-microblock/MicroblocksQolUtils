@@ -6,10 +6,12 @@ internal static class NativeRecordingFinalizer {
     public static async Task<bool> FinishAsync(
         IReadOnlyList<RecordingClip> clips,
         string output,
-        string description
+        string description,
+        Action<double>? progress = null
     ) {
         try {
             if (clips.Count == 0 || clips.Any(clip => !File.Exists(clip.Source))) return false;
+            progress?.Invoke(0d);
             Directory.CreateDirectory(Path.GetDirectoryName(output)!);
             QolSettings settings = MicroblocksQolUtilsModule.Settings;
             await NativeCaptureBridge.FinalizeRecordingAsync(
@@ -19,12 +21,14 @@ internal static class NativeRecordingFinalizer {
                 settings.RecordingBitrateKbps,
                 settings.RecordingFrameRate,
                 settings.BgmMode == BgmRecordingMode.SfxOnlyWithPostMix,
-                settings.BgmEventMapFile
+                settings.BgmEventMapFile,
+                value => progress?.Invoke(value * 0.99d)
             ).ConfigureAwait(false);
             await File.WriteAllTextAsync(
                 output + ".timeline.json",
                 JsonSerializer.Serialize(new { clips }, new JsonSerializerOptions { WriteIndented = true })
             ).ConfigureAwait(false);
+            progress?.Invoke(1d);
             Logger.Log(LogLevel.Info, "MicroblocksQolUtils/Recorder", $"Saved {description}: {output}");
             return true;
         } catch (Exception exception) {

@@ -9,7 +9,7 @@ namespace Celeste.Mod.MicroblocksQolUtils;
 
 public static class NativeCaptureBridge {
     private const string LibraryName = "microblocks_qol_native";
-    private const uint ExpectedAbiVersion = 3;
+    private const uint ExpectedAbiVersion = 4;
     private static bool resolverInstalled;
     private static IntPtr nativeHandle;
     private static string? configuredNativeDirectory;
@@ -104,7 +104,8 @@ public static class NativeCaptureBridge {
         int bitrateKbps,
         int fps,
         bool reconstructBgm,
-        string bgmEventMapFile
+        string bgmEventMapFile,
+        Action<double>? progress = null
     ) {
         EnsureAvailable();
         byte[] json = JsonSerializer.SerializeToUtf8Bytes(new {
@@ -124,7 +125,38 @@ public static class NativeCaptureBridge {
                 ? ""
                 : Path.GetFullPath(Environment.ExpandEnvironmentVariables(bgmEventMapFile))
         });
-        return Task.Run(() => ThrowIfFailed(RecordingFinalize(json, (nuint)json.Length), "finalize"));
+        return Task.Run(() => {
+            GCHandle progressHandle = default;
+            FinalizeProgressCallback? callback = null;
+            try {
+                if (progress is not null) {
+                    progressHandle = GCHandle.Alloc(progress);
+                    callback = ReportFinalizeProgress;
+                }
+                ThrowIfFailed(RecordingFinalizeWithProgress(
+                    json,
+                    (nuint)json.Length,
+                    callback,
+                    progressHandle.IsAllocated ? GCHandle.ToIntPtr(progressHandle) : IntPtr.Zero
+                ), "finalize");
+                progress?.Invoke(1d);
+                GC.KeepAlive(callback);
+            } finally {
+                if (progressHandle.IsAllocated) progressHandle.Free();
+            }
+        });
+    }
+
+    private static void ReportFinalizeProgress(float value, IntPtr context) {
+        if (context == IntPtr.Zero) return;
+        try {
+            if (GCHandle.FromIntPtr(context).Target is Action<double> progress) {
+                progress(Math.Clamp(value, 0f, 1f));
+            }
+        } catch (Exception exception) {
+            Logger.Log(LogLevel.Warn, "MicroblocksQolUtils/Recorder",
+                $"Cannot report finalization progress: {exception.Message}");
+        }
     }
 
     private static void EnsureAvailable() {
@@ -245,8 +277,17 @@ public static class NativeCaptureBridge {
     [DllImport(LibraryName, EntryPoint = "mqol_capture_last_error", CallingConvention = CallingConvention.Cdecl)]
     private static extern nuint CaptureLastError(IntPtr buffer, nuint capacity);
 
-    [DllImport(LibraryName, EntryPoint = "mqol_recording_finalize", CallingConvention = CallingConvention.Cdecl)]
-    private static extern int RecordingFinalize(byte[] plan, nuint planLength);
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void FinalizeProgressCallback(float progress, IntPtr context);
+
+    [DllImport(LibraryName, EntryPoint = "mqol_recording_finalize_with_progress",
+        CallingConvention = CallingConvention.Cdecl)]
+    private static extern int RecordingFinalizeWithProgress(
+        byte[] plan,
+        nuint planLength,
+        FinalizeProgressCallback? progress,
+        IntPtr context
+    );
 }
 
 public sealed class NativeCaptureSession : IDisposable {

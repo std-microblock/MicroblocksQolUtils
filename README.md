@@ -45,23 +45,26 @@ Implemented:
 - Streaming H.264 encoding through FFmpeg shared libraries, with automatic
   NVENC, QSV, AMF, Media Foundation, then OpenH264 fallback. No `ffmpeg.exe`,
   `gdigrab`, managed frame buffer, or subprocess is used.
-- One WGC/encoder session remains alive for the complete area run, including
-  every room transition. Deaths, SpeedrunTool loads, and respawn changes only
-  move logical start/end markers; they never restart capture or grow an
-  in-memory recording buffer.
+- Full-run recording keeps one WGC/encoder session alive for the complete area,
+  including every room transition. Deaths, SpeedrunTool loads, and respawn
+  changes only move logical start/end markers and never grow an in-memory frame
+  buffer. Death-replay-only capture rotates after a death so the replay can be
+  finalized immediately, then resumes automatically after respawn.
 - A top-right recording badge can independently show a blinking red capture
   dot and the elapsed recording time.
 - Native background finalization decodes only the retained ranges from the
   continuous run file and re-encodes them into one gapless MP4 at area
-  completion. This permits
+  completion. The recording center displays native encode progress while the
+  final MP4 is being generated. This permits
   exact non-keyframe cuts while failed attempts and load freezes are omitted.
 - Completed recordings are pruned oldest-first at startup and after finalization;
   the recording settings can change the retention count, disable the limit,
   or run cleanup immediately.
-- Optional death replays preserve the failed attempt from the latest room or
-  respawn anchor instead of dropping it from the continuous capture. Death
-  replays have their own retention limit (30 by default) and are finalized when
-  the current continuous recording session stops.
+- Optional death replays keep recording whenever gameplay is active and retain
+  only the most recent rolling window (30 seconds by default, configurable from
+  10 to 60 seconds). In death-replay-only mode the capture is stopped and saved
+  immediately on death, then automatically resumes after respawn. Death replays
+  have their own retention limit (30 files by default).
 - The recording library can switch between recent deaths and complete videos.
   New files are separated under `deaths/<area>` and `full/<area>` inside the
   configured recording directory; recordings created by older versions remain

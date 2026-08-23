@@ -22,7 +22,7 @@ mod finalizer;
 #[cfg(all(windows, feature = "ffmpeg"))]
 mod finalizer_audio;
 
-const ABI_VERSION: u32 = 3;
+const ABI_VERSION: u32 = 4;
 const OK: i32 = 0;
 const ERR_INVALID_ARGUMENT: i32 = -1;
 const ERR_NOT_FOUND: i32 = -2;
@@ -1081,6 +1081,19 @@ pub unsafe extern "C" fn mqol_capture_last_error(buffer: *mut c_char, capacity: 
 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mqol_recording_finalize(plan_json: *const u8, plan_length: usize) -> i32 {
+    // SAFETY: Forward the same validated buffer to the extended entry point without a callback.
+    unsafe { mqol_recording_finalize_with_progress(plan_json, plan_length, None, ptr::null_mut()) }
+}
+
+type FinalizeProgressCallback = unsafe extern "C" fn(f32, *mut c_void);
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mqol_recording_finalize_with_progress(
+    plan_json: *const u8,
+    plan_length: usize,
+    progress: Option<FinalizeProgressCallback>,
+    progress_context: *mut c_void,
+) -> i32 {
     ffi_status(|| {
         #[cfg(all(windows, feature = "ffmpeg"))]
         {
@@ -1090,7 +1103,13 @@ pub unsafe extern "C" fn mqol_recording_finalize(plan_json: *const u8, plan_leng
                 set_last_error(format!("invalid finalize plan JSON: {error}"));
                 ERR_INVALID_ARGUMENT
             })?;
-            finalizer::finalize(&plan).map_err(|error| {
+            finalizer::finalize_with_progress(&plan, |value| {
+                if let Some(callback) = progress {
+                    // SAFETY: The caller keeps the callback and context alive for this synchronous call.
+                    unsafe { callback(value, progress_context) };
+                }
+            })
+            .map_err(|error| {
                 set_last_error(error.to_string());
                 ERR_CAPTURE
             })?;
@@ -1098,7 +1117,7 @@ pub unsafe extern "C" fn mqol_recording_finalize(plan_json: *const u8, plan_leng
         }
         #[cfg(not(all(windows, feature = "ffmpeg")))]
         {
-            let _ = (plan_json, plan_length);
+            let _ = (plan_json, plan_length, progress, progress_context);
             set_last_error("native FFmpeg finalization is unavailable in this build");
             Err(ERR_PLATFORM)
         }

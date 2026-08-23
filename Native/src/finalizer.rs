@@ -123,7 +123,15 @@ pub enum FinalizeError {
 }
 
 pub fn finalize(plan: &FinalizePlan) -> Result<(), FinalizeError> {
+    finalize_with_progress(plan, |_| {})
+}
+
+pub fn finalize_with_progress(
+    plan: &FinalizePlan,
+    mut report_progress: impl FnMut(f32),
+) -> Result<(), FinalizeError> {
     validate_plan(plan)?;
+    report_progress(0.0);
     ffmpeg::init().map_err(|source| FinalizeError::OpenInput {
         path: PathBuf::from("FFmpeg initialization"),
         source,
@@ -168,6 +176,11 @@ pub fn finalize(plan: &FinalizePlan) -> Result<(), FinalizeError> {
     drop(video);
 
     let mut selection = TimelineSelection::new(&plan.clips);
+    let total_duration = plan
+        .clips
+        .iter()
+        .map(|clip| clip.duration_seconds)
+        .sum::<f64>();
     let mut output = None;
     let mut decoded = frame::Video::empty();
     for (stream, packet) in input.packets() {
@@ -185,6 +198,8 @@ pub fn finalize(plan: &FinalizePlan) -> Result<(), FinalizeError> {
             &video_temporary,
             &mut selection,
             &mut output,
+            total_duration,
+            &mut report_progress,
         )?;
         if selection.finished() {
             break;
@@ -200,12 +215,15 @@ pub fn finalize(plan: &FinalizePlan) -> Result<(), FinalizeError> {
             &video_temporary,
             &mut selection,
             &mut output,
+            total_duration,
+            &mut report_progress,
         )?;
     }
 
     let mut output = output.ok_or(FinalizeError::NoFrames)?;
     output.finish()?;
     drop(output);
+    report_progress(0.85);
 
     let sidecar = PathBuf::from(format!("{}.sfxchunks", source_path.display()));
     let bgm_map = (plan.reconstruct_bgm && !plan.bgm_event_map_file.trim().is_empty())
@@ -217,9 +235,11 @@ pub fn finalize(plan: &FinalizePlan) -> Result<(), FinalizeError> {
         &audio_temporary,
         bgm_map,
     )?;
+    report_progress(0.96);
     if has_audio {
         finalizer_audio::mux_video_and_audio(&video_temporary, &audio_temporary, &mux_temporary)?;
     }
+    report_progress(0.99);
     fs::remove_file(output_path).ok();
     let completed = if has_audio {
         &mux_temporary
@@ -238,6 +258,7 @@ pub fn finalize(plan: &FinalizePlan) -> Result<(), FinalizeError> {
     ] {
         let _ = fs::remove_file(path);
     }
+    report_progress(1.0);
     Ok(())
 }
 
@@ -284,6 +305,8 @@ fn drain_decoder(
     output_path: &Path,
     selection: &mut TimelineSelection<'_>,
     output: &mut Option<TimelineOutput>,
+    total_duration: f64,
+    report_progress: &mut impl FnMut(f32),
 ) -> Result<(), FinalizeError> {
     while decoder.receive_frame(decoded).is_ok() {
         let Some(timestamp) = decoded.timestamp() else {
@@ -300,6 +323,7 @@ fn drain_decoder(
             .as_mut()
             .expect("output initialized above")
             .encode(decoded, output_seconds)?;
+        report_progress(((output_seconds / total_duration) * 0.85).clamp(0.0, 0.85) as f32);
     }
     Ok(())
 }
