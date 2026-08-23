@@ -250,9 +250,11 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
             string levelSet = area.LevelSet ?? "Celeste";
             string title = CleanName(area.Name, sid);
             string levelSetTitle = levelSet == "Celeste" ? "Celeste" : Dialog.CleanLevelSet(levelSet);
-            string? collabName = collabMap || collabGym || collabLobby
-                ? CollabUtils2Bridge.GetCollabName(sid)
-                : null;
+            // GetCollabNameForSID also recognizes special collab maps such as the prologue,
+            // which CollabUtils2 intentionally excludes from IsCollabLobby. Group by the
+            // collab root for every SID so the lobby, its maps, gyms, and prologue stay in
+            // one tab.
+            string? collabName = CollabUtils2Bridge.GetCollabName(sid);
             string groupId = string.IsNullOrWhiteSpace(collabName) ? levelSet : collabName;
             string groupTitle = string.IsNullOrWhiteSpace(collabName)
                 ? levelSetTitle
@@ -340,7 +342,10 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         save.LastArea_Safe = entry.Area.ToKey();
         Logger.Log(LogLevel.Info, "MicroblocksQolUtils/ChapterSelect",
             $"Selected {entry.Sid} area={entry.Area.ID} levelSet={entry.LevelSet}");
-        UserIO.SaveHandler(file: true, settings: false);
+        // Match the vanilla chapter select and leave saving to the normal game flow.
+        // Saving here invokes SaveData.AfterInitialize; CollabUtils2 uses that hook to
+        // replace a collab map's LastArea with its lobby, so OuiChapterPanel would open
+        // (and then start) the lobby instead of the selected map.
         Overworld.Goto<OuiChapterPanel>();
     }
 
