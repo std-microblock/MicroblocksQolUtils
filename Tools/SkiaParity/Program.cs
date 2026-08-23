@@ -17,6 +17,7 @@ using SKTypeface bold = SKTypeface.FromFamilyName("Microsoft YaHei UI", SKFontSt
     ?? throw new InvalidOperationException("Microsoft YaHei UI bold was not found.");
 using SKBitmap reference = NewCanvas();
 using SKBitmap simulated = NewCanvas();
+using SKBitmap simulatedLayer = NewLayer();
 
 TextSpec[] texts = [
     new("Microblock 的 QOL 工具", 76, 44, 31, 40, true, new SKColor(242, 239, 249)),
@@ -44,21 +45,31 @@ using (SKCanvas canvas = new(reference)) {
     canvas.Flush();
 }
 
-using (SKCanvas canvas = new(simulated)) {
+using (SKCanvas canvas = new(simulatedLayer)) {
     foreach (TextSpec spec in texts) DrawTextSimulated(canvas, spec);
     foreach (IconSpec spec in icons) DrawIconSimulated(canvas, spec);
+    canvas.Flush();
+}
+using (SKCanvas canvas = new(simulated)) {
+    canvas.DrawBitmap(simulatedLayer, 0f, 0f,
+        new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None));
     canvas.Flush();
 }
 
 string referencePath = Path.Combine(output, "skia-reference.png");
 string simulatedPath = Path.Combine(output, "mod-simulated.png");
+string layerPath = Path.Combine(output, "mod-layer.png");
 SavePng(reference, referencePath);
 SavePng(simulated, simulatedPath);
+SavePng(simulatedLayer, layerPath);
+File.WriteAllBytes(Path.Combine(output, "skia-reference.bgra"), TightBytes(reference));
+File.WriteAllBytes(Path.Combine(output, "mod-layer.bgra"), TightBytes(simulatedLayer));
 ParityReport report = Compare(reference, simulated, background);
 string reportPath = Path.Combine(output, "report.json");
 File.WriteAllText(reportPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
 Console.WriteLine($"Skia reference: {referencePath}");
 Console.WriteLine($"Mod simulation: {simulatedPath}");
+Console.WriteLine($"Mod transparent layer: {layerPath}");
 Console.WriteLine($"Foreground similarity: {report.ForegroundSimilarity:P6}");
 Console.WriteLine($"Full image similarity: {report.FullImageSimilarity:P6}");
 Console.WriteLine($"Exact foreground pixels: {report.ExactForegroundPixelRatio:P6}");
@@ -68,6 +79,13 @@ SKBitmap NewCanvas() {
     SKBitmap bitmap = new(new SKImageInfo(Width, Height, SKColorType.Bgra8888, SKAlphaType.Premul));
     using SKCanvas canvas = new(bitmap);
     canvas.Clear(background);
+    return bitmap;
+}
+
+SKBitmap NewLayer() {
+    SKBitmap bitmap = new(new SKImageInfo(Width, Height, SKColorType.Bgra8888, SKAlphaType.Premul));
+    using SKCanvas canvas = new(bitmap);
+    canvas.Clear(SKColors.Transparent);
     return bitmap;
 }
 
@@ -183,6 +201,15 @@ byte[] Bytes(SKBitmap bitmap) {
     byte[] bytes = new byte[bitmap.RowBytes * bitmap.Height];
     Marshal.Copy(bitmap.GetPixels(), bytes, 0, bytes.Length);
     return bytes;
+}
+
+byte[] TightBytes(SKBitmap bitmap) {
+    byte[] source = Bytes(bitmap);
+    if (bitmap.RowBytes == bitmap.Width * 4) return source;
+    byte[] tight = new byte[bitmap.Width * bitmap.Height * 4];
+    for (int y = 0; y < bitmap.Height; y++)
+        Array.Copy(source, y * bitmap.RowBytes, tight, y * bitmap.Width * 4, bitmap.Width * 4);
+    return tight;
 }
 
 readonly record struct TextSpec(

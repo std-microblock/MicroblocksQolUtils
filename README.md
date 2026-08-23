@@ -166,5 +166,14 @@ path. It fails below 99.9% foreground pixel similarity:
 node scripts/verify-skia-parity.mjs
 ```
 
+For a GPU-level check, the FNA harness uploads the generated premultiplied
+layer, renders it through the same `SpriteBatch` `LinearClamp` / `AlphaBlend`
+path used by the mod, reads the render target back, and applies the same 99.9%
+foreground gate:
+
+```powershell
+node scripts/verify-skia-gpu-parity.mjs
+```
+
 Close Celeste before using `--install`; the script refuses to replace loaded
 DLLs while the game is running.
