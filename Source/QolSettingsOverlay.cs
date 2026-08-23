@@ -771,6 +771,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                     value => settings.ChapterSelectShowCollabMaps = value),
                 Toggle("完全移除场景过渡", () => settings.RemoveRoomTransitions,
                     value => settings.RemoveRoomTransitions = value),
+                Toggle("完全移除死亡动画", () => settings.RemoveDeathAnimation,
+                    value => settings.RemoveDeathAnimation = value),
                 Toggle("关心玩家过面通知", () => settings.WatchedPlayerNotifications,
                     value => settings.WatchedPlayerNotifications = value)
             ])

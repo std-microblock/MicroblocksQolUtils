@@ -112,6 +112,9 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue(false)]
     public bool RemoveRoomTransitions { get; set; }
 
+    [DefaultValue(false)]
+    public bool RemoveDeathAnimation { get; set; }
+
     [DefaultValue(true)]
     public bool ShowFps { get; set; } = true;
 

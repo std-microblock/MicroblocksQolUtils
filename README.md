@@ -28,6 +28,7 @@ Implemented:
 - Background Windows balloon notifications when a watched player changes rooms.
 - Optional suppression of MiaoNet's off-screen name labels.
 - Near-instant room transitions (camera/player/light interpolation removed).
+- Optional instant respawns that skip the death animation and death screen wipe.
 - Opt-in frame-spike sampling grouped by owning assembly for entity Update and
   Render, with an on-screen top offender and CSV logs under LocalAppData.
 - A Rust `cdylib` capture backend built directly on `scap`/WGC. Captured BGRA
