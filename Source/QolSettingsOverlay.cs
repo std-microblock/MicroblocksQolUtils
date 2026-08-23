@@ -1116,6 +1116,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                     value => settings.MiniMapHighlightRoute = value),
                 Toggle("标注收集品", () => settings.MiniMapCollectibles,
                     value => settings.MiniMapCollectibles = value),
+                Toggle("边框显示附近房间草莓", () => settings.MiniMapShowNearbyRoomStrawberries,
+                    value => settings.MiniMapShowNearbyRoomStrawberries = value),
                 Toggle("自适应地图颜色", () => settings.MiniMapAdaptiveColors,
                     value => settings.MiniMapAdaptiveColors = value),
                 Toggle("显示 MiaoNet 玩家", () => settings.ShowMiaoNetPlayers,

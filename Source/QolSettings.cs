@@ -129,6 +129,9 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue(true)]
     public bool MiniMapCollectibles { get; set; } = true;
 
+    [DefaultValue(false)]
+    public bool MiniMapShowNearbyRoomStrawberries { get; set; }
+
     [SettingRange(0, 10)]
     [DefaultValue(6)]
     public int MiniMapBackgroundOpacity { get; set; } = 6;

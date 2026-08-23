@@ -26,8 +26,10 @@ internal readonly record struct MiniMapCollectible(
             if (session.DoNotLoad.Contains(id)) return true;
             if (Kind is MiniMapCollectibleKind.Strawberry
                 or MiniMapCollectibleKind.GoldenBerry
-                or MiniMapCollectibleKind.MoonBerry)
-                return session.Strawberries.Contains(id);
+                or MiniMapCollectibleKind.MoonBerry) {
+                if (session.Strawberries.Contains(id)) return true;
+                return SaveData.Instance?.CheckStrawberry(session.Area, id) == true;
+            }
             if (Kind == MiniMapCollectibleKind.Key) return session.Keys.Contains(id);
         }
 
