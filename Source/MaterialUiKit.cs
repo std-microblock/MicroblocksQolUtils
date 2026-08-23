@@ -143,10 +143,10 @@ internal sealed class MaterialScrollViewport : IDisposable {
         _ = name;
     }
 
-    public void Render(MaterialRect bounds, System.Action drawContents) {
+    public void Render(MaterialRect bounds, Matrix renderMatrix, System.Action drawContents) {
         GraphicsDevice graphics = Engine.Graphics.GraphicsDevice;
         Rectangle previousScissor = graphics.ScissorRectangle;
-        Rectangle scissor = ScreenScissor(bounds, graphics.Viewport);
+        Rectangle scissor = ScreenScissor(bounds, graphics.Viewport, renderMatrix);
         if (scissor.Width <= 0 || scissor.Height <= 0) return;
 
         Draw.SpriteBatch.End();
@@ -158,7 +158,7 @@ internal sealed class MaterialScrollViewport : IDisposable {
             DepthStencilState.None,
             ScissorRasterizer,
             null,
-            Engine.ScreenMatrix
+            renderMatrix
         );
         drawContents();
         Draw.SpriteBatch.End();
@@ -170,15 +170,18 @@ internal sealed class MaterialScrollViewport : IDisposable {
             DepthStencilState.None,
             RasterizerState.CullNone,
             null,
-            Engine.ScreenMatrix
+            renderMatrix
         );
     }
 
     public void Dispose() { }
 
-    private static Rectangle ScreenScissor(MaterialRect bounds, Viewport viewport) {
-        Vector2 first = Vector2.Transform(new Vector2(bounds.X, bounds.Y), Engine.ScreenMatrix);
-        Vector2 second = Vector2.Transform(new Vector2(bounds.Right, bounds.Bottom), Engine.ScreenMatrix);
+    private static Rectangle ScreenScissor(MaterialRect bounds, Viewport viewport, Matrix renderMatrix) {
+        Vector2 viewportOrigin = new(viewport.X, viewport.Y);
+        Vector2 first = Vector2.Transform(new Vector2(bounds.X, bounds.Y), renderMatrix)
+            + viewportOrigin;
+        Vector2 second = Vector2.Transform(new Vector2(bounds.Right, bounds.Bottom), renderMatrix)
+            + viewportOrigin;
         int viewportRight = viewport.X + viewport.Width;
         int viewportBottom = viewport.Y + viewport.Height;
         int left = Math.Clamp((int)MathF.Floor(Math.Min(first.X, second.X)), viewport.X, viewportRight);

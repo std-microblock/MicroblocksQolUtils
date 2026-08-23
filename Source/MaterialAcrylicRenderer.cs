@@ -169,7 +169,7 @@ internal static class MaterialAcrylicRenderer {
                 Engine.ScreenMatrix
             );
             begun = true;
-            page.RenderMaterialContent(acrylicActive: true);
+            page.RenderMaterialContent(acrylicActive: true, Engine.ScreenMatrix);
         } finally {
             if (begun) Draw.SpriteBatch.End();
         }
