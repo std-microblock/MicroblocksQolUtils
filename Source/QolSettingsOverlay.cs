@@ -201,24 +201,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             ease
         );
 
-        MaterialUiKit.IconBubble("deployed_code", new Vector2(layout.Header.X + 28f, layout.Header.Y + 28f),
-            56f, palette, ease);
-        MaterialUiKit.Text("Microblock 的 QOL 工具", new Vector2(layout.Header.X + 70f, layout.Header.Y - 2f),
-            Vector2.Zero, MaterialTextRole.Display, palette.OnSurface, ease, scaleOverride: 0.70f);
-        MaterialUiKit.Text("MATERIAL YOU  ·  CELESTE UTILITIES",
-            new Vector2(layout.Header.X + 73f, layout.Header.Y + 51f), Vector2.Zero,
-            MaterialTextRole.Caption, palette.Primary, ease * 0.82f, scaleOverride: 0.20f);
-
-        MaterialRect brand = new(layout.Header.Right - 212f, layout.Header.Y + 7f, 212f, 42f);
-        MaterialUi.RoundedRect(brand.X, brand.Y, brand.Width, brand.Height, 21f,
-            palette.SurfaceHighest * (0.72f * ease));
-        MaterialUi.RoundedOutline(brand.X, brand.Y, brand.Width, brand.Height, 21f, 1f,
-            palette.Outline * (0.42f * ease));
-        MaterialUiKit.Icon("settings", new Vector2(brand.X + 24f, brand.Center.Y), 21f,
-            palette.Primary, ease);
-        MaterialUiKit.Text("QOL CONTROL CENTER", new Vector2(brand.X + 43f, brand.Center.Y),
-            new Vector2(0f, 0.5f), MaterialTextRole.Caption, palette.OnSurfaceVariant,
-            ease, scaleOverride: 0.20f);
+        MaterialUiKit.Text("Microblock 的 QOL 工具", new Vector2(layout.Header.X, layout.Header.Y),
+            Vector2.Zero, MaterialTextRole.Display, palette.OnSurface, ease, scaleOverride: 0.76f);
 
         RenderNavigation(layout, palette);
         RenderContent(layout, palette);
@@ -242,17 +226,12 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             SettingsTab settingsTab = tabs[index];
             motion.RenderStateLayer(key, tab, 22f,
                 selected ? palette.OnPrimary : palette.Primary, ease);
-            MaterialUiKit.Icon(settingsTab.Icon, new Vector2(tab.X + 28f, tab.Center.Y), 25f,
+            MaterialUiKit.Icon(settingsTab.Icon, new Vector2(tab.X + 28f, tab.Center.Y), 24f,
                 selected ? palette.OnPrimary : palette.Primary, ease, filled: selected);
-            MaterialUiKit.Text(settingsTab.Title, new Vector2(tab.X + 52f, tab.Center.Y - 10f),
+            MaterialUiKit.Text(settingsTab.Title, new Vector2(tab.X + 52f, tab.Center.Y),
                 new Vector2(0f, 0.5f), MaterialTextRole.Label,
                 selected ? palette.OnPrimary : palette.OnSurfaceVariant, ease,
                 scaleOverride: NavigationTitleScale);
-            MaterialUiKit.Text(settingsTab.Eyebrow.ToUpperInvariant(),
-                new Vector2(tab.X + 53f, tab.Center.Y + 15f), new Vector2(0f, 0.5f),
-                MaterialTextRole.Caption,
-                selected ? palette.OnPrimary * 0.76f : palette.OnSurfaceVariant * 0.62f,
-                ease, scaleOverride: 0.17f);
         }
     }
 
@@ -266,8 +245,11 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             return;
         }
         SettingsTab tab = tabs[selectedTab];
-        MaterialUiKit.PageHeading(tab.Title, tab.Eyebrow, tab.Icon, layout.ContentHeader,
-            palette, ease * contentEase);
+        MaterialUiKit.Icon(tab.Icon, new Vector2(layout.ContentHeader.X + 14f, layout.ContentHeader.Y + 20f),
+            28f, palette.Primary, ease * contentEase, filled: true);
+        MaterialUiKit.Text(tab.Title, new Vector2(layout.ContentHeader.X + 38f, layout.ContentHeader.Y),
+            Vector2.Zero, MaterialTextRole.Title, palette.OnSurface, ease * contentEase,
+            scaleOverride: 0.48f);
         RenderRows(layout, palette);
 
         float maximum = MaxRowScroll(layout);
@@ -284,9 +266,10 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private void RenderRecorderPage(OverlayLayout layout, MaterialPalette palette) {
         float alpha = ease * contentEase;
-        SettingsTab tab = tabs[selectedTab];
-        MaterialUiKit.PageHeading("录制中心", tab.Eyebrow, tab.Icon, layout.ContentHeader,
-            palette, alpha);
+        MaterialUiKit.Icon("videocam", new Vector2(layout.ContentHeader.X + 14f, layout.ContentHeader.Y + 20f),
+            28f, palette.Primary, alpha, filled: true);
+        MaterialUiKit.Text("录制中心", new Vector2(layout.ContentHeader.X + 38f, layout.ContentHeader.Y),
+            Vector2.Zero, MaterialTextRole.Title, palette.OnSurface, alpha, scaleOverride: 0.48f);
         string summary = recordingNoticeTimer > 0f
             ? recordingNotice
             : recordingFiles.Count > 0
@@ -324,9 +307,9 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             palette.Primary * (0.30f * alpha));
 
         bool active = AutoRecorder.IsRecording || AutoRecorder.ManualMode;
-        MaterialUiKit.IconBubble("fiber_manual_record", new Vector2(hero.X + 34f, hero.Y + 39f),
-            30f, palette, alpha, selected: AutoRecorder.IsRecording);
-        MaterialUiKit.Text(RecordingStatus(), new Vector2(hero.X + 58f, hero.Y + 25f), Vector2.Zero,
+        Color statusColor = AutoRecorder.IsRecording ? new Color(244, 91, 105) : palette.Primary;
+        MaterialUi.Circle(new Vector2(hero.X + 34f, hero.Y + 39f), 8f, statusColor * alpha);
+        MaterialUiKit.Text(RecordingStatus(), new Vector2(hero.X + 54f, hero.Y + 25f), Vector2.Zero,
             MaterialTextRole.Section, palette.OnSurface, alpha, scaleOverride: 0.39f);
         string duration = AutoRecorder.IsRecording ? FormatDuration(AutoRecorder.DisplaySeconds) : "00:00";
         MaterialUiKit.Text(duration, new Vector2(hero.X + 54f, hero.Y + 65f), Vector2.Zero,
@@ -340,17 +323,16 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                 MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.26f);
         }
 
-        RenderRecorderButton(RecorderButtonRect(hero, 0), "打开文件夹", "folder_open", true, palette, alpha,
+        RenderRecorderButton(RecorderButtonRect(hero, 0), "打开文件夹", true, palette, alpha,
             "settings.recorder.folder");
         RenderRecorderButton(RecorderButtonRect(hero, 1),
-            active ? "停止并保存" : "开始录制", active ? "stop" : "fiber_manual_record",
-            true, palette, alpha,
+            active ? "停止并保存" : "开始录制", true, palette, alpha,
             "settings.recorder.toggle", primary: true);
-        RenderRecorderButton(RecorderButtonRect(hero, 2), "丢弃", "delete", active, palette, alpha,
+        RenderRecorderButton(RecorderButtonRect(hero, 2), "丢弃", active, palette, alpha,
             "settings.recorder.discard", danger: active);
     }
 
-    private void RenderRecorderButton(MaterialRect rect, string text, string icon, bool enabled,
+    private void RenderRecorderButton(MaterialRect rect, string text, bool enabled,
         MaterialPalette palette, float alpha, string key, bool primary = false, bool danger = false) {
         float emphasis = motion.Emphasis(key);
         Color dangerColor = new(205, 78, 92);
@@ -369,9 +351,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         Color textColor = enabled
             ? primary || danger ? palette.OnPrimary : palette.OnSurface
             : palette.OnSurfaceVariant * 0.50f;
-        MaterialUiKit.Icon(icon, new Vector2(rect.X + 22f, rect.Center.Y), 20f,
-            textColor, alpha, filled: primary || danger);
-        MaterialUiKit.Text(text, rect.Center + new Vector2(8f, 0f), new Vector2(0.5f),
+        MaterialUiKit.Text(text, rect.Center, new Vector2(0.5f),
             MaterialTextRole.Label, textColor, alpha, scaleOverride: 0.28f);
     }
 
@@ -410,9 +390,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             string emptyTitle = recordingLibraryKind == RecordingLibraryKind.DeathReplay
                 ? "暂无死亡回放"
                 : "暂无完整录像";
-            MaterialUiKit.Icon("video_library", empty.Center + new Vector2(0f, -22f), 34f,
-                palette.Primary, alpha * 0.72f);
-            MaterialUiKit.Text(emptyTitle, empty.Center + new Vector2(0f, 20f),
+            MaterialUiKit.Text(emptyTitle, empty.Center,
                 new Vector2(0.5f), MaterialTextRole.Section, palette.OnSurfaceVariant, alpha,
                 scaleOverride: 0.34f);
             return;
@@ -541,9 +519,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         }
 
         Color labelColor = enabled ? palette.OnSurface : palette.OnSurfaceVariant * 0.55f;
-        MaterialUiKit.IconBubble(row.Icon, new Vector2(rect.X + 31f, rect.Y + 27f), 32f,
-            palette, alpha * (enabled ? 1f : 0.48f));
-        MaterialUiKit.Text(row.Label, new Vector2(rect.X + 55f, rect.Y + 12f), Vector2.Zero,
+        MaterialUiKit.Text(row.Label, new Vector2(rect.X + 18f, rect.Y + 12f), Vector2.Zero,
             MaterialTextRole.Label, labelColor, alpha, scaleOverride: 0.31f);
 
         switch (row.Kind) {
@@ -711,7 +687,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private static void RenderAction(SettingRow row, MaterialRect rect, MaterialPalette palette,
         float alpha, bool enabled) {
-        MaterialRect control = WideControlRect(rect);
+        MaterialRect control = ActionControlRect(row, rect);
         MaterialUi.RoundedRect(control.X, control.Y, control.Width, control.Height, 16f,
             (enabled ? palette.Primary : palette.Outline) * (alpha * (enabled ? 0.88f : 0.25f)));
         MaterialUiKit.Text(row.Value(), control.Center, new Vector2(0.5f),
@@ -738,9 +714,9 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         MaterialUiKit.Text("文件会从磁盘永久删除，此操作无法撤销。", new Vector2(modal.Center.X, modal.Y + 145f),
             new Vector2(0.5f, 0f), MaterialTextRole.Caption, new Color(255, 183, 190), ease,
             scaleOverride: 0.27f);
-        RenderRecorderButton(RecordingDeleteCancelRect(modal), "取消", "close", true, palette, ease,
+        RenderRecorderButton(RecordingDeleteCancelRect(modal), "取消", true, palette, ease,
             "settings.delete.cancel");
-        RenderRecorderButton(RecordingDeleteConfirmRect(modal), "永久删除", "delete", true, palette, ease,
+        RenderRecorderButton(RecordingDeleteConfirmRect(modal), "永久删除", true, palette, ease,
             "settings.delete.confirm", danger: true);
     }
 
@@ -1499,144 +1475,125 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private List<SettingsTab> BuildTabs() {
         QolSettings settings = MicroblocksQolUtilsModule.Settings;
         return [
-            new SettingsTab("HUD", "Heads-up display", "dashboard", [
-                Toggle("启用 QOL 工具", () => settings.Enabled, value => settings.Enabled = value, "dashboard"),
+            new SettingsTab("HUD", "dashboard", [
+                Toggle("启用 QOL 工具", () => settings.Enabled, value => settings.Enabled = value),
                 Toggle("HUD 信息卡阴影、背景与边框", () => settings.HudMaterialSurfaces,
-                    value => settings.HudMaterialSurfaces = value, "layers"),
-                Toggle("显示帧率", () => settings.ShowFps, value => settings.ShowFps = value, "speed"),
-                Toggle("显示 CPU 帧耗时", () => settings.ShowFrameTime, value => settings.ShowFrameTime = value,
-                    "monitor_heart"),
+                    value => settings.HudMaterialSurfaces = value),
+                Toggle("显示帧率", () => settings.ShowFps, value => settings.ShowFps = value),
+                Toggle("显示 CPU 帧耗时", () => settings.ShowFrameTime, value => settings.ShowFrameTime = value),
                 Toggle("物理与渲染帧率", () => settings.ShowPhysicalAndRenderFps,
-                    value => settings.ShowPhysicalAndRenderFps = value, "analytics"),
+                    value => settings.ShowPhysicalAndRenderFps = value),
                 Toggle("显示帧率分析", () => settings.EnableFrameProfiler,
-                    value => settings.EnableFrameProfiler = value, "memory"),
+                    value => settings.EnableFrameProfiler = value),
                 Range("卡顿采样阈值", () => settings.FrameSpikeThresholdMs,
-                    value => settings.FrameSpikeThresholdMs = value, 20, 250, 5, value => $"{value} ms", "timer"),
-                Toggle("显示还剩多少面", () => settings.ShowRoomsRemaining,
-                    value => settings.ShowRoomsRemaining = value, "route"),
-                Toggle("显示地图人数", () => settings.ShowMapPlayerCount,
-                    value => settings.ShowMapPlayerCount = value, "group"),
-                Toggle("显示当前时间", () => settings.ShowClock, value => settings.ShowClock = value, "schedule")
+                    value => settings.FrameSpikeThresholdMs = value, 20, 250, 5, value => $"{value} ms"),
+                Toggle("显示还剩多少面", () => settings.ShowRoomsRemaining, value => settings.ShowRoomsRemaining = value),
+                Toggle("显示地图人数", () => settings.ShowMapPlayerCount, value => settings.ShowMapPlayerCount = value),
+                Toggle("显示当前时间", () => settings.ShowClock, value => settings.ShowClock = value)
             ]),
-            new SettingsTab("Profiler", "Performance trace", "speed", [], ProfilerPage: true),
-            new SettingsTab("小地图", "Room overview", "map", [
-                Toggle("启用小地图", () => settings.MiniMapEnabled,
-                    value => settings.MiniMapEnabled = value, "map"),
-                EnumRow("裁剪形状", () => settings.MiniMapShape,
-                    value => settings.MiniMapShape = value, "crop"),
+            new SettingsTab("Profiler", "speed", [], ProfilerPage: true),
+            new SettingsTab("小地图", "map", [
+                Toggle("启用小地图", () => settings.MiniMapEnabled, value => settings.MiniMapEnabled = value),
+                EnumRow("裁剪形状", () => settings.MiniMapShape, value => settings.MiniMapShape = value),
                 Range("地图尺寸", () => settings.MiniMapSize, value => settings.MiniMapSize = value,
-                    96, 384, 16, value => $"{value} px", "crop"),
+                    96, 384, 16, value => $"{value} px"),
                 Range("缩放档位", () => settings.MiniMapZoom, value => settings.MiniMapZoom = value,
-                    0, 12, 1, value => value == 0 ? "当前房间" : value.ToString(), "zoom_in"),
-                Action("键盘快捷键", "使用 Everest 设置", () => OpenBindingConfig(controller: false),
-                    icon: "keyboard"),
-                Action("手柄按键", "使用 Everest 设置", () => OpenBindingConfig(controller: true),
-                    icon: "sports_esports"),
-                Toggle("显示背景", () => settings.MiniMapBackground,
-                    value => settings.MiniMapBackground = value, "layers"),
+                    0, 12, 1, value => value == 0 ? "当前房间" : value.ToString()),
+                Action("键盘快捷键", "使用 Everest 设置", () => OpenBindingConfig(controller: false)),
+                Action("手柄按键", "使用 Everest 设置", () => OpenBindingConfig(controller: true)),
+                Toggle("显示背景", () => settings.MiniMapBackground, value => settings.MiniMapBackground = value),
                 Range("背景不透明度", () => settings.MiniMapBackgroundOpacity,
-                    value => settings.MiniMapBackgroundOpacity = value, 0, 10, 1,
-                    value => $"{value * 10}%", "opacity"),
-                Toggle("显示地图边框", () => settings.MiniMapBorder,
-                    value => settings.MiniMapBorder = value, "border_style"),
+                    value => settings.MiniMapBackgroundOpacity = value, 0, 10, 1, value => $"{value * 10}%"),
+                Toggle("显示地图边框", () => settings.MiniMapBorder, value => settings.MiniMapBorder = value),
                 Toggle("显示房间背景", () => settings.MiniMapRoomBackgrounds,
-                    value => settings.MiniMapRoomBackgrounds = value, "map"),
+                    value => settings.MiniMapRoomBackgrounds = value),
                 Range("房间背景不透明度", () => settings.MiniMapRoomBackgroundOpacity,
-                    value => settings.MiniMapRoomBackgroundOpacity = value, 0, 10, 1,
-                    value => $"{value * 10}%", "opacity"),
-                Toggle("显示房间边缘线", () => settings.MiniMapRoomBounds,
-                    value => settings.MiniMapRoomBounds = value, "border_style"),
+                    value => settings.MiniMapRoomBackgroundOpacity = value, 0, 10, 1, value => $"{value * 10}%"),
+                Toggle("显示房间边缘线", () => settings.MiniMapRoomBounds, value => settings.MiniMapRoomBounds = value),
                 Toggle("高亮正路房间", () => settings.MiniMapHighlightRoute,
-                    value => settings.MiniMapHighlightRoute = value, "route"),
+                    value => settings.MiniMapHighlightRoute = value),
                 Toggle("标注收集品", () => settings.MiniMapCollectibles,
-                    value => settings.MiniMapCollectibles = value, "extension"),
+                    value => settings.MiniMapCollectibles = value),
                 Toggle("边框显示附近房间草莓", () => settings.MiniMapShowNearbyRoomStrawberries,
-                    value => settings.MiniMapShowNearbyRoomStrawberries = value, "visibility"),
+                    value => settings.MiniMapShowNearbyRoomStrawberries = value),
                 Toggle("自适应地图颜色", () => settings.MiniMapAdaptiveColors,
-                    value => settings.MiniMapAdaptiveColors = value, "opacity"),
+                    value => settings.MiniMapAdaptiveColors = value),
                 Toggle("显示 MiaoNet 玩家", () => settings.ShowMiaoNetPlayers,
-                    value => settings.ShowMiaoNetPlayers = value, "group"),
+                    value => settings.ShowMiaoNetPlayers = value),
                 Toggle("边框显示越界玩家", () => settings.MiniMapShowOffscreenPlayers,
-                    value => settings.MiniMapShowOffscreenPlayers = value, "visibility"),
+                    value => settings.MiniMapShowOffscreenPlayers = value),
                 EnumRow("头像裁剪形状", () => settings.MiniMapAvatarShape,
-                    value => settings.MiniMapAvatarShape = value, "crop"),
-                EnumRow("玩家名字", () => settings.MiniMapNames,
-                    value => settings.MiniMapNames = value, "group"),
+                    value => settings.MiniMapAvatarShape = value),
+                EnumRow("玩家名字", () => settings.MiniMapNames, value => settings.MiniMapNames = value),
                 Toggle("隐藏原生越界名字", () => settings.HideMiaoNetOffscreenNames,
-                    value => settings.HideMiaoNetOffscreenNames = value, "visibility")
+                    value => settings.HideMiaoNetOffscreenNames = value)
             ]),
-            new SettingsTab("录制", "Capture & replay", "videocam", [
-                Toggle("自动录制", () => settings.AutoRecorderEnabled,
-                    value => settings.AutoRecorderEnabled = value, "videocam"),
+            new SettingsTab("录制", "videocam", [
+                Toggle("自动录制", () => settings.AutoRecorderEnabled, value => settings.AutoRecorderEnabled = value),
                 Toggle("保存死亡回放", () => settings.DeathReplayEnabled,
-                    value => settings.DeathReplayEnabled = value, "replay"),
+                    value => settings.DeathReplayEnabled = value),
                 Range("死亡回放时长", () => settings.DeathReplayBufferSeconds,
                     value => settings.DeathReplayBufferSeconds = value,
-                    10, 60, 5, value => $"最近 {value} 秒", "timer"),
+                    10, 60, 5, value => $"最近 {value} 秒"),
                 Toggle("显示录制红点", () => settings.ShowRecordingIndicator,
-                    value => settings.ShowRecordingIndicator = value, "fiber_manual_record"),
+                    value => settings.ShowRecordingIndicator = value),
                 Toggle("显示录制时长", () => settings.ShowRecordingDuration,
-                    value => settings.ShowRecordingDuration = value, "schedule"),
-                EnumRow("自动录制策略", () => settings.RecordingPolicy,
-                    value => settings.RecordingPolicy = value, "tune"),
-                EnumRow("BGM 拼接", () => settings.BgmMode,
-                    value => settings.BgmMode = value, "movie"),
+                    value => settings.ShowRecordingDuration = value),
+                EnumRow("自动录制策略", () => settings.RecordingPolicy, value => settings.RecordingPolicy = value),
+                EnumRow("BGM 拼接", () => settings.BgmMode, value => settings.BgmMode = value),
                 Toggle("录制 UI 音效", () => settings.RecordingIncludeUiSfx,
-                    value => settings.RecordingIncludeUiSfx = value, "movie"),
+                    value => settings.RecordingIncludeUiSfx = value),
                 Range("录制帧率", () => settings.RecordingFrameRate, value => settings.RecordingFrameRate = value,
-                    30, 120, 30, value => $"{value} FPS", "speed"),
+                    30, 120, 30, value => $"{value} FPS"),
                 Range("录制码率", () => settings.RecordingBitrateKbps,
                     value => settings.RecordingBitrateKbps = value,
-                    2000, 50000, 1000, value => $"{value / 1000f:0.#} Mbps", "analytics"),
+                    2000, 50000, 1000, value => $"{value / 1000f:0.#} Mbps"),
                 Range("最多保留完整录像", () => settings.RecordingRetentionCount,
                     value => settings.RecordingRetentionCount = value,
-                    0, 500, 10, value => value == 0 ? "不限" : $"{value} 个", "video_library"),
+                    0, 500, 10, value => value == 0 ? "不限" : $"{value} 个"),
                 Range("最多保留死亡回放", () => settings.DeathReplayRetentionCount,
                     value => settings.DeathReplayRetentionCount = value,
-                    0, 200, 5, value => value == 0 ? "不限" : $"{value} 个", "replay"),
+                    0, 200, 5, value => value == 0 ? "不限" : $"{value} 个"),
                 Action("立即清理旧录像", "清理", AutoRecorder.CleanupRecordings,
                     () => (settings.RecordingRetentionCount > 0 || settings.DeathReplayRetentionCount > 0)
-                        && !AutoRecorder.IsCleaning, "delete"),
+                        && !AutoRecorder.IsCleaning),
                 Text("输出目录", () => settings.RecordingDirectory, value => settings.RecordingDirectory = value,
-                    "留空使用默认目录", 240, "folder_open"),
+                    "留空使用默认目录", 240),
                 Text("编码器", () => settings.RecordingEncoder, value => settings.RecordingEncoder = value,
-                    "auto / nvenc / qsv / amf…", 48, "settings")
+                    "auto / nvenc / qsv / amf…", 48)
             ], RecorderPage: true),
-            new SettingsTab("界面与系统", "Appearance & system", "settings", [
+            new SettingsTab("界面与系统", "settings", [
                 Toggle("亚克力模糊背景", () => settings.MaterialAcrylicBackground,
-                    value => settings.MaterialAcrylicBackground = value, "blur_on"),
+                    value => settings.MaterialAcrylicBackground = value),
                 Range("模糊强度", () => settings.MaterialAcrylicBlurStrength,
-                    value => settings.MaterialAcrylicBlurStrength = value, 1, 12, 1,
-                    value => value.ToString(), "tune"),
+                    value => settings.MaterialAcrylicBlurStrength = value, 1, 12, 1, value => value.ToString()),
                 Choice("界面字体", UiFontCatalog.InstalledFamilies, () => settings.FontFamily, value => {
                     settings.FontFamily = value;
                     settings.FontFile = "";
-                }, "font_download"),
+                }),
                 Toggle("取代原版选关页", () => settings.ReplaceChapterSelect,
-                    value => settings.ReplaceChapterSelect = value, "deployed_code"),
+                    value => settings.ReplaceChapterSelect = value),
                 Toggle("选关页显示 Collab 地图", () => settings.ChapterSelectShowCollabMaps,
-                    value => settings.ChapterSelectShowCollabMaps = value, "map"),
+                    value => settings.ChapterSelectShowCollabMaps = value),
                 Toggle("输入框中文、游戏内英文输入法", () => settings.AutoSwitchInputLanguage,
-                    value => settings.AutoSwitchInputLanguage = value, "keyboard"),
+                    value => settings.AutoSwitchInputLanguage = value),
                 Toggle("完全移除场景过渡", () => settings.RemoveRoomTransitions,
-                    value => settings.RemoveRoomTransitions = value, "transition_push"),
+                    value => settings.RemoveRoomTransitions = value),
                 Toggle("完全移除死亡动画", () => settings.RemoveDeathAnimation,
-                    value => settings.RemoveDeathAnimation = value, "skull"),
-                EnumRow("碰撞箱", () => settings.CollisionBoxes,
-                    value => settings.CollisionBoxes = value, "border_style"),
+                    value => settings.RemoveDeathAnimation = value),
+                EnumRow("碰撞箱", () => settings.CollisionBoxes, value => settings.CollisionBoxes = value),
                 Toggle("关心玩家过面通知", () => settings.WatchedPlayerNotifications,
-                    value => settings.WatchedPlayerNotifications = value, "notifications")
+                    value => settings.WatchedPlayerNotifications = value)
             ])
         ];
     }
 
-    private static SettingRow Toggle(string label, Func<bool> get, Action<bool> set, string? icon = null) => new(
+    private static SettingRow Toggle(string label, Func<bool> get, Action<bool> set) => new(
         label,
         SettingKind.Toggle,
         () => get() ? "开" : "关",
         direction => set(direction > 0),
-        toggleValue: get,
-        icon: icon
+        toggleValue: get
     );
 
     private static SettingRow Range(
@@ -1646,8 +1603,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         int min,
         int max,
         int step,
-        Func<int, string> format,
-        string? icon = null
+        Func<int, string> format
     ) => new(
         label,
         SettingKind.Range,
@@ -1666,12 +1622,10 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             return true;
         },
         numericInput: true,
-        maxInputLength: 10,
-        icon: icon
+        maxInputLength: 10
     );
 
-    private static SettingRow EnumRow<T>(string label, Func<T> get, Action<T> set, string? icon = null)
-        where T : struct, Enum {
+    private static SettingRow EnumRow<T>(string label, Func<T> get, Action<T> set) where T : struct, Enum {
         T[] values = Enum.GetValues<T>();
         return new SettingRow(label, SettingKind.Enum, () => FormatEnum(get()), direction => {
             int index = Array.IndexOf(values, get());
@@ -1679,7 +1633,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             set(values[index]);
         }, options: values.Select(value => FormatEnum(value)).ToArray(),
             selectedOption: () => Array.IndexOf(values, get()),
-            selectOption: index => set(values[Math.Clamp(index, 0, values.Length - 1)]), icon: icon);
+            selectOption: index => set(values[Math.Clamp(index, 0, values.Length - 1)]));
     }
 
     private static SettingRow Text(
@@ -1687,8 +1641,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         Func<string> get,
         Action<string> set,
         string placeholder,
-        int maxLength,
-        string? icon = null
+        int maxLength
     ) => new(
         label,
         SettingKind.Text,
@@ -1699,16 +1652,14 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             return true;
         },
         placeholder: placeholder,
-        maxInputLength: maxLength,
-        icon: icon
+        maxInputLength: maxLength
     );
 
     private static SettingRow Choice(
         string label,
         IReadOnlyList<string> values,
         Func<string> get,
-        Action<string> set,
-        string? icon = null
+        Action<string> set
     ) {
         string[] options = values.ToArray();
 
@@ -1727,24 +1678,22 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             int index = (SelectedIndex() + Math.Sign(direction) + options.Length) % options.Length;
             set(options[index]);
         }, options: options, selectedOption: SelectedIndex,
-            selectOption: index => set(options[Math.Clamp(index, 0, options.Length - 1)]), icon: icon);
+            selectOption: index => set(options[Math.Clamp(index, 0, options.Length - 1)]));
     }
 
     private static SettingRow Action(string label, string buttonText, System.Action action,
-        Func<bool>? enabled = null, string? icon = null) => new(
+        Func<bool>? enabled = null) => new(
         label,
         SettingKind.Action,
         () => buttonText,
         _ => action(),
-        isEnabled: enabled,
-        icon: icon
+        isEnabled: enabled
     );
 
-    private static SettingRow Status(string label, Func<string> value, string? icon = null) => new(
+    private static SettingRow Status(string label, Func<string> value) => new(
         label,
         SettingKind.Status,
-        value,
-        icon: icon
+        value
     );
 
     private static string RecordingStatus() {
@@ -1772,9 +1721,10 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private void RenderProfilerContent(OverlayLayout layout, MaterialPalette palette) {
         float alpha = ease * contentEase;
-        SettingsTab tab = tabs[selectedTab];
-        MaterialUiKit.PageHeading("Profiler", tab.Eyebrow, tab.Icon, layout.ContentHeader,
-            palette, alpha);
+        MaterialUiKit.Icon("speed", new Vector2(layout.ContentHeader.X + 14f, layout.ContentHeader.Y + 20f),
+            28f, palette.Primary, alpha, filled: true);
+        MaterialUiKit.Text("Profiler", new Vector2(layout.ContentHeader.X + 38f, layout.ContentHeader.Y),
+            Vector2.Zero, MaterialTextRole.Title, palette.OnSurface, alpha, scaleOverride: 0.48f);
         ManagedSamplingStage stage = ManagedCpuSampler.Stage;
         ManagedProfileReport? report = ManagedCpuSampler.LatestReport;
         string status = stage switch {
@@ -1812,16 +1762,14 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             headline = "尚未生成报告";
         }
         MaterialRect startButtonBounds = ProfilerStartRect(layout);
-        float summaryTextWidth = Math.Max(0f, startButtonBounds.X - summary.X - 100f);
+        float summaryTextWidth = Math.Max(0f, startButtonBounds.X - summary.X - 48f);
         string visibleHeadline = MaterialTextUtil.Ellipsize(
             headline, summaryTextWidth, 0.34f, UiFontWeight.Bold);
-        MaterialUiKit.IconBubble("analytics", new Vector2(summary.X + 40f, summary.Y + 50f),
-            48f, palette, alpha);
-        MaterialUiKit.Text(visibleHeadline, new Vector2(summary.X + 76f, summary.Y + 24f), Vector2.Zero,
+        MaterialUiKit.Text(visibleHeadline, new Vector2(summary.X + 24f, summary.Y + 24f), Vector2.Zero,
             MaterialTextRole.Label, palette.OnSurface, alpha, scaleOverride: 0.34f);
         if (detail is not null) {
             string visibleDetail = MaterialTextUtil.Ellipsize(detail, summaryTextWidth, 0.27f);
-            MaterialUiKit.Text(visibleDetail, new Vector2(summary.X + 76f, summary.Y + 62f), Vector2.Zero,
+            MaterialUiKit.Text(visibleDetail, new Vector2(summary.X + 24f, summary.Y + 62f), Vector2.Zero,
                 MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.27f);
         }
 
@@ -1832,9 +1780,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             (busy ? palette.Outline : palette.Primary)
                 * (alpha * (busy ? 0.26f : MathHelper.Lerp(0.88f, 1f, buttonEmphasis))));
         motion.RenderStateLayer("settings.profiler.start", button, 18f, palette.OnPrimary, alpha);
-        MaterialUiKit.Icon(busy ? "timer" : "play_arrow", new Vector2(button.X + 28f, button.Center.Y),
-            23f, busy ? palette.OnSurfaceVariant : palette.OnPrimary, alpha, filled: !busy);
-        MaterialUiKit.Text(busy ? "正在采样" : "开始 10 秒采样", button.Center + new Vector2(8f, -8f),
+        MaterialUiKit.Text(busy ? "正在采样" : "开始 10 秒采样", button.Center + new Vector2(0f, -8f),
             new Vector2(0.5f), MaterialTextRole.Label,
             busy ? palette.OnSurfaceVariant : palette.OnPrimary, alpha, scaleOverride: 0.29f);
 
@@ -1859,14 +1805,10 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             simpleMode ? palette.OnPrimary : palette.Primary, alpha);
         motion.RenderStateLayer("settings.profiler.professional", professionalRect, 14f,
             simpleMode ? palette.Primary : palette.OnPrimary, alpha);
-        MaterialUiKit.Icon("bolt", new Vector2(simpleRect.X + 19f, simpleRect.Center.Y), 18f,
-            simpleMode ? palette.OnPrimary : palette.Primary, alpha, filled: simpleMode);
-        MaterialUiKit.Icon("analytics", new Vector2(professionalRect.X + 19f, professionalRect.Center.Y), 18f,
-            simpleMode ? palette.Primary : palette.OnPrimary, alpha, filled: !simpleMode);
-        MaterialUiKit.Text("简单 · 仅 Mod", simpleRect.Center + new Vector2(7f, -7f),
+        MaterialUiKit.Text("简单 · 仅 Mod", simpleRect.Center + new Vector2(0f, -7f),
             new Vector2(0.5f), MaterialTextRole.Label,
             simpleMode ? palette.OnPrimary : palette.OnSurfaceVariant, alpha, scaleOverride: 0.25f);
-        MaterialUiKit.Text("专业 · 全部", professionalRect.Center + new Vector2(7f, -7f),
+        MaterialUiKit.Text("专业 · 全部", professionalRect.Center + new Vector2(0f, -7f),
             new Vector2(0.5f), MaterialTextRole.Label,
             simpleMode ? palette.OnSurfaceVariant : palette.OnPrimary, alpha, scaleOverride: 0.25f);
 
@@ -2250,6 +2192,12 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private static MaterialRect WideControlRect(MaterialRect row) => new(row.X + 18f, row.Y + 45f,
         row.Width - 36f, 35f);
 
+    private static MaterialRect ActionControlRect(SettingRow row, MaterialRect rect) {
+        float textWidth = SystemTtfFont.MeasureVisible(row.Value(), 0.28f, UiFontWeight.Bold).X;
+        float width = Math.Clamp(textWidth + 38f, 98f, 250f);
+        return new MaterialRect(rect.Right - width - 18f, rect.Y + 14f, width, 38f);
+    }
+
     private MaterialRect DropdownControlRect(OverlayLayout layout, SettingRow row) {
         int index = CurrentRows.IndexOf(row);
         if (index < 0) return default;
@@ -2314,7 +2262,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private sealed record SettingsTab(
         string Title,
-        string Eyebrow,
         string Icon,
         List<SettingRow> Rows,
         bool RecorderPage = false,
@@ -2323,7 +2270,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private sealed class SettingRow {
         public string Label { get; }
-        public string Icon { get; }
         public SettingKind Kind { get; }
         public Func<string> Value { get; }
         public Action<int>? Change { get; }
@@ -2361,18 +2307,9 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             Func<string, bool>? commitEdit = null,
             bool numericInput = false,
             string? placeholder = null,
-            int maxInputLength = 120,
-            string? icon = null
+            int maxInputLength = 120
         ) {
             Label = label;
-            Icon = icon ?? kind switch {
-                SettingKind.Toggle => "toggle_on",
-                SettingKind.Range => "tune",
-                SettingKind.Enum => "list_alt",
-                SettingKind.Text => "edit",
-                SettingKind.Action => "arrow_forward",
-                _ => "info"
-            };
             Kind = kind;
             Value = value;
             Change = change;
