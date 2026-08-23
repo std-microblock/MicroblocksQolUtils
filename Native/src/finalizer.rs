@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -10,6 +11,9 @@ use crate::encoder::{
     encoder_candidates, encoder_options, even_dimension, pixel_format_for_encoder,
 };
 use crate::finalizer_audio;
+
+const CROSSFADE_SECONDS: f64 = 0.25;
+const CUT_GAP_SECONDS: f64 = 0.10;
 
 #[derive(Debug, Deserialize)]
 #[serde(default)]
@@ -46,6 +50,48 @@ pub struct FinalizeClip {
     pub music_event: String,
     #[serde(default)]
     pub music_timeline_milliseconds: i64,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TimelineClipLayout {
+    pub output_start_seconds: f64,
+    pub fade_in_seconds: f64,
+    pub fade_out_seconds: f64,
+}
+
+pub(crate) fn timeline_layout(clips: &[FinalizeClip]) -> Vec<TimelineClipLayout> {
+    let mut result = Vec::with_capacity(clips.len());
+    let mut output_start_seconds = 0.0;
+    for (index, clip) in clips.iter().enumerate() {
+        let fade_in_seconds = index
+            .checked_sub(1)
+            .map(|previous| transition_duration(clips, previous))
+            .unwrap_or(0.0);
+        let fade_out_seconds = transition_duration(clips, index);
+        result.push(TimelineClipLayout {
+            output_start_seconds,
+            fade_in_seconds,
+            fade_out_seconds,
+        });
+        output_start_seconds += clip.duration_seconds - fade_out_seconds;
+    }
+    result
+}
+
+fn transition_duration(clips: &[FinalizeClip], index: usize) -> f64 {
+    let Some(current) = clips.get(index) else {
+        return 0.0;
+    };
+    let Some(next) = clips.get(index + 1) else {
+        return 0.0;
+    };
+    let source_gap = next.start_seconds - (current.start_seconds + current.duration_seconds);
+    if source_gap <= CUT_GAP_SECONDS {
+        return 0.0;
+    }
+    CROSSFADE_SECONDS
+        .min(current.duration_seconds * 0.5)
+        .min(next.duration_seconds * 0.5)
 }
 
 #[derive(Debug, Error)]
@@ -290,7 +336,7 @@ fn drain_decoder(
             continue;
         };
         let source_seconds = timestamp as f64 * f64::from(input_time_base);
-        let Some(output_seconds) = selection.map(source_seconds) else {
+        let Some(mapped) = selection.map(source_seconds) else {
             continue;
         };
         if output.is_none() {
@@ -299,40 +345,68 @@ fn drain_decoder(
         output
             .as_mut()
             .expect("output initialized above")
-            .encode(decoded, output_seconds)?;
+            .encode(decoded, mapped)?;
     }
     Ok(())
 }
 
 struct TimelineSelection<'a> {
     clips: &'a [FinalizeClip],
+    layout: Vec<TimelineClipLayout>,
     index: usize,
-    output_offset: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum TimelineBlend {
+    Normal,
+    Outgoing,
+    Incoming { progress: f64 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MappedFrame {
+    output_seconds: f64,
+    blend: TimelineBlend,
 }
 
 impl<'a> TimelineSelection<'a> {
     fn new(clips: &'a [FinalizeClip]) -> Self {
         Self {
             clips,
+            layout: timeline_layout(clips),
             index: 0,
-            output_offset: 0.0,
         }
     }
 
-    fn map(&mut self, source_seconds: f64) -> Option<f64> {
+    fn map(&mut self, source_seconds: f64) -> Option<MappedFrame> {
         while let Some(clip) = self.clips.get(self.index) {
             let end = clip.start_seconds + clip.duration_seconds;
             if source_seconds < end {
                 break;
             }
-            self.output_offset += clip.duration_seconds;
             self.index += 1;
         }
         let clip = self.clips.get(self.index)?;
         if source_seconds < clip.start_seconds {
             return None;
         }
-        Some(self.output_offset + source_seconds - clip.start_seconds)
+        let layout = self.layout[self.index];
+        let local_seconds = source_seconds - clip.start_seconds;
+        let blend = if layout.fade_in_seconds > 0.0 && local_seconds < layout.fade_in_seconds {
+            TimelineBlend::Incoming {
+                progress: (local_seconds / layout.fade_in_seconds).clamp(0.0, 1.0),
+            }
+        } else if layout.fade_out_seconds > 0.0
+            && local_seconds >= clip.duration_seconds - layout.fade_out_seconds
+        {
+            TimelineBlend::Outgoing
+        } else {
+            TimelineBlend::Normal
+        };
+        Some(MappedFrame {
+            output_seconds: layout.output_start_seconds + local_seconds,
+            blend,
+        })
     }
 
     fn finished(&self) -> bool {
@@ -356,6 +430,7 @@ struct TimelineOutput {
     stream_time_base: Rational,
     fps: u32,
     last_pts: i64,
+    pending_outgoing: BTreeMap<i64, frame::Video>,
     finished: bool,
 }
 
@@ -466,11 +541,15 @@ impl TimelineOutput {
             stream_time_base,
             fps: plan.fps,
             last_pts: -1,
+            pending_outgoing: BTreeMap::new(),
             finished: false,
         })
     }
 
-    fn encode(&mut self, source: &frame::Video, output_seconds: f64) -> Result<(), FinalizeError> {
+    fn encode(&mut self, source: &frame::Video, mapped: MappedFrame) -> Result<(), FinalizeError> {
+        if mapped.blend == TimelineBlend::Normal {
+            self.flush_pending_outgoing()?;
+        }
         if source.format() != self.input_format
             || source.width() != self.input_width
             || source.height() != self.input_height
@@ -491,7 +570,27 @@ impl TimelineOutput {
         self.scaler
             .run(source, &mut self.converted)
             .map_err(FinalizeError::Convert)?;
-        let timestamp = (output_seconds * self.fps as f64).round().max(0.0) as i64;
+        let timestamp = (mapped.output_seconds * self.fps as f64).round().max(0.0) as i64;
+        match mapped.blend {
+            TimelineBlend::Outgoing => {
+                if timestamp > self.last_pts {
+                    self.pending_outgoing
+                        .entry(timestamp)
+                        .or_insert_with(|| self.converted.clone());
+                }
+                return Ok(());
+            }
+            TimelineBlend::Incoming { progress } => {
+                if let Some(outgoing) = self.take_pending_outgoing(timestamp) {
+                    blend_video_frames(&outgoing, &mut self.converted, progress);
+                }
+            }
+            TimelineBlend::Normal => {}
+        }
+        self.send_converted(timestamp)
+    }
+
+    fn send_converted(&mut self, timestamp: i64) -> Result<(), FinalizeError> {
         if timestamp <= self.last_pts {
             return Ok(());
         }
@@ -503,10 +602,31 @@ impl TimelineOutput {
         self.write_available_packets()
     }
 
+    fn take_pending_outgoing(&mut self, timestamp: i64) -> Option<frame::Video> {
+        let start = timestamp.saturating_sub(1);
+        let end = timestamp.saturating_add(1);
+        let key = self
+            .pending_outgoing
+            .range(start..=end)
+            .min_by_key(|(candidate, _)| candidate.abs_diff(timestamp))
+            .map(|(candidate, _)| *candidate)?;
+        self.pending_outgoing.remove(&key)
+    }
+
+    fn flush_pending_outgoing(&mut self) -> Result<(), FinalizeError> {
+        let pending = std::mem::take(&mut self.pending_outgoing);
+        for (timestamp, frame) in pending {
+            self.converted.clone_from(&frame);
+            self.send_converted(timestamp)?;
+        }
+        Ok(())
+    }
+
     fn finish(&mut self) -> Result<(), FinalizeError> {
         if self.finished {
             return Ok(());
         }
+        self.flush_pending_outgoing()?;
         self.encoder
             .send_eof()
             .map_err(FinalizeError::FlushEncoder)?;
@@ -536,6 +656,21 @@ impl TimelineOutput {
             }
         }
         Ok(())
+    }
+}
+
+fn blend_video_frames(outgoing: &frame::Video, incoming: &mut frame::Video, progress: f64) {
+    let incoming_weight = progress.clamp(0.0, 1.0);
+    let outgoing_weight = 1.0 - incoming_weight;
+    for plane in 0..incoming.planes().min(outgoing.planes()) {
+        let source = outgoing.data(plane);
+        let destination = incoming.data_mut(plane);
+        for (incoming, outgoing) in destination.iter_mut().zip(source) {
+            *incoming = (f64::from(*outgoing) * outgoing_weight
+                + f64::from(*incoming) * incoming_weight)
+                .round()
+                .clamp(0.0, 255.0) as u8;
+        }
     }
 }
 
@@ -590,11 +725,71 @@ mod tests {
         ];
         let mut selection = TimelineSelection::new(&clips);
         assert_eq!(selection.map(0.5), None);
-        assert_eq!(selection.map(1.5), Some(0.5));
+        assert_eq!(
+            selection.map(1.5),
+            Some(MappedFrame {
+                output_seconds: 0.5,
+                blend: TimelineBlend::Normal,
+            })
+        );
+        let outgoing = selection.map(2.8).unwrap();
+        assert!((outgoing.output_seconds - 1.8).abs() < 1e-9);
+        assert_eq!(outgoing.blend, TimelineBlend::Outgoing);
         assert_eq!(selection.map(4.0), None);
-        assert_eq!(selection.map(5.25), Some(2.25));
+        assert_eq!(
+            selection.map(5.125),
+            Some(MappedFrame {
+                output_seconds: 1.875,
+                blend: TimelineBlend::Incoming { progress: 0.5 },
+            })
+        );
+        assert_eq!(
+            selection.map(5.25),
+            Some(MappedFrame {
+                output_seconds: 2.0,
+                blend: TimelineBlend::Normal,
+            })
+        );
         assert_eq!(selection.map(6.0), None);
         assert!(selection.finished());
+    }
+
+    #[test]
+    fn adjacent_metadata_clips_do_not_create_a_transition() {
+        let clips = vec![
+            FinalizeClip {
+                source: "room.mkv".to_owned(),
+                start_seconds: 0.0,
+                duration_seconds: 1.0,
+                music_event: "event:/music/a".to_owned(),
+                music_timeline_milliseconds: 0,
+            },
+            FinalizeClip {
+                source: "room.mkv".to_owned(),
+                start_seconds: 1.0,
+                duration_seconds: 1.0,
+                music_event: "event:/music/a".to_owned(),
+                music_timeline_milliseconds: 1_000,
+            },
+        ];
+        let layout = timeline_layout(&clips);
+        assert_eq!(layout[0].fade_out_seconds, 0.0);
+        assert_eq!(layout[1].fade_in_seconds, 0.0);
+        assert_eq!(layout[1].output_start_seconds, 1.0);
+    }
+
+    #[test]
+    fn video_frame_blending_interpolates_the_transition() {
+        let mut outgoing = frame::Video::new(ffmpeg::format::Pixel::YUV420P, 2, 2);
+        let mut incoming = frame::Video::new(ffmpeg::format::Pixel::YUV420P, 2, 2);
+        for plane in 0..outgoing.planes() {
+            outgoing.data_mut(plane).fill(20);
+            incoming.data_mut(plane).fill(220);
+        }
+        blend_video_frames(&outgoing, &mut incoming, 0.5);
+        for plane in 0..incoming.planes() {
+            assert!(incoming.data(plane).iter().all(|value| *value == 120));
+        }
     }
 
     #[test]
@@ -636,9 +831,11 @@ mod tests {
         let video_stream = joined.streams().best(media::Type::Video).unwrap();
         let stream_index = video_stream.index();
         let time_base = video_stream.time_base();
+        let video_stream_duration = video_stream.duration() as f64 * f64::from(time_base);
         drop(video_stream);
         let audio_stream = joined.streams().best(media::Type::Audio).unwrap();
         assert_eq!(audio_stream.parameters().id(), codec::Id::AAC);
+        let audio_duration = audio_stream.duration() as f64 * f64::from(audio_stream.time_base());
         drop(audio_stream);
         let mut last_timestamp = 0_i64;
         for (stream, packet) in joined.packets() {
@@ -646,7 +843,14 @@ mod tests {
                 last_timestamp = last_timestamp.max(packet.pts().unwrap_or(0));
             }
         }
-        assert!(last_timestamp as f64 * f64::from(time_base) > 0.8);
+        let video_duration = last_timestamp as f64 * f64::from(time_base);
+        assert!(
+            (0.60..0.75).contains(&video_duration),
+            "unexpected crossfaded video duration {video_duration}"
+        );
+        assert!((0.60..0.75).contains(&video_stream_duration));
+        assert!((0.70..0.82).contains(&audio_duration));
+        assert!((audio_duration - video_stream_duration).abs() < 0.15);
     }
 
     fn write_continuous_source(path: &Path) {
