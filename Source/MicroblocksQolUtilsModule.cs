@@ -21,6 +21,7 @@ public sealed class MicroblocksQolUtilsModule : EverestModule {
     public override void Load() {
         Logger.Log(LogLevel.Info, "MicroblocksQolUtils", "Loading microblock's QoL Utils");
         FrameRateCounter.Reset();
+        WindowsInputLanguage.Load();
         MaterialTextInputFocus.Load();
         CollabUtils2Bridge.Load();
         MaterialChapterSelect.Load();
@@ -57,6 +58,7 @@ public sealed class MicroblocksQolUtilsModule : EverestModule {
         MiaoNetBridge.Unload();
         MotionSmoothingBridge.Unload();
         MaterialTextInputFocus.Unload();
+        WindowsInputLanguage.Unload();
         FrameRateCounter.Reset();
         MaterialUi.Dispose();
         MiniMapRenderer.Dispose();
@@ -74,6 +76,7 @@ public sealed class MicroblocksQolUtilsModule : EverestModule {
         try {
             orig(self, gameTime);
             MaterialUiSmoke.Update();
+            WindowsInputLanguage.Update();
         } finally {
             FrameProfiler.EndUpdate();
             FrameRateCounter.TickUpdate();

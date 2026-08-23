@@ -31,6 +31,8 @@ Implemented:
   (plus `qol_watch`, `qol_unwatch`, `qol_watch_list` in the Everest console).
 - Background Windows balloon notifications when a watched player changes rooms.
 - Optional suppression of MiaoNet's off-screen name labels.
+- Optional Windows input-language control: text fields use an installed Chinese
+  keyboard layout, while normal gameplay stays locked to an English layout.
 - Near-instant room transitions (camera/player/light interpolation removed).
 - Optional instant respawns that skip the death animation and death screen wipe.
 - Three-state collision-box rendering: hidden, overlaid on gameplay, or collision boxes only.

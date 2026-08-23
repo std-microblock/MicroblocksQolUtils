@@ -55,6 +55,9 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue(false)]
     public bool ChapterSelectShowCollabMaps { get; set; }
 
+    [DefaultValue(false)]
+    public bool AutoSwitchInputLanguage { get; set; }
+
     [DefaultValue("Microsoft YaHei UI")]
     public string FontFamily { get; set; } = "Microsoft YaHei UI";
 
