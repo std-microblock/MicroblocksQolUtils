@@ -51,7 +51,15 @@ public sealed class QolHud : Entity {
                     palette.Outline
                 );
             }
-            SystemTtfFont.Draw(text, position, Vector2.Zero, 0.43f, palette.OnSurface, 0f);
+            SystemTtfFont.Draw(
+                text,
+                position,
+                Vector2.Zero,
+                0.43f,
+                palette.OnSurface,
+                settings.HudMaterialSurfaces ? 0f : 1f,
+                Color.Black
+            );
             if (settings.EnableFrameProfiler) FrameProfiler.RenderHud(new Vector2(18f, 48f));
         }
     }

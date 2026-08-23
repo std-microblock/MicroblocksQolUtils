@@ -93,7 +93,8 @@ public static class MiniMapRenderer {
                 new Vector2(0.5f, 0f),
                 0.42f,
                 palette.OnSurface,
-                0f
+                settings.HudMaterialSurfaces ? 0f : 1f,
+                Color.Black
             );
         }
     }
