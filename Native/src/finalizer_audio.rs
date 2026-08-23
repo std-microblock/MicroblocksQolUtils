@@ -7,7 +7,7 @@ use ffmpeg::{ChannelLayout, Packet, Rational, codec, encoder, format, frame, med
 use ffmpeg_next as ffmpeg;
 use thiserror::Error;
 
-use crate::finalizer::FinalizeClip;
+use crate::finalizer::{FinalizeClip, TimelineClipLayout, timeline_layout};
 
 const SIDECAR_MAGIC: &[u8; 8] = b"MQOLAUD1";
 const CHUNK_HEADER_BYTES: usize = 24;
@@ -94,6 +94,31 @@ struct AudioSpec {
     total_frames: u64,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct AudioClipLayout {
+    output_start_frames: u64,
+    clip_frames: u64,
+    fade_in_frames: u64,
+    fade_out_frames: u64,
+}
+
+impl AudioClipLayout {
+    fn gain_at(self, local_frame: u64) -> f32 {
+        let fade_in = if self.fade_in_frames > 0 && local_frame < self.fade_in_frames {
+            local_frame as f32 / self.fade_in_frames as f32
+        } else {
+            1.0
+        };
+        let fade_out_start = self.clip_frames.saturating_sub(self.fade_out_frames);
+        let fade_out = if self.fade_out_frames > 0 && local_frame >= fade_out_start {
+            (self.clip_frames.saturating_sub(local_frame)) as f32 / self.fade_out_frames as f32
+        } else {
+            1.0
+        };
+        fade_in.min(fade_out).clamp(0.0, 1.0)
+    }
+}
+
 #[derive(Debug)]
 struct SidecarChunk {
     media_time_nanos: u64,
@@ -163,12 +188,8 @@ fn render_mix(
             channels: first.channels,
         });
     }
-    let total_frames = clips.iter().try_fold(0_u64, |total, clip| {
-        let frames = seconds_to_frames(clip.duration_seconds, first.sample_rate)?;
-        total
-            .checked_add(frames)
-            .ok_or(AudioFinalizeError::TimelineTooLarge)
-    })?;
+    let clip_layout = audio_timeline_layout(clips, first.sample_rate)?;
+    let total_frames = total_frames_from_layout(&clip_layout)?;
     let total_bytes = total_frames
         .checked_mul(u64::from(first.channels))
         .and_then(|samples| samples.checked_mul(4))
@@ -188,6 +209,7 @@ fn render_mix(
         &mut mixed,
         &first,
         clips,
+        &clip_layout,
         first.sample_rate,
         first.channels,
         bgm_map,
@@ -207,6 +229,7 @@ fn render_mix(
             &mut mixed,
             &chunk,
             clips,
+            &clip_layout,
             first.sample_rate,
             first.channels,
             bgm_map,
@@ -227,10 +250,40 @@ fn total_timeline_frames(
     clips: &[FinalizeClip],
     sample_rate: u32,
 ) -> Result<u64, AudioFinalizeError> {
-    clips.iter().try_fold(0_u64, |total, clip| {
-        total
-            .checked_add(seconds_to_frames(clip.duration_seconds, sample_rate)?)
-            .ok_or(AudioFinalizeError::TimelineTooLarge)
+    total_frames_from_layout(&audio_timeline_layout(clips, sample_rate)?)
+}
+
+fn audio_timeline_layout(
+    clips: &[FinalizeClip],
+    sample_rate: u32,
+) -> Result<Vec<AudioClipLayout>, AudioFinalizeError> {
+    timeline_layout(clips)
+        .into_iter()
+        .zip(clips)
+        .map(|(layout, clip)| audio_clip_layout(layout, clip, sample_rate))
+        .collect()
+}
+
+fn audio_clip_layout(
+    layout: TimelineClipLayout,
+    clip: &FinalizeClip,
+    sample_rate: u32,
+) -> Result<AudioClipLayout, AudioFinalizeError> {
+    Ok(AudioClipLayout {
+        output_start_frames: seconds_to_frames(layout.output_start_seconds, sample_rate)?,
+        clip_frames: seconds_to_frames(clip.duration_seconds, sample_rate)?,
+        fade_in_frames: seconds_to_frames(layout.fade_in_seconds, sample_rate)?,
+        fade_out_frames: seconds_to_frames(layout.fade_out_seconds, sample_rate)?,
+    })
+}
+
+fn total_frames_from_layout(layout: &[AudioClipLayout]) -> Result<u64, AudioFinalizeError> {
+    layout.iter().try_fold(0_u64, |total, clip| {
+        Ok(total.max(
+            clip.output_start_frames
+                .checked_add(clip.clip_frames)
+                .ok_or(AudioFinalizeError::TimelineTooLarge)?,
+        ))
     })
 }
 
@@ -293,22 +346,18 @@ fn mix_bgm_tracks(
         .write(true)
         .open(mixed_pcm)
         .map_err(|source| io_error(mixed_pcm, source))?;
-    let mut output_offset = 0_u64;
-    for clip in clips {
-        let clip_frames = seconds_to_frames(clip.duration_seconds, spec.sample_rate)?;
+    let clip_layout = audio_timeline_layout(clips, spec.sample_rate)?;
+    for (clip, layout) in clips.iter().zip(clip_layout) {
         if let Some(path) = event_map.get(&clip.music_event) {
             mix_bgm_segment(
                 &mut mixed,
                 path,
                 clip.music_timeline_milliseconds.max(0) as f64 / 1_000.0,
                 clip.duration_seconds,
-                output_offset,
+                layout,
                 spec,
             )?;
         }
-        output_offset = output_offset
-            .checked_add(clip_frames)
-            .ok_or(AudioFinalizeError::TimelineTooLarge)?;
     }
     mixed.flush().map_err(|source| io_error(mixed_pcm, source))
 }
@@ -318,7 +367,7 @@ fn mix_bgm_segment(
     path: &Path,
     source_start_seconds: f64,
     duration_seconds: f64,
-    output_offset_frames: u64,
+    clip_layout: AudioClipLayout,
     spec: AudioSpec,
 ) -> Result<(), AudioFinalizeError> {
     let mut input = format::input(path).map_err(|source| AudioFinalizeError::OpenBgm {
@@ -381,7 +430,7 @@ fn mix_bgm_segment(
             input_time_base,
             source_start_seconds,
             source_end_seconds,
-            output_offset_frames,
+            clip_layout,
             spec,
             &mut fallback_seconds,
         )? {
@@ -399,7 +448,7 @@ fn mix_bgm_segment(
             input_time_base,
             source_start_seconds,
             source_end_seconds,
-            output_offset_frames,
+            clip_layout,
             spec,
             &mut fallback_seconds,
         )?;
@@ -416,7 +465,7 @@ fn drain_bgm_decoder(
     input_time_base: Rational,
     source_start_seconds: f64,
     source_end_seconds: f64,
-    output_offset_frames: u64,
+    clip_layout: AudioClipLayout,
     spec: AudioSpec,
     fallback_seconds: &mut f64,
 ) -> Result<bool, AudioFinalizeError> {
@@ -457,11 +506,11 @@ fn drain_bgm_decoder(
             let mut frames =
                 seconds_to_frames(overlap_end - overlap_start, spec.sample_rate)? as usize;
             frames = frames.min(converted_frames.saturating_sub(source_frame));
-            let destination_frame = output_offset_frames
-                .checked_add(seconds_to_frames(
-                    overlap_start - source_start_seconds,
-                    spec.sample_rate,
-                )?)
+            let local_frame =
+                seconds_to_frames(overlap_start - source_start_seconds, spec.sample_rate)?;
+            let destination_frame = clip_layout
+                .output_start_frames
+                .checked_add(local_frame)
                 .ok_or(AudioFinalizeError::TimelineTooLarge)?;
             let channels = usize::from(spec.channels);
             let samples = converted.plane::<f32>(0);
@@ -470,6 +519,8 @@ fn drain_bgm_decoder(
                 destination_frame,
                 &samples[source_frame * channels..(source_frame + frames) * channels],
                 spec.channels,
+                clip_layout,
+                local_frame,
             )?;
         }
     }
@@ -480,6 +531,7 @@ fn mix_chunk(
     mixed: &mut File,
     chunk: &SidecarChunk,
     clips: &[FinalizeClip],
+    clip_layout: &[AudioClipLayout],
     sample_rate: u32,
     channels: u16,
     bgm_map: &HashMap<String, PathBuf>,
@@ -492,22 +544,21 @@ fn mix_chunk(
     let chunk_frames = chunk.samples.len() / channel_count;
     let chunk_start = nanos_to_frames(chunk.media_time_nanos, sample_rate);
     let chunk_end = chunk_start.saturating_add(chunk_frames as u64);
-    let mut output_offset = 0_u64;
-    for clip in clips {
-        let clip_frames = seconds_to_frames(clip.duration_seconds, sample_rate)?;
+    for (clip, layout) in clips.iter().zip(clip_layout) {
         if chunk.bus_id == 3 && bgm_map.contains_key(&clip.music_event) {
-            output_offset = output_offset
-                .checked_add(clip_frames)
-                .ok_or(AudioFinalizeError::TimelineTooLarge)?;
             continue;
         }
         let clip_start = seconds_to_frames(clip.start_seconds, sample_rate)?;
-        let clip_end = clip_start.saturating_add(clip_frames);
+        let clip_end = clip_start.saturating_add(layout.clip_frames);
         let overlap_start = chunk_start.max(clip_start);
         let overlap_end = chunk_end.min(clip_end);
         if overlap_start < overlap_end {
             let source_frame = (overlap_start - chunk_start) as usize;
-            let destination_frame = output_offset + overlap_start - clip_start;
+            let local_frame = overlap_start - clip_start;
+            let destination_frame = layout
+                .output_start_frames
+                .checked_add(local_frame)
+                .ok_or(AudioFinalizeError::TimelineTooLarge)?;
             let frames = (overlap_end - overlap_start) as usize;
             add_samples(
                 mixed,
@@ -515,11 +566,10 @@ fn mix_chunk(
                 &chunk.samples
                     [source_frame * channel_count..(source_frame + frames) * channel_count],
                 channels,
+                *layout,
+                local_frame,
             )?;
         }
-        output_offset = output_offset
-            .checked_add(clip_frames)
-            .ok_or(AudioFinalizeError::TimelineTooLarge)?;
     }
     Ok(())
 }
@@ -529,6 +579,8 @@ fn add_samples(
     destination_frame: u64,
     samples: &[f32],
     channels: u16,
+    clip_layout: AudioClipLayout,
+    clip_local_start_frame: u64,
 ) -> Result<(), AudioFinalizeError> {
     let byte_offset = destination_frame
         .checked_mul(u64::from(channels))
@@ -545,8 +597,10 @@ fn add_samples(
     for (index, sample) in samples.iter().enumerate() {
         let offset = index * 4;
         let existing = f32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
+        let local_frame = clip_local_start_frame + index as u64 / u64::from(channels);
+        let gain = clip_layout.gain_at(local_frame);
         bytes[offset..offset + 4]
-            .copy_from_slice(&(existing + sample).clamp(-1.0, 1.0).to_le_bytes());
+            .copy_from_slice(&(existing + sample * gain).clamp(-1.0, 1.0).to_le_bytes());
     }
     mixed
         .seek(SeekFrom::Start(byte_offset))
@@ -946,6 +1000,58 @@ mod tests {
             .collect();
         assert_eq!(values.len(), 4);
         assert!(values.iter().all(|value| (*value - 0.5).abs() < 1e-6));
+    }
+
+    #[test]
+    fn disjoint_clips_crossfade_audio_on_the_same_timeline_as_video() {
+        let directory = tempfile::tempdir().unwrap();
+        let sidecar = directory.path().join("room.mkv.sfxchunks");
+        let mixed = directory.path().join("mixed.f32");
+        let mut writer = BufWriter::new(File::create(&sidecar).unwrap());
+        writer.write_all(SIDECAR_MAGIC).unwrap();
+        for (second, value) in [0.8_f32, 0.0, -0.8].into_iter().enumerate() {
+            write_audio_chunk(
+                &mut writer,
+                &AudioChunk {
+                    media_time_nanos: second as u64 * 1_000_000_000,
+                    sample_rate: 8_000,
+                    channels: 2,
+                    bus_id: 1,
+                    samples: vec![value; 8_000 * 2],
+                },
+            )
+            .unwrap();
+        }
+        writer.flush().unwrap();
+
+        let clips = [
+            FinalizeClip {
+                source: "room.mkv".to_owned(),
+                start_seconds: 0.0,
+                duration_seconds: 1.0,
+                music_event: String::new(),
+                music_timeline_milliseconds: 0,
+            },
+            FinalizeClip {
+                source: "room.mkv".to_owned(),
+                start_seconds: 2.0,
+                duration_seconds: 1.0,
+                music_event: String::new(),
+                music_timeline_milliseconds: 0,
+            },
+        ];
+        let spec = render_mix(&sidecar, &clips, &mixed, &HashMap::new())
+            .unwrap()
+            .unwrap();
+        assert_eq!(spec.total_frames, 14_000);
+        let values: Vec<f32> = fs::read(mixed)
+            .unwrap()
+            .chunks_exact(8)
+            .map(|frame| f32::from_le_bytes(frame[0..4].try_into().unwrap()))
+            .collect();
+        assert!((values[6_000] - 0.8).abs() < 1e-6);
+        assert!(values[7_000].abs() < 1e-6);
+        assert!((values[8_000] + 0.8).abs() < 1e-6);
     }
 
     #[test]

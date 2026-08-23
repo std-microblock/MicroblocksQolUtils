@@ -177,35 +177,46 @@ struct AudioChunkQueue {
 
 #[derive(Debug)]
 struct AudioBusClock {
-    origin_nanos: AtomicU64,
-    frames: AtomicU64,
+    next_nanos: AtomicU64,
 }
 
 impl AudioBusClock {
+    const RESYNC_THRESHOLD_NANOS: u64 = 250_000_000;
+
     const fn new() -> Self {
         Self {
-            origin_nanos: AtomicU64::new(u64::MAX),
-            frames: AtomicU64::new(0),
+            next_nanos: AtomicU64::new(u64::MAX),
         }
     }
 
     fn reserve(&self, frame_count: u64, sample_rate: u32, fallback_nanos: u64) -> u64 {
-        let origin = match self.origin_nanos.compare_exchange(
-            u64::MAX,
-            fallback_nanos,
-            Ordering::AcqRel,
-            Ordering::Acquire,
-        ) {
-            Ok(_) => fallback_nanos,
-            Err(existing) => existing,
-        };
-        let start_frame = self.frames.fetch_add(frame_count, Ordering::Relaxed);
-        origin.saturating_add(
-            start_frame
-                .saturating_mul(1_000_000_000)
-                .checked_div(u64::from(sample_rate))
-                .unwrap_or(0),
-        )
+        let duration_nanos = frame_count
+            .saturating_mul(1_000_000_000)
+            .checked_div(u64::from(sample_rate))
+            .unwrap_or(0);
+        let mut observed = self.next_nanos.load(Ordering::Acquire);
+        loop {
+            // FMOD can stop producing DSP blocks while a pause or save-state load is being
+            // removed from the video timeline. Snap forward to the video clock after a real
+            // stall so every later SFX chunk keeps its original on-screen timestamp.
+            let start = if observed == u64::MAX
+                || fallback_nanos.saturating_sub(observed) > Self::RESYNC_THRESHOLD_NANOS
+            {
+                fallback_nanos
+            } else {
+                observed
+            };
+            let next = start.saturating_add(duration_nanos);
+            match self.next_nanos.compare_exchange_weak(
+                observed,
+                next,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(_) => return start,
+                Err(actual) => observed = actual,
+            }
+        }
     }
 }
 
@@ -1189,11 +1200,12 @@ mod tests {
     }
 
     #[test]
-    fn audio_bus_clock_advances_even_when_a_chunk_would_be_dropped() {
+    fn audio_bus_clock_advances_and_resynchronizes_after_a_video_clock_jump() {
         let clock = AudioBusClock::new();
         assert_eq!(clock.reserve(480, 48_000, 2_000_000_000), 2_000_000_000);
-        assert_eq!(clock.reserve(960, 48_000, 9_000_000_000), 2_010_000_000);
-        assert_eq!(clock.reserve(480, 48_000, 9_000_000_000), 2_030_000_000);
+        assert_eq!(clock.reserve(960, 48_000, 2_050_000_000), 2_010_000_000);
+        assert_eq!(clock.reserve(480, 48_000, 9_000_000_000), 9_000_000_000);
+        assert_eq!(clock.reserve(480, 48_000, 9_000_000_000), 9_010_000_000);
     }
 
     #[test]
