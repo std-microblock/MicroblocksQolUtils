@@ -1,23 +1,9 @@
-using System.Drawing.Drawing2D;
-using System.Drawing.Imaging;
-using System.Drawing.Text;
 using System.Reflection;
-using System.Runtime.InteropServices;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Monocle;
-using DrawingBitmap = System.Drawing.Bitmap;
-using DrawingFont = System.Drawing.Font;
-using DrawingFontFamily = System.Drawing.FontFamily;
-using DrawingFontStyle = System.Drawing.FontStyle;
-using DrawingGraphics = System.Drawing.Graphics;
-using DrawingGraphicsUnit = System.Drawing.GraphicsUnit;
-using DrawingPointF = System.Drawing.PointF;
-using DrawingStringFormat = System.Drawing.StringFormat;
-using DrawingStringFormatFlags = System.Drawing.StringFormatFlags;
+using SkiaSharp;
 using XnaMatrix = Microsoft.Xna.Framework.Matrix;
-
-#pragma warning disable CA1416
 
 namespace Celeste.Mod.MicroblocksQolUtils;
 
@@ -27,70 +13,65 @@ public enum UiFontWeight {
 }
 
 /// <summary>
-/// Rasterizes glyphs directly from a Windows-installed font or an arbitrary
-/// user-supplied TTF/OTF. Glyph textures are created lazily and retained on the
-/// GPU; no Celeste bitmap-font atlas is required.
+/// Renders complete text runs with Skia, uploads the exact alpha mask, and
+/// draws every texel at one physical screen pixel. The CPU reference image and
+/// the runtime texture therefore share the same rasterization bytes.
 /// </summary>
 public static class SystemTtfFont {
     private const float BasePixelSize = 42f;
     private const float BaseLineHeight = 54f;
-    private static readonly Dictionary<(char Character, int PixelSize, UiFontWeight Weight), Glyph> Glyphs = [];
-    private static readonly Dictionary<(int PixelSize, UiFontWeight Weight), DrawingFont> Fonts = [];
+    private const int MaxCachedRuns = 512;
     private const BindingFlags SpriteBatchFields = BindingFlags.Instance | BindingFlags.NonPublic;
     private static readonly FieldInfo SpriteBatchBeginCalledField = RequiredSpriteBatchField("beginCalled", "_beginCalled");
     private static readonly FieldInfo SpriteBatchTransformMatrixField = RequiredSpriteBatchField(
         "transformMatrix", "_transformMatrix");
-    private static PrivateFontCollection? privateFonts;
-    private static DrawingFontFamily? fontFamily;
-    private static DrawingStringFormat? stringFormat;
+    private static readonly Dictionary<TextRunKey, TextRunCacheEntry> Runs = [];
+    private static readonly LinkedList<TextRunKey> RunLru = [];
+    private static SKTypeface? regularTypeface;
+    private static SKTypeface? boldTypeface;
+    private static bool synthesizeBold;
     private static string loadedIdentity = "";
 
     public static void Prepare() {
-        if (!OperatingSystem.IsWindows())
-            throw new PlatformNotSupportedException("System TTF rendering currently supports Windows only.");
-
         QolSettings settings = MicroblocksQolUtilsModule.Settings;
         string identity = string.IsNullOrWhiteSpace(settings.FontFile)
             ? $"family:{settings.FontFamily.Trim()}"
             : $"file:{Path.GetFullPath(Environment.ExpandEnvironmentVariables(settings.FontFile.Trim()))}";
-        if (fontFamily is not null && string.Equals(identity, loadedIdentity, StringComparison.OrdinalIgnoreCase)) return;
+        if (regularTypeface is not null && string.Equals(identity, loadedIdentity, StringComparison.OrdinalIgnoreCase))
+            return;
 
         Dispose();
         if (identity.StartsWith("file:", StringComparison.Ordinal)) {
             string path = identity[5..];
             if (!File.Exists(path)) throw new FileNotFoundException("Configured UI font does not exist.", path);
-            privateFonts = new PrivateFontCollection();
-            privateFonts.AddFontFile(path);
-            if (privateFonts.Families.Length == 0) throw new InvalidDataException($"No font family found in {path}");
-            fontFamily = privateFonts.Families[0];
+            regularTypeface = SKTypeface.FromFile(path)
+                ?? throw new InvalidDataException($"No font face found in {path}");
+            boldTypeface = SKTypeface.FromFile(path)
+                ?? throw new InvalidDataException($"No font face found in {path}");
+            synthesizeBold = boldTypeface.FontStyle.Weight < (int)SKFontStyleWeight.SemiBold;
         } else {
             string familyName = settings.FontFamily.Trim();
             if (familyName.Length == 0) familyName = "Microsoft YaHei UI";
-            fontFamily = new DrawingFontFamily(familyName);
+            regularTypeface = SKTypeface.FromFamilyName(familyName, SKFontStyle.Normal)
+                ?? throw new InvalidOperationException($"Unable to load UI font family {familyName}");
+            boldTypeface = SKTypeface.FromFamilyName(familyName, SKFontStyle.Bold)
+                ?? throw new InvalidOperationException($"Unable to load bold UI font family {familyName}");
+            synthesizeBold = false;
         }
 
-        stringFormat = (DrawingStringFormat)DrawingStringFormat.GenericTypographic.Clone();
-        stringFormat.FormatFlags |= DrawingStringFormatFlags.MeasureTrailingSpaces;
         loadedIdentity = identity;
-        Logger.Log(LogLevel.Info, "MicroblocksQolUtils", $"Using system UI font {fontFamily.Name} ({identity})");
+        Logger.Log(LogLevel.Info, "MicroblocksQolUtils",
+            $"Using Skia UI font {regularTypeface.FamilyName} / {boldTypeface.FamilyName} ({identity})");
     }
 
-    public static Vector2 Measure(string text, float scale = 1f, UiFontWeight weight = UiFontWeight.Regular) {
-        return MeasureMetrics(text, RasterContext.Create(scale), weight).LayoutSize;
-    }
+    public static Vector2 Measure(string text, float scale = 1f, UiFontWeight weight = UiFontWeight.Regular) =>
+        MeasureMetrics(text, RasterContext.Create(scale), weight).LayoutSize;
 
-    /// <summary>
-    /// Returns the visible ink size rather than the font's full line box. This is
-    /// useful for centering short labels inside Material controls, where the
-    /// ascender padding included by GDI+ otherwise makes text look displaced.
-    /// </summary>
     public static Vector2 MeasureVisible(
         string text,
         float scale = 1f,
         UiFontWeight weight = UiFontWeight.Regular
-    ) {
-        return MeasureMetrics(text, RasterContext.Create(scale), weight).VisualBounds.Size;
-    }
+    ) => MeasureMetrics(text, RasterContext.Create(scale), weight).VisualBounds.Size;
 
     public static void Draw(
         string text,
@@ -105,22 +86,10 @@ public static class SystemTtfFont {
         if (string.IsNullOrEmpty(text)) return;
         Prepare();
         RasterContext context = RasterContext.Create(scale);
-        if (outline > 0f) {
-            Color stroke = outlineColor ?? Color.Black;
-            DrawCore(text, position + new Vector2(-outline, 0f), justify, context, stroke, weight);
-            DrawCore(text, position + new Vector2(outline, 0f), justify, context, stroke, weight);
-            DrawCore(text, position + new Vector2(0f, -outline), justify, context, stroke, weight);
-            DrawCore(text, position + new Vector2(0f, outline), justify, context, stroke, weight);
-        }
-        DrawCore(text, position, justify, context, color, weight);
+        Vector2 origin = MeasureMetrics(text, context, weight).LayoutSize * justify;
+        DrawWithOutline(text, position, origin, context, color, outline, outlineColor, weight);
     }
 
-    /// <summary>
-    /// Draws with justification applied to the visible glyph ink. Unlike Draw,
-    /// a zero justification places the visible top-left at <paramref name="position"/>,
-    /// and a 0.5 justification visually centers the text rather than its padded
-    /// GDI+ line box.
-    /// </summary>
     public static void DrawVisual(
         string text,
         Vector2 position,
@@ -136,43 +105,42 @@ public static class SystemTtfFont {
         RasterContext context = RasterContext.Create(scale);
         TextMetrics metrics = MeasureMetrics(text, context, weight);
         Vector2 origin = metrics.VisualBounds.Location + metrics.VisualBounds.Size * justify;
-        if (outline > 0f) {
-            Color stroke = outlineColor ?? Color.Black;
-            DrawCoreAligned(text, position + new Vector2(-outline, 0f), origin, context, stroke, weight);
-            DrawCoreAligned(text, position + new Vector2(outline, 0f), origin, context, stroke, weight);
-            DrawCoreAligned(text, position + new Vector2(0f, -outline), origin, context, stroke, weight);
-            DrawCoreAligned(text, position + new Vector2(0f, outline), origin, context, stroke, weight);
-        }
-        DrawCoreAligned(text, position, origin, context, color, weight);
+        DrawWithOutline(text, position, origin, context, color, outline, outlineColor, weight);
     }
 
     public static void Dispose() {
-        foreach (Glyph glyph in Glyphs.Values) glyph.Texture?.Dispose();
-        Glyphs.Clear();
-        foreach (DrawingFont font in Fonts.Values) font.Dispose();
-        Fonts.Clear();
-        stringFormat?.Dispose();
-        stringFormat = null;
-        fontFamily?.Dispose();
-        fontFamily = null;
-        privateFonts?.Dispose();
-        privateFonts = null;
+        foreach (TextRunCacheEntry entry in Runs.Values) entry.Run.Texture?.Dispose();
+        Runs.Clear();
+        RunLru.Clear();
+        regularTypeface?.Dispose();
+        regularTypeface = null;
+        boldTypeface?.Dispose();
+        boldTypeface = null;
+        synthesizeBold = false;
         loadedIdentity = "";
     }
 
-    private static void DrawCore(
+    private static void DrawWithOutline(
         string text,
         Vector2 position,
-        Vector2 justify,
+        Vector2 origin,
         RasterContext context,
         Color color,
+        float outline,
+        Color? outlineColor,
         UiFontWeight weight
     ) {
-        Vector2 origin = MeasureMetrics(text, context, weight).LayoutSize * justify;
-        DrawCoreAligned(text, position, origin, context, color, weight);
+        if (outline > 0f) {
+            Color stroke = outlineColor ?? Color.Black;
+            DrawCore(text, position + new Vector2(-outline, 0f), origin, context, stroke, weight);
+            DrawCore(text, position + new Vector2(outline, 0f), origin, context, stroke, weight);
+            DrawCore(text, position + new Vector2(0f, -outline), origin, context, stroke, weight);
+            DrawCore(text, position + new Vector2(0f, outline), origin, context, stroke, weight);
+        }
+        DrawCore(text, position, origin, context, color, weight);
     }
 
-    private static void DrawCoreAligned(
+    private static void DrawCore(
         string text,
         Vector2 position,
         Vector2 origin,
@@ -180,217 +148,96 @@ public static class SystemTtfFont {
         Color color,
         UiFontWeight weight
     ) {
-        Vector2 cursor = Vector2.Zero;
-        foreach (char character in text) {
-            if (character == '\n') {
-                cursor.X = 0f;
-                cursor.Y += context.LineHeight;
-                continue;
-            }
-
-            Glyph glyph = GetGlyph(character, context.PixelSize, weight);
-            if (glyph.Texture is not null) {
-                Vector2 at = position + cursor + context.ToLayout(glyph.Offset) - origin;
-                // Rasterize at the physical output size, then cancel the active UI transform
-                // while drawing. This keeps every glyph texel at 1:1 screen pixels even when
-                // Celeste scales its 1920x1080 UI to (for example) 2560x1440.
-                at = context.SnapToPixel(at);
-                Monocle.Draw.SpriteBatch.Draw(
-                    glyph.Texture,
-                    at,
-                    null,
-                    color,
-                    0f,
-                    Vector2.Zero,
-                    context.TextureScale,
-                    SpriteEffects.None,
-                    0f
-                );
-            }
-            cursor.X += context.ToLayoutX(glyph.Advance);
-        }
-    }
-
-    private static Glyph GetGlyph(char character, int pixelSize, UiFontWeight weight) {
-        Prepare();
-        var key = (character, pixelSize, weight);
-        if (Glyphs.TryGetValue(key, out Glyph? glyph)) return glyph;
-        if (fontFamily is null || stringFormat is null) throw new InvalidOperationException("UI font is not prepared.");
-
-        DrawingFont font = GetFont(pixelSize, weight);
-        if (character == '\t')
-            return Glyphs[key] = new Glyph(null, pixelSize * 2f,
-                Vector2.Zero, Vector2.Zero, Vector2.Zero);
-
-        string value = character.ToString();
-        float advance;
-        using (DrawingBitmap measure = new(1, 1, PixelFormat.Format32bppArgb))
-        using (DrawingGraphics graphics = DrawingGraphics.FromImage(measure)) {
-            graphics.PageUnit = DrawingGraphicsUnit.Pixel;
-            graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-            advance = Math.Max(1f, graphics.MeasureString(value, font, DrawingPointF.Empty, stringFormat).Width);
-        }
-        advance = MathF.Round(advance);
-        if (char.IsWhiteSpace(character))
-            return Glyphs[key] = new Glyph(null, advance,
-                Vector2.Zero, Vector2.Zero, Vector2.Zero);
-
-        int padding = Math.Max(2, (int)MathF.Ceiling(pixelSize / 10f));
-        int width = Math.Max(1, (int)Math.Ceiling(advance) + padding * 2);
-        int height = Math.Max(1, (int)Math.Ceiling(BaseLineHeight * pixelSize / BasePixelSize) + padding * 2);
-        using DrawingBitmap bitmap = new(width, height, PixelFormat.Format32bppArgb);
-        using (DrawingGraphics graphics = DrawingGraphics.FromImage(bitmap)) {
-            graphics.Clear(System.Drawing.Color.Transparent);
-            graphics.PageUnit = DrawingGraphicsUnit.Pixel;
-            graphics.CompositingMode = CompositingMode.SourceOver;
-            graphics.CompositingQuality = CompositingQuality.HighQuality;
-            graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            graphics.SmoothingMode = SmoothingMode.HighQuality;
-            graphics.TextRenderingHint = TextRenderingHint.AntiAliasGridFit;
-            graphics.TextContrast = 0;
-            using var brush = new System.Drawing.SolidBrush(System.Drawing.Color.White);
-            graphics.DrawString(value, font, brush, new DrawingPointF(padding, padding), stringFormat);
-        }
-
-        TextureData textureData = CreateTexture(bitmap);
-        Rectangle ink = textureData.InkBounds;
-        Vector2 textureOffset = new(-padding);
-        return Glyphs[key] = new Glyph(
-            textureData.Texture,
-            advance,
-            textureOffset,
-            textureOffset + new Vector2(ink.X, ink.Y),
-            new Vector2(ink.Width, ink.Height)
+        TextRun run = GetRun(text, context, weight, color);
+        if (run.Texture is null) return;
+        Color tint = OpacityTint(color);
+        Vector2 at = position + context.ToLayout(run.TextureOffsetPixels) - origin;
+        at = context.SnapToPixel(at);
+        Monocle.Draw.SpriteBatch.Draw(
+            run.Texture,
+            at,
+            null,
+            tint,
+            0f,
+            Vector2.Zero,
+            context.TextureScale,
+            SpriteEffects.None,
+            0f
         );
-    }
-
-    private static DrawingFont GetFont(int pixelSize, UiFontWeight weight) {
-        var key = (pixelSize, weight);
-        if (Fonts.TryGetValue(key, out DrawingFont? font)) return font;
-        if (fontFamily is null) throw new InvalidOperationException("UI font is not prepared.");
-        DrawingFontStyle style = weight == UiFontWeight.Bold && fontFamily.IsStyleAvailable(DrawingFontStyle.Bold)
-            ? DrawingFontStyle.Bold
-            : DrawingFontStyle.Regular;
-        font = new DrawingFont(fontFamily, pixelSize, style, DrawingGraphicsUnit.Pixel);
-        Fonts.Add(key, font);
-        return font;
-    }
-
-    private static TextureData CreateTexture(DrawingBitmap bitmap) {
-        var bounds = new System.Drawing.Rectangle(0, 0, bitmap.Width, bitmap.Height);
-        BitmapData data = bitmap.LockBits(bounds, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-        try {
-            int stride = Math.Abs(data.Stride);
-            byte[] pixels = new byte[stride * bitmap.Height];
-            Marshal.Copy(data.Scan0, pixels, 0, pixels.Length);
-            Color[] colors = new Color[bitmap.Width * bitmap.Height];
-            int inkLeft = bitmap.Width;
-            int inkTop = bitmap.Height;
-            int inkRight = 0;
-            int inkBottom = 0;
-            for (int y = 0; y < bitmap.Height; y++) {
-                int sourceY = data.Stride < 0 ? bitmap.Height - 1 - y : y;
-                int row = sourceY * stride;
-                for (int x = 0; x < bitmap.Width; x++) {
-                    int source = row + x * 4;
-                    byte alpha = SharpenCoverage(pixels[source + 3]);
-                    if (alpha != 0) {
-                        inkLeft = Math.Min(inkLeft, x);
-                        inkTop = Math.Min(inkTop, y);
-                        inkRight = Math.Max(inkRight, x + 1);
-                        inkBottom = Math.Max(inkBottom, y + 1);
-                    }
-                    // Monocle's normal AlphaBlend state expects premultiplied color.
-                    // Keeping RGB at 255 when A is zero turns every glyph texture into
-                    // a visible white rectangle instead of a transparent background.
-                    colors[y * bitmap.Width + x] = new Color(alpha, alpha, alpha, alpha);
-                }
-            }
-            Texture2D texture = new(Engine.Graphics.GraphicsDevice, bitmap.Width, bitmap.Height);
-            texture.SetData(colors);
-            Rectangle inkBounds = inkRight > inkLeft && inkBottom > inkTop
-                ? new Rectangle(inkLeft, inkTop, inkRight - inkLeft, inkBottom - inkTop)
-                : Rectangle.Empty;
-            return new TextureData(texture, inkBounds);
-        } finally {
-            bitmap.UnlockBits(data);
-        }
-    }
-
-    private static byte SharpenCoverage(byte alpha) {
-        int value = alpha;
-        int smooth = (value * value * (765 - value * 2) + 32512) / 65025;
-        return (byte)((value + smooth * 3 + 2) / 4);
     }
 
     private static TextMetrics MeasureMetrics(string text, RasterContext context, UiFontWeight weight) {
-        Prepare();
         if (string.IsNullOrEmpty(text)) return new TextMetrics(Vector2.Zero, FloatRect.Empty);
-
-        float width = 0f;
-        float lineWidth = 0f;
-        int lineCount = 1;
-        float inkLeft = float.MaxValue;
-        float inkRight = float.MinValue;
-        bool hasInk = false;
-        bool lineStartsWithWhitespace = true;
-        bool startsWithWhitespace = false;
-        bool endsWithWhitespace = false;
-
-        foreach (char character in text) {
-            if (character == '\n') {
-                width = Math.Max(width, lineWidth);
-                lineWidth = 0f;
-                lineCount++;
-                lineStartsWithWhitespace = true;
-                endsWithWhitespace = false;
-                continue;
-            }
-
-            Glyph glyph = GetGlyph(character, context.PixelSize, weight);
-            float advance = context.ToLayoutX(glyph.Advance);
-            Vector2 inkOffset = context.ToLayout(glyph.InkOffset);
-            Vector2 inkSize = context.ToLayout(glyph.InkSize);
-            if (lineStartsWithWhitespace && char.IsWhiteSpace(character)) startsWithWhitespace = true;
-            if (!char.IsWhiteSpace(character)) lineStartsWithWhitespace = false;
-            endsWithWhitespace = char.IsWhiteSpace(character);
-            if (glyph.Texture is not null && inkSize.X > 0f) {
-                hasInk = true;
-                inkLeft = Math.Min(inkLeft, lineWidth + inkOffset.X);
-                inkRight = Math.Max(inkRight, lineWidth + inkOffset.X + inkSize.X);
-            }
-            lineWidth += advance;
-        }
-        width = Math.Max(width, lineWidth);
-
-        FloatRect lineInk = GetVisualLineBounds(context, weight);
-        float visualLeft = hasInk ? inkLeft : 0f;
-        float visualRight = hasInk ? inkRight : width;
-        if (startsWithWhitespace) visualLeft = Math.Min(visualLeft, 0f);
-        if (endsWithWhitespace) visualRight = Math.Max(visualRight, lineWidth);
-        FloatRect visualBounds = new(
-            visualLeft,
-            lineInk.Y,
-            Math.Max(0f, visualRight - visualLeft),
-            Math.Max(0f, (lineCount - 1) * context.LineHeight + lineInk.Height)
+        TextRun run = GetRun(text, context, weight, Color.White);
+        return new TextMetrics(
+            context.ToLayout(run.LayoutPixels),
+            context.ToLayout(run.VisualBoundsPixels)
         );
-        return new TextMetrics(new Vector2(width, lineCount * context.LineHeight), visualBounds);
     }
 
-    private static FloatRect GetVisualLineBounds(RasterContext context, UiFontWeight weight) {
-        float top = float.MaxValue;
-        float bottom = float.MinValue;
-        foreach (char character in "Hg国") {
-            Glyph glyph = GetGlyph(character, context.PixelSize, weight);
-            Vector2 inkOffset = context.ToLayout(glyph.InkOffset);
-            Vector2 inkSize = context.ToLayout(glyph.InkSize);
-            if (glyph.Texture is null || inkSize.Y <= 0f) continue;
-            top = Math.Min(top, inkOffset.Y);
-            bottom = Math.Max(bottom, inkOffset.Y + inkSize.Y);
+    private static TextRun GetRun(string text, RasterContext context, UiFontWeight weight, Color color) {
+        Prepare();
+        BaseColor baseColor = GetBaseColor(color);
+        TextRunKey key = new(text, context.PixelSize, context.LineHeightPixels, weight,
+            baseColor.Red, baseColor.Green, baseColor.Blue);
+        if (Runs.TryGetValue(key, out TextRunCacheEntry? cached)) {
+            RunLru.Remove(cached.Node);
+            RunLru.AddFirst(cached.Node);
+            return cached.Run;
         }
-        return bottom > top
-            ? new FloatRect(0f, top, 0f, bottom - top)
-            : new FloatRect(0f, 0f, 0f, context.LineHeight);
+
+        SKTypeface typeface = weight == UiFontWeight.Bold
+            ? boldTypeface ?? throw new InvalidOperationException("Bold UI font is not prepared.")
+            : regularTypeface ?? throw new InvalidOperationException("UI font is not prepared.");
+        bool embolden = weight == UiFontWeight.Bold && synthesizeBold;
+        SkiaTextRaster raster = SkiaRasterizer.RasterizeText(
+            text, typeface, context.PixelSize, context.LineHeightPixels, embolden,
+            new SKColor(baseColor.Red, baseColor.Green, baseColor.Blue));
+        Texture2D? texture = raster.Image is null ? null : CreateTexture(raster.Image);
+        TextRun run = new(
+            texture,
+            new Vector2(raster.TextureOffsetX, raster.TextureOffsetY),
+            new Vector2(raster.LayoutWidth, raster.LayoutHeight),
+            new FloatRect(raster.VisualBounds.X, raster.VisualBounds.Y,
+                raster.VisualBounds.Width, raster.VisualBounds.Height)
+        );
+        LinkedListNode<TextRunKey> node = RunLru.AddFirst(key);
+        Runs.Add(key, new TextRunCacheEntry(run, node));
+        while (Runs.Count > MaxCachedRuns && RunLru.Last is { } last) {
+            RunLru.RemoveLast();
+            if (Runs.Remove(last.Value, out TextRunCacheEntry? evicted)) evicted.Run.Texture?.Dispose();
+        }
+        return run;
+    }
+
+    private static Texture2D CreateTexture(SkiaRasterImage image) {
+        Color[] colors = new Color[image.Width * image.Height];
+        for (int index = 0; index < colors.Length; index++) {
+            int source = index * 4;
+            colors[index] = new Color(
+                image.BgraPremultiplied[source + 2],
+                image.BgraPremultiplied[source + 1],
+                image.BgraPremultiplied[source],
+                image.BgraPremultiplied[source + 3]
+            );
+        }
+        Texture2D texture = new(Engine.Graphics.GraphicsDevice, image.Width, image.Height);
+        texture.SetData(colors);
+        return texture;
+    }
+
+    private static BaseColor GetBaseColor(Color color) {
+        if (color.A == 0) return new BaseColor(255, 255, 255);
+        return new BaseColor(
+            (byte)Math.Clamp((color.R * 255 + color.A / 2) / color.A, 0, 255),
+            (byte)Math.Clamp((color.G * 255 + color.A / 2) / color.A, 0, 255),
+            (byte)Math.Clamp((color.B * 255 + color.A / 2) / color.A, 0, 255)
+        );
+    }
+
+    private static Color OpacityTint(Color color) {
+        float opacity = color.A / 255f;
+        return Color.White * opacity;
     }
 
     private static FieldInfo RequiredSpriteBatchField(params string[] names) {
@@ -409,7 +256,7 @@ public static class SystemTtfFont {
                 && SpriteBatchTransformMatrixField.GetValue(spriteBatch) is XnaMatrix transform)
                 return transform;
         } catch {
-            // Fall through to the transform used by the normal high-resolution UI pass.
+            // Fall through to the normal high-resolution UI transform.
         }
         return HiresRenderer.DrawToBuffer ? XnaMatrix.Identity : Engine.ScreenMatrix;
     }
@@ -422,8 +269,7 @@ public static class SystemTtfFont {
 
     private readonly record struct RasterContext(
         int PixelSize,
-        float LineHeight,
-        Vector2 PixelsPerUnit,
+        int LineHeightPixels,
         Vector2 TextureScale,
         XnaMatrix Transform,
         XnaMatrix InverseTransform,
@@ -441,22 +287,20 @@ public static class SystemTtfFont {
             Vector2 textureScale = new(1f / pixelsPerUnit.X, 1f / pixelsPerUnit.Y);
             int pixelSize = Math.Max(8,
                 (int)MathF.Round(BasePixelSize * Math.Max(0.01f, scale) * pixelsPerUnit.Y));
-            float lineHeightPixels = Math.Max(1f,
-                MathF.Round(BaseLineHeight * Math.Max(0.01f, scale) * pixelsPerUnit.Y));
+            int lineHeightPixels = Math.Max(1,
+                (int)MathF.Round(BaseLineHeight * Math.Max(0.01f, scale) * pixelsPerUnit.Y));
             XnaMatrix inverse = screenAligned ? XnaMatrix.Invert(transform) : XnaMatrix.Identity;
-            return new RasterContext(
-                pixelSize,
-                lineHeightPixels / pixelsPerUnit.Y,
-                pixelsPerUnit,
-                textureScale,
-                transform,
-                inverse,
-                screenAligned
-            );
+            return new RasterContext(pixelSize, lineHeightPixels, textureScale,
+                transform, inverse, screenAligned);
         }
 
-        public float ToLayoutX(float pixels) => pixels / PixelsPerUnit.X;
         public Vector2 ToLayout(Vector2 pixels) => pixels * TextureScale;
+        public FloatRect ToLayout(FloatRect pixels) => new(
+            pixels.X * TextureScale.X,
+            pixels.Y * TextureScale.Y,
+            pixels.Width * TextureScale.X,
+            pixels.Height * TextureScale.Y
+        );
 
         public Vector2 SnapToPixel(Vector2 position) {
             if (!ScreenAligned) return new Vector2(MathF.Round(position.X), MathF.Round(position.Y));
@@ -466,15 +310,25 @@ public static class SystemTtfFont {
         }
     }
 
-    private sealed record Glyph(
-        Texture2D? Texture,
-        float Advance,
-        Vector2 Offset,
-        Vector2 InkOffset,
-        Vector2 InkSize
+    private readonly record struct TextRunKey(
+        string Text,
+        int PixelSize,
+        int LineHeightPixels,
+        UiFontWeight Weight,
+        byte Red,
+        byte Green,
+        byte Blue
     );
 
-    private sealed record TextureData(Texture2D Texture, Rectangle InkBounds);
+    private readonly record struct BaseColor(byte Red, byte Green, byte Blue);
 
+    private sealed record TextRun(
+        Texture2D? Texture,
+        Vector2 TextureOffsetPixels,
+        Vector2 LayoutPixels,
+        FloatRect VisualBoundsPixels
+    );
+
+    private sealed record TextRunCacheEntry(TextRun Run, LinkedListNode<TextRunKey> Node);
     private readonly record struct TextMetrics(Vector2 LayoutSize, FloatRect VisualBounds);
 }
