@@ -13,6 +13,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private const float RecorderHeroHeight = 150f;
     private const float RecorderFileHeight = 76f;
     private const float RecorderSettingHeight = 92f;
+    private const float DropdownItemHeight = 42f;
+    private const int DropdownMaxVisibleItems = 7;
 
     private static QolSettingsOverlay? activePage;
 
@@ -36,6 +38,9 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private bool textInputSubscribed;
     private float editError;
     private SettingRow? draggedSlider;
+    private SettingRow? dropdownRow;
+    private int dropdownHighlight;
+    private int dropdownFirstVisible;
     private CloseDestination closeDestination;
     private readonly List<RecordingLibraryEntry> recordingFiles = [];
     private int recorderSelectedItem;
@@ -118,6 +123,11 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         }
         if (inputDelay > 0f) return;
 
+        if (dropdownRow is not null) {
+            UpdateDropdown(layout);
+            return;
+        }
+
         if (Input.Pause.Pressed) {
             BeginClose(CloseDestination.Game);
             return;
@@ -184,9 +194,12 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
         RenderNavigation(layout, palette);
         RenderContent(layout, palette);
+        if (dropdownRow is not null) RenderDropdown(layout, palette);
 
         string footer = IsProfilerTab
             ? "点击开始后会自动返回游戏，采样 10 秒；完成后回到这里查看报告"
+            : dropdownRow is not null
+                ? "↑↓ 选择  ·  Enter 确认  ·  Esc 关闭下拉框"
             : editingRow is not null
             ? "输入后按 Enter 保存，Esc 取消"
             : IsRecorderTab
@@ -515,21 +528,68 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         }
     }
 
-    private static void RenderEnum(SettingRow row, MaterialRect rect, MaterialPalette palette,
+    private void RenderEnum(SettingRow row, MaterialRect rect, MaterialPalette palette,
         float alpha, bool enabled) {
         MaterialRect control = WideControlRect(rect);
+        bool open = dropdownRow == row;
         MaterialUi.RoundedRect(control.X, control.Y, control.Width, control.Height, 16f,
             palette.Surface * (0.72f * alpha));
-        MaterialUi.RoundedOutline(control.X, control.Y, control.Width, control.Height, 16f, 1f,
-            palette.Outline * (0.48f * alpha));
-        MaterialUiKit.Text("<", new Vector2(control.X + 18f, control.Center.Y), new Vector2(0f, 0.5f),
-            MaterialTextRole.Label, palette.OnSurfaceVariant, alpha, scaleOverride: 0.27f);
-        MaterialUiKit.Text(Trim(row.Value(), 28), control.Center,
-            new Vector2(0.5f), MaterialTextRole.Label,
+        MaterialUi.RoundedOutline(control.X, control.Y, control.Width, control.Height, 16f,
+            open ? 2f : 1f, (open ? palette.Primary : palette.Outline) * (alpha * (open ? 1f : 0.48f)));
+        MaterialUiKit.Text(Trim(row.Value(), 34), new Vector2(control.X + 14f, control.Center.Y),
+            new Vector2(0f, 0.5f), MaterialTextRole.Label,
             enabled ? palette.OnSurface : palette.OnSurfaceVariant * 0.5f, alpha, scaleOverride: 0.28f);
-        MaterialUiKit.Text(">", new Vector2(control.Right - 18f, control.Center.Y),
+        MaterialUiKit.Text(open ? "▲" : "▼", new Vector2(control.Right - 16f, control.Center.Y),
             new Vector2(1f, 0.5f), MaterialTextRole.Label, palette.OnSurfaceVariant, alpha,
-            scaleOverride: 0.27f);
+            scaleOverride: 0.20f);
+    }
+
+    private void RenderDropdown(OverlayLayout layout, MaterialPalette palette) {
+        SettingRow? row = dropdownRow;
+        if (row?.Options is null || row.Options.Count == 0) return;
+        MaterialRect menu = DropdownRect(layout, row);
+        float alpha = ease * contentEase;
+        MaterialUi.RoundedRect(menu.X, menu.Y + 5f, menu.Width, menu.Height, 18f,
+            Color.Black * (0.24f * alpha));
+        MaterialUi.RoundedRect(menu.X, menu.Y, menu.Width, menu.Height, 18f,
+            palette.SurfaceHighest * alpha);
+        MaterialUi.RoundedOutline(menu.X, menu.Y, menu.Width, menu.Height, 18f, 1f,
+            palette.Outline * (0.58f * alpha));
+
+        int visibleCount = DropdownVisibleCount(row);
+        int selected = row.SelectedOption?.Invoke() ?? -1;
+        for (int visibleIndex = 0; visibleIndex < visibleCount; visibleIndex++) {
+            int optionIndex = dropdownFirstVisible + visibleIndex;
+            MaterialRect item = DropdownItemRect(menu, visibleIndex);
+            bool highlighted = optionIndex == dropdownHighlight;
+            bool current = optionIndex == selected;
+            if (highlighted) {
+                MaterialUi.RoundedRect(item.X, item.Y, item.Width, item.Height, 13f,
+                    palette.Primary * (0.88f * alpha));
+            }
+            MaterialUiKit.Text(Trim(row.Options[optionIndex], 38),
+                new Vector2(item.X + 14f, item.Center.Y), new Vector2(0f, 0.5f),
+                MaterialTextRole.Label,
+                highlighted ? palette.OnPrimary : palette.OnSurface,
+                alpha, scaleOverride: 0.27f);
+            if (current) {
+                MaterialUiKit.Text("✓", new Vector2(item.Right - 14f, item.Center.Y),
+                    new Vector2(1f, 0.5f), MaterialTextRole.Label,
+                    highlighted ? palette.OnPrimary : palette.Primary,
+                    alpha, scaleOverride: 0.25f);
+            }
+        }
+
+        if (row.Options.Count > visibleCount) {
+            float trackHeight = menu.Height - 16f;
+            float thumbHeight = Math.Max(28f, trackHeight * visibleCount / row.Options.Count);
+            float maximum = row.Options.Count - visibleCount;
+            float thumbY = menu.Y + 8f + (trackHeight - thumbHeight) * dropdownFirstVisible / maximum;
+            MaterialUi.RoundedRect(menu.Right - 5f, menu.Y + 8f, 3f, trackHeight, 1.5f,
+                palette.Outline * (0.28f * alpha));
+            MaterialUi.RoundedRect(menu.Right - 5f, thumbY, 3f, thumbHeight, 1.5f,
+                palette.Primary * (0.82f * alpha));
+        }
     }
 
     private void RenderTextField(SettingRow row, MaterialRect rect, MaterialPalette palette,
@@ -807,6 +867,106 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         }
     }
 
+    private void UpdateDropdown(OverlayLayout layout) {
+        SettingRow? row = dropdownRow;
+        if (row?.Options is null || row.Options.Count == 0 || !CurrentRows.Contains(row)) {
+            CloseDropdown();
+            return;
+        }
+        if (Input.Pause.Pressed) {
+            CloseDropdown(playSound: false);
+            BeginClose(CloseDestination.Game);
+            return;
+        }
+        if (Input.MenuCancel.Pressed || Input.ESC.Pressed || MInput.Keyboard.Pressed(Keys.Escape)) {
+            CloseDropdown();
+            return;
+        }
+        if (Input.MenuUp.Pressed) {
+            MoveDropdownHighlight(-1);
+            return;
+        }
+        if (Input.MenuDown.Pressed) {
+            MoveDropdownHighlight(1);
+            return;
+        }
+        if (Input.MenuConfirm.Pressed
+            || MInput.Keyboard.Pressed(Keys.Enter)
+            || MInput.Keyboard.Pressed(Keys.Space)) {
+            CommitDropdown();
+            return;
+        }
+
+        MaterialRect menu = DropdownRect(layout, row);
+        if (MInput.Mouse.WheelDelta != 0 && menu.Contains(MInput.Mouse.Position)) {
+            int visibleCount = DropdownVisibleCount(row);
+            int maximum = Math.Max(0, row.Options.Count - visibleCount);
+            dropdownFirstVisible = Math.Clamp(
+                dropdownFirstVisible - Math.Sign(MInput.Mouse.WheelDelta), 0, maximum);
+            dropdownHighlight = Math.Clamp(dropdownHighlight, dropdownFirstVisible,
+                dropdownFirstVisible + visibleCount - 1);
+        }
+        if (MInput.Mouse.WasMoved || MInput.Mouse.PressedLeftButton) {
+            int visibleCount = DropdownVisibleCount(row);
+            for (int visibleIndex = 0; visibleIndex < visibleCount; visibleIndex++) {
+                if (!DropdownItemRect(menu, visibleIndex).Contains(MInput.Mouse.Position)) continue;
+                dropdownHighlight = dropdownFirstVisible + visibleIndex;
+                if (MInput.Mouse.PressedLeftButton) CommitDropdown();
+                return;
+            }
+        }
+        if (MInput.Mouse.PressedLeftButton) CloseDropdown();
+    }
+
+    private void OpenDropdown(SettingRow row) {
+        if (row.Options is null || row.Options.Count == 0 || row.SelectOption is null) {
+            Audio.Play("event:/ui/main/button_invalid");
+            return;
+        }
+        dropdownRow = row;
+        dropdownHighlight = Math.Clamp(row.SelectedOption?.Invoke() ?? 0, 0, row.Options.Count - 1);
+        dropdownFirstVisible = 0;
+        EnsureDropdownHighlightVisible();
+        Audio.Play("event:/ui/main/button_select");
+    }
+
+    private void MoveDropdownHighlight(int direction) {
+        SettingRow? row = dropdownRow;
+        if (row?.Options is null || row.Options.Count == 0) return;
+        dropdownHighlight = (dropdownHighlight + Math.Sign(direction) + row.Options.Count) % row.Options.Count;
+        EnsureDropdownHighlightVisible();
+        Audio.Play("event:/ui/main/rollover_down");
+    }
+
+    private void EnsureDropdownHighlightVisible() {
+        SettingRow? row = dropdownRow;
+        if (row?.Options is null) return;
+        int visibleCount = DropdownVisibleCount(row);
+        if (dropdownHighlight < dropdownFirstVisible) dropdownFirstVisible = dropdownHighlight;
+        else if (dropdownHighlight >= dropdownFirstVisible + visibleCount)
+            dropdownFirstVisible = dropdownHighlight - visibleCount + 1;
+        dropdownFirstVisible = Math.Clamp(dropdownFirstVisible, 0,
+            Math.Max(0, row.Options.Count - visibleCount));
+    }
+
+    private void CommitDropdown() {
+        SettingRow? row = dropdownRow;
+        if (row?.Options is null || row.SelectOption is null || row.Options.Count == 0) {
+            CloseDropdown();
+            return;
+        }
+        row.SelectOption(Math.Clamp(dropdownHighlight, 0, row.Options.Count - 1));
+        row.Pulse = 1f;
+        dropdownRow = null;
+        Audio.Play("event:/ui/main/button_toggle_on");
+    }
+
+    private void CloseDropdown(bool playSound = true) {
+        if (dropdownRow is null) return;
+        dropdownRow = null;
+        if (playSound) Audio.Play("event:/ui/main/button_back");
+    }
+
     private void ActivateMouse(SettingRow row, MaterialRect rect, Vector2 mouse) {
         if (!row.Enabled() || row.Kind == SettingKind.Status) {
             if (!row.Enabled()) Audio.Play("event:/ui/main/button_invalid");
@@ -951,6 +1111,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                 StartEdit(row);
                 return;
             case SettingKind.Enum:
+                OpenDropdown(row);
+                return;
             case SettingKind.Action:
                 row.Change?.Invoke(1);
                 break;
@@ -982,6 +1144,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         rowScroll.Reset();
         contentEase = 0f;
         draggedSlider = null;
+        dropdownRow = null;
         if (IsRecorderTab) RefreshRecordingFiles();
         Audio.Play("event:/ui/main/rollover_down");
     }
@@ -1062,6 +1225,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         editingRow = null;
         closeDestination = destination;
         draggedSlider = null;
+        dropdownRow = null;
         ReleaseFocusedInput();
         Audio.Play("event:/ui/main/button_back");
     }
@@ -1246,7 +1410,9 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             int index = Array.IndexOf(values, get());
             index = (index + Math.Sign(direction) + values.Length) % values.Length;
             set(values[index]);
-        });
+        }, options: values.Select(value => FormatEnum(value)).ToArray(),
+            selectedOption: () => Array.IndexOf(values, get()),
+            selectOption: index => set(values[Math.Clamp(index, 0, values.Length - 1)]));
     }
 
     private static SettingRow Text(
@@ -1273,17 +1439,26 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         IReadOnlyList<string> values,
         Func<string> get,
         Action<string> set
-    ) => new(label, SettingKind.Enum, get, direction => {
-        if (values.Count == 0) return;
-        int index = -1;
-        for (int candidate = 0; candidate < values.Count; candidate++) {
-            if (!string.Equals(values[candidate], get(), StringComparison.OrdinalIgnoreCase)) continue;
-            index = candidate;
-            break;
+    ) {
+        string[] options = values.ToArray();
+
+        int SelectedIndex() {
+            int index = -1;
+            for (int candidate = 0; candidate < options.Length; candidate++) {
+                if (!string.Equals(options[candidate], get(), StringComparison.OrdinalIgnoreCase)) continue;
+                index = candidate;
+                break;
+            }
+            return index;
         }
-        index = (index + Math.Sign(direction) + values.Count) % values.Count;
-        set(values[index]);
-    });
+
+        return new SettingRow(label, SettingKind.Enum, get, direction => {
+            if (options.Length == 0) return;
+            int index = (SelectedIndex() + Math.Sign(direction) + options.Length) % options.Length;
+            set(options[index]);
+        }, options: options, selectedOption: SelectedIndex,
+            selectOption: index => set(options[Math.Clamp(index, 0, options.Length - 1)]));
+    }
 
     private static SettingRow Action(string label, string buttonText, System.Action action,
         Func<bool>? enabled = null) => new(
@@ -1638,6 +1813,34 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private static MaterialRect WideControlRect(MaterialRect row) => new(row.X + 18f, row.Y + 45f,
         row.Width - 36f, 35f);
 
+    private MaterialRect DropdownControlRect(OverlayLayout layout, SettingRow row) {
+        int index = CurrentRows.IndexOf(row);
+        if (index < 0) return default;
+        MaterialRect rowRect = IsRecorderTab
+            ? RecorderSettingRect(layout, index)
+            : layout.Row(index, rowScroll.Offset);
+        return WideControlRect(rowRect);
+    }
+
+    private MaterialRect DropdownRect(OverlayLayout layout, SettingRow row) {
+        MaterialRect control = DropdownControlRect(layout, row);
+        float height = DropdownVisibleCount(row) * DropdownItemHeight + 12f;
+        float y = control.Bottom + 6f;
+        if (y + height > layout.Body.Bottom) y = control.Y - height - 6f;
+        y = Math.Clamp(y, layout.Body.Y, Math.Max(layout.Body.Y, layout.Body.Bottom - height));
+        return new MaterialRect(control.X, y, control.Width, height);
+    }
+
+    private static MaterialRect DropdownItemRect(MaterialRect menu, int visibleIndex) => new(
+        menu.X + 6f,
+        menu.Y + 6f + visibleIndex * DropdownItemHeight,
+        menu.Width - 12f,
+        DropdownItemHeight
+    );
+
+    private static int DropdownVisibleCount(SettingRow row) =>
+        Math.Min(DropdownMaxVisibleItems, row.Options?.Count ?? 0);
+
     private static void SetTextInputRectangle(MaterialRect rect) {
         float xScale = Engine.ViewWidth / ScreenWidth;
         float yScale = Engine.ViewHeight / ScreenHeight;
@@ -1689,6 +1892,9 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         public Func<bool>? ToggleValue { get; }
         public Func<float>? Normalized { get; }
         public Action<float>? SetNormalized { get; }
+        public IReadOnlyList<string>? Options { get; }
+        public Func<int>? SelectedOption { get; }
+        public Action<int>? SelectOption { get; }
         public Func<string>? EditValue { get; }
         public Func<string, bool>? CommitEdit { get; }
         public bool NumericInput { get; }
@@ -1709,6 +1915,9 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             Func<bool>? toggleValue = null,
             Func<float>? normalized = null,
             Action<float>? setNormalized = null,
+            IReadOnlyList<string>? options = null,
+            Func<int>? selectedOption = null,
+            Action<int>? selectOption = null,
             Func<string>? editValue = null,
             Func<string, bool>? commitEdit = null,
             bool numericInput = false,
@@ -1723,6 +1932,9 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             ToggleValue = toggleValue;
             Normalized = normalized;
             SetNormalized = setNormalized;
+            Options = options;
+            SelectedOption = selectedOption;
+            SelectOption = selectOption;
             EditValue = editValue;
             CommitEdit = commitEdit;
             NumericInput = numericInput;
