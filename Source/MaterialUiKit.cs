@@ -302,7 +302,7 @@ internal static class MaterialUiKit {
         float alpha = 1f
     ) {
         const float scale = 0.27f;
-        float width = Math.Max(82f, SystemTtfFont.Measure(text, scale, UiFontWeight.Bold).X + 30f);
+        float width = Math.Max(82f, SystemTtfFont.MeasureVisible(text, scale, UiFontWeight.Bold).X + 30f);
         MaterialUi.RoundedRect(rightTop.X - width, rightTop.Y, width, 32f, 16f,
             (selected ? palette.Primary : palette.SurfaceHighest) * alpha);
         Text(text, new Vector2(rightTop.X - width / 2f, rightTop.Y + 16f),
@@ -327,7 +327,7 @@ internal static class MaterialUiKit {
             MaterialTextRole.Label => (0.31f, UiFontWeight.Bold),
             _ => (0.31f, UiFontWeight.Regular)
         };
-        SystemTtfFont.Draw(text, position, justify, scaleOverride ?? scale, color * alpha, weight: weight);
+        SystemTtfFont.DrawVisual(text, position, justify, scaleOverride ?? scale, color * alpha, weight: weight);
     }
 
     public static void Cursor(Vector2 position, MaterialPalette palette, float alpha) {
