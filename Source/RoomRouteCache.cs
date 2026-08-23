@@ -98,9 +98,11 @@ public static class RoomRouteCache {
 
         public IReadOnlySet<string> NearbyFrom(string room) {
             if (nearbyRooms.TryGetValue(room, out IReadOnlySet<string>? cached)) return cached;
-            if (!edges.TryGetValue(room, out HashSet<string>? adjacent)) return EmptyRoute;
+            if (!edges.TryGetValue(room, out HashSet<string>? outgoing)
+                || !predecessors.TryGetValue(room, out HashSet<string>? incoming)) return EmptyRoute;
 
-            HashSet<string> nearby = new(adjacent, StringComparer.Ordinal) { room };
+            HashSet<string> nearby = new(outgoing, StringComparer.Ordinal) { room };
+            nearby.UnionWith(incoming);
             nearbyRooms[room] = nearby;
             return nearby;
         }
