@@ -311,9 +311,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         string? detail = AutoRecorder.IsFinalizing
             ? $"正在生成{AutoRecorder.FinalizationDescription} · {finalizationProgress:P0}"
             : AutoRecorder.IsRecording
-                ? AutoRecorder.IsFullRecordingEnabled || AutoRecorder.ManualMode
-                    ? $"当前片段：{ShortPath(AutoRecorder.CurrentPath)}"
-                    : $"滚动缓冲：始终保留最近 {MicroblocksQolUtilsModule.Settings.DeathReplayBufferSeconds} 秒"
+                ? $"当前片段：{ShortPath(AutoRecorder.CurrentPath)}"
                 : null;
         if (detail is not null) {
             MaterialUiKit.Text(Trim(detail, 48), new Vector2(hero.X + 190f, hero.Y + 75f), Vector2.Zero,
@@ -1678,7 +1676,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private static string RecordingStatus() {
         if (AutoRecorder.IsRecording) {
             if (AutoRecorder.ManualMode) return "手动录制中";
-            return AutoRecorder.IsFullRecordingEnabled ? "自动录制中" : "死亡回放录制中";
+            return "自动录制中";
         }
         if (AutoRecorder.IsFinalizing) return "正在生成视频";
         if (AutoRecorder.ManualMode) return "已开启，等待游戏画面";

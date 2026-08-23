@@ -49,10 +49,12 @@ Implemented:
 - Streaming H.264 encoding through FFmpeg shared libraries, with automatic
   NVENC, QSV, AMF, Media Foundation, then OpenH264 fallback. No `ffmpeg.exe`,
   `gdigrab`, managed frame buffer, or subprocess is used.
-- Full-run recording keeps one WGC/encoder session alive for the complete area,
+- Full-run/manual recording and death replay use independent WGC/encoder
+  sessions, so a background death-replay buffer never occupies the manual
+  recording controls. Full-run recording stays alive for the complete area,
   including every room transition. Deaths, SpeedrunTool loads, and respawn
-  changes only move logical start/end markers and never grow an in-memory frame
-  buffer. Death-replay-only capture rotates after a death so the replay can be
+  changes only move its logical start/end markers and never grow an in-memory
+  frame buffer. Death-replay capture rotates after a death so the replay can be
   finalized immediately, then resumes automatically after respawn.
 - A top-right recording badge can independently show a blinking red capture
   dot and the elapsed recording time.
@@ -64,11 +66,11 @@ Implemented:
 - Completed recordings are pruned oldest-first at startup and after finalization;
   the recording settings can change the retention count, disable the limit,
   or run cleanup immediately.
-- Optional death replays keep recording whenever gameplay is active and retain
-  only the most recent rolling window (30 seconds by default, configurable from
-  10 to 60 seconds). In death-replay-only mode the capture is stopped and saved
-  immediately on death, then automatically resumes after respawn. Death replays
-  have their own retention limit (30 files by default).
+- Optional death replays keep their own recording session active during gameplay
+  and retain only the most recent rolling window (30 seconds by default,
+  configurable from 10 to 60 seconds). The death capture is stopped and queued
+  for saving after the game update finishes, then automatically resumes after
+  respawn. Death replays have their own retention limit (30 files by default).
 - The recording library can switch between recent deaths and complete videos.
   New files are separated under `deaths/<area>` and `full/<area>` inside the
   configured recording directory; recordings created by older versions remain
