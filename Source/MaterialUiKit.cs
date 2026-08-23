@@ -1,3 +1,4 @@
+using System.Reflection;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Monocle;
@@ -133,7 +134,8 @@ internal sealed class MaterialScrollController {
 internal sealed class MaterialScrollViewport : IDisposable {
     // Changing render targets while drawing a page can discard everything already batched on
     // the backbuffer. Scissoring keeps the existing page intact while still clipping scrolling
-    // content to its viewport.
+    // content to its viewport. Capture the active SpriteBatch state instead of guessing from
+    // HiresRenderer.DrawToBuffer: fullscreen/letterboxed HUD passes can use a different transform.
     private static readonly RasterizerState ScissorRasterizer = new() {
         CullMode = CullMode.None,
         ScissorTestEnable = true
@@ -143,35 +145,26 @@ internal sealed class MaterialScrollViewport : IDisposable {
         _ = name;
     }
 
-    public void Render(MaterialRect bounds, Matrix renderMatrix, System.Action drawContents) {
+    public void Render(MaterialRect bounds, System.Action drawContents) {
         GraphicsDevice graphics = Engine.Graphics.GraphicsDevice;
+        SpriteBatchState state = SpriteBatchState.Capture(Draw.SpriteBatch);
         Rectangle previousScissor = graphics.ScissorRectangle;
-        Rectangle scissor = ScreenScissor(bounds, graphics.Viewport, renderMatrix);
+        Rectangle scissor = ScreenScissor(bounds, graphics.Viewport, state.TransformMatrix);
         if (scissor.Width <= 0 || scissor.Height <= 0) return;
 
         Draw.SpriteBatch.End();
-        graphics.ScissorRectangle = scissor;
-        Draw.SpriteBatch.Begin(
-            SpriteSortMode.Deferred,
-            BlendState.AlphaBlend,
-            SamplerState.LinearClamp,
-            DepthStencilState.None,
-            ScissorRasterizer,
-            null,
-            renderMatrix
-        );
-        drawContents();
-        Draw.SpriteBatch.End();
-        graphics.ScissorRectangle = previousScissor;
-        Draw.SpriteBatch.Begin(
-            SpriteSortMode.Deferred,
-            BlendState.AlphaBlend,
-            SamplerState.LinearClamp,
-            DepthStencilState.None,
-            RasterizerState.CullNone,
-            null,
-            renderMatrix
-        );
+        try {
+            graphics.ScissorRectangle = scissor;
+            state.Begin(Draw.SpriteBatch, ScissorRasterizer);
+            try {
+                drawContents();
+            } finally {
+                Draw.SpriteBatch.End();
+            }
+        } finally {
+            graphics.ScissorRectangle = previousScissor;
+            state.Begin(Draw.SpriteBatch, state.RasterizerState);
+        }
     }
 
     public void Dispose() { }
@@ -189,6 +182,66 @@ internal sealed class MaterialScrollViewport : IDisposable {
         int right = Math.Clamp((int)MathF.Ceiling(Math.Max(first.X, second.X)), viewport.X, viewportRight);
         int bottom = Math.Clamp((int)MathF.Ceiling(Math.Max(first.Y, second.Y)), viewport.Y, viewportBottom);
         return new Rectangle(left, top, Math.Max(0, right - left), Math.Max(0, bottom - top));
+    }
+
+    private readonly record struct SpriteBatchState(
+        SpriteSortMode SortMode,
+        BlendState BlendState,
+        SamplerState SamplerState,
+        DepthStencilState DepthStencilState,
+        RasterizerState RasterizerState,
+        Effect? Effect,
+        Matrix TransformMatrix
+    ) {
+        private const BindingFlags InstanceFields = BindingFlags.Instance | BindingFlags.NonPublic;
+        private static readonly FieldInfo BeginCalledField = RequiredField("beginCalled", "_beginCalled");
+        private static readonly FieldInfo SortModeField = RequiredField("sortMode", "_sortMode");
+        private static readonly FieldInfo BlendStateField = RequiredField("blendState", "_blendState");
+        private static readonly FieldInfo SamplerStateField = RequiredField("samplerState", "_samplerState");
+        private static readonly FieldInfo DepthStencilStateField = RequiredField(
+            "depthStencilState", "_depthStencilState");
+        private static readonly FieldInfo RasterizerStateField = RequiredField(
+            "rasterizerState", "_rasterizerState");
+        private static readonly FieldInfo EffectField = RequiredField("customEffect", "_customEffect");
+        private static readonly FieldInfo TransformMatrixField = RequiredField(
+            "transformMatrix", "_transformMatrix");
+
+        public static SpriteBatchState Capture(SpriteBatch spriteBatch) {
+            if (!Read<bool>(spriteBatch, BeginCalledField))
+                throw new InvalidOperationException("Material scroll viewport requires an active SpriteBatch.");
+            return new SpriteBatchState(
+                Read<SpriteSortMode>(spriteBatch, SortModeField),
+                Read<BlendState>(spriteBatch, BlendStateField),
+                Read<SamplerState>(spriteBatch, SamplerStateField),
+                Read<DepthStencilState>(spriteBatch, DepthStencilStateField),
+                Read<RasterizerState>(spriteBatch, RasterizerStateField),
+                (Effect?)EffectField.GetValue(spriteBatch),
+                Read<Matrix>(spriteBatch, TransformMatrixField)
+            );
+        }
+
+        public void Begin(SpriteBatch spriteBatch, RasterizerState rasterizerState) => spriteBatch.Begin(
+            SortMode,
+            BlendState,
+            SamplerState,
+            DepthStencilState,
+            rasterizerState,
+            Effect,
+            TransformMatrix
+        );
+
+        private static FieldInfo RequiredField(params string[] names) {
+            Type type = typeof(SpriteBatch);
+            foreach (string name in names) {
+                FieldInfo? field = type.GetField(name, InstanceFields);
+                if (field is not null) return field;
+            }
+            throw new MissingFieldException(type.FullName, string.Join(" or ", names));
+        }
+
+        private static T Read<T>(SpriteBatch spriteBatch, FieldInfo field) =>
+            (T)(field.GetValue(spriteBatch)
+                ?? throw new InvalidOperationException($"SpriteBatch.{field.Name} was null."));
     }
 }
 
