@@ -749,11 +749,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             if (MInput.Mouse.PressedLeftButton) SelectTab(index);
             return;
         }
-        if (IsProfilerTab) {
-            if (MInput.Mouse.PressedLeftButton && ProfilerStartRect(layout).Contains(mouse))
-                StartProfilerSampling();
-            return;
-        }
         if (!layout.Rows.Contains(mouse)) return;
 
         MaterialRect hero = RecorderHeroRect(layout);
@@ -955,6 +950,11 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         for (int index = 0; index < tabs.Count; index++) {
             if (!layout.Tab(index, tabs.Count).Contains(mouse)) continue;
             if (MInput.Mouse.PressedLeftButton) SelectTab(index);
+            return;
+        }
+        if (IsProfilerTab) {
+            if (MInput.Mouse.PressedLeftButton && ProfilerStartRect(layout).Contains(mouse))
+                StartProfilerSampling();
             return;
         }
         if (!layout.Rows.Contains(mouse)) return;

@@ -43,6 +43,7 @@ rmSync(output, { recursive: true, force: true });
 mkdirSync(resolve(output, "Code"), { recursive: true });
 cpSync(dll, resolve(output, "Code/MicroblocksQolUtils.dll"));
 for (const dependency of [
+  "Dia2Lib.dll",
   "Microsoft.Diagnostics.FastSerialization.dll",
   "Microsoft.Diagnostics.NETCore.Client.dll",
   "Microsoft.Diagnostics.Tracing.TraceEvent.dll",
@@ -53,6 +54,7 @@ for (const dependency of [
   "System.Reflection.Metadata.dll",
   "System.Text.Encodings.Web.dll",
   "System.Text.Json.dll",
+  "TraceReloggerLib.dll",
 ]) {
   const source = resolve(managedOutput, dependency);
   if (existsSync(source)) cpSync(source, resolve(output, "Code", dependency));
