@@ -36,7 +36,7 @@ public static class NativeCaptureCommands {
         Engine.Commands.Log("Native scap capture probe stopped.");
     }
 
-    [Command("qol_record_start", "Start manual room recording")]
+    [Command("qol_record_start", "Start manual run recording")]
     public static void StartManualRecording() {
         AutoRecorder.StartManual();
         Engine.Commands.Log("Manual recording armed; capture starts when gameplay resumes.");

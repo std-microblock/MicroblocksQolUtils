@@ -38,6 +38,9 @@ public static class MiniMapRenderer {
         Color terrainColor = settings.MiniMapAdaptiveColors
             ? AdaptiveForeground(mapBackdrop) * 0.9f
             : Color.SlateGray * 0.9f;
+        if (settings.MiniMapRoomBackgrounds && settings.MiniMapRoomBackgroundOpacity > 0)
+            DrawRoomBackgrounds(level, player.Center, center, radius, pixelsPerWorld, settings.MiniMapShape,
+                settings.MiniMapRoomBackgroundOpacity / 10f);
         if (settings.MiniMapRoomBounds) {
             IReadOnlySet<string>? route = settings.MiniMapHighlightRoute
                 ? RoomRouteCache.RouteToGoal(level)
@@ -47,12 +50,12 @@ public static class MiniMapRenderer {
         }
         DrawSolids(solids, player.Center, center, radius, pixelsPerWorld, settings.MiniMapShape, terrainColor);
         if (settings.MiniMapCollectibles && level.Session.MapData is MapData map)
-            DrawCollectibles(map, level.Session, player.Center, center, radius, pixelsPerWorld, settings.MiniMapShape);
+            DrawCollectibles(map, level, player.Center, center, radius, pixelsPerWorld, settings);
         foreach (RemotePlayer remote in MiaoNetBridge.Players) {
             if (!settings.ShowMiaoNetPlayers) break;
             DrawRemote(remote, player.Center, center, radius, pixelsPerWorld, settings);
         }
-        DrawLocalPlayer(center);
+        DrawLocalPlayer(center, settings.MiniMapAvatarShape);
 
         Color border = settings.MiniMapAdaptiveColors
             ? AdaptiveForeground(mapBackdrop) * 0.8f
@@ -136,6 +139,90 @@ public static class MiniMapRenderer {
         }
     }
 
+    private static void DrawRoomBackgrounds(
+        Level level,
+        Vector2 player,
+        Vector2 center,
+        float radius,
+        float scale,
+        MiniMapShape shape,
+        float opacity
+    ) {
+        MapData? map = level.Session.MapData;
+        if (map is null) return;
+        int roomIndex = 0;
+        foreach (LevelData room in map.Levels) {
+            if (room.Dummy) continue;
+            Rectangle bounds = room.Bounds;
+            float left = center.X + (bounds.Left - player.X) * scale;
+            float top = center.Y + (bounds.Top - player.Y) * scale;
+            float right = center.X + (bounds.Right - player.X) * scale;
+            float bottom = center.Y + (bounds.Bottom - player.Y) * scale;
+            Color roomColor = RoomColor(roomIndex++) * opacity;
+            DrawClippedRoomBackground(left, top, right, bottom, center, radius - 2f, shape, roomColor);
+        }
+    }
+
+    private static void DrawClippedRoomBackground(
+        float left,
+        float top,
+        float right,
+        float bottom,
+        Vector2 center,
+        float radius,
+        MiniMapShape shape,
+        Color color
+    ) {
+        float clipLeft = Math.Max(left, center.X - radius);
+        float clipTop = Math.Max(top, center.Y - radius);
+        float clipRight = Math.Min(right, center.X + radius);
+        float clipBottom = Math.Min(bottom, center.Y + radius);
+        if (clipRight <= clipLeft || clipBottom <= clipTop) return;
+
+        if (shape == MiniMapShape.Square) {
+            Draw.Rect(clipLeft, clipTop, clipRight - clipLeft, clipBottom - clipTop, color);
+            return;
+        }
+
+        int firstRow = (int)MathF.Floor(clipTop);
+        int lastRow = (int)MathF.Ceiling(clipBottom);
+        for (int row = firstRow; row < lastRow; row++) {
+            float rowTop = Math.Max(clipTop, row);
+            float rowBottom = Math.Min(clipBottom, row + 1f);
+            if (rowBottom <= rowTop) continue;
+            float sampleY = Math.Clamp((rowTop + rowBottom) / 2f, center.Y - radius, center.Y + radius);
+            float deltaY = sampleY - center.Y;
+            float halfWidth = MathF.Sqrt(Math.Max(0f, radius * radius - deltaY * deltaY));
+            float rowLeft = Math.Max(clipLeft, center.X - halfWidth);
+            float rowRight = Math.Min(clipRight, center.X + halfWidth);
+            if (rowRight > rowLeft)
+                Draw.Rect(rowLeft, rowTop, rowRight - rowLeft, rowBottom - rowTop, color);
+        }
+    }
+
+    private static Color RoomColor(int index) {
+        float hue = index * 0.61803398875f % 1f;
+        return Hsv(hue, 0.58f, 0.92f);
+    }
+
+    private static Color Hsv(float hue, float saturation, float value) {
+        float scaled = hue * 6f;
+        int sector = (int)MathF.Floor(scaled);
+        float fraction = scaled - sector;
+        float low = value * (1f - saturation);
+        float falling = value * (1f - saturation * fraction);
+        float rising = value * (1f - saturation * (1f - fraction));
+        (float red, float green, float blue) = (sector % 6) switch {
+            0 => (value, rising, low),
+            1 => (falling, value, low),
+            2 => (low, value, rising),
+            3 => (low, falling, value),
+            4 => (rising, low, value),
+            _ => (value, low, falling)
+        };
+        return new Color(red, green, blue);
+    }
+
     private static void DrawSolids(
         SolidTiles solids,
         Vector2 player,
@@ -155,22 +242,29 @@ public static class MiniMapRenderer {
 
     private static void DrawCollectibles(
         MapData map,
-        Session session,
+        Level level,
         Vector2 player,
         Vector2 center,
         float radius,
         float scale,
-        MiniMapShape shape
+        QolSettings settings
     ) {
+        IReadOnlySet<string>? nearbyRooms = settings.MiniMapShowNearbyRoomStrawberries
+            ? RoomRouteCache.NearbyRooms(level)
+            : null;
         foreach (MiniMapCollectible collectible in MapCollectibleCache.Get(map)) {
             Vector2 point = center + (collectible.Position - player) * scale;
-            if (!Inside(point, center, radius - 8f, shape)) continue;
-            float alpha = collectible.IsCollected(session) ? 0.34f : 1f;
-            DrawCollectible(point, collectible.Kind, alpha);
+            bool offscreen = !Inside(point, center, radius - 14f, settings.MiniMapShape);
+            if (offscreen) {
+                if (!IsStrawberry(collectible.Kind) || nearbyRooms?.Contains(collectible.Room) != true) continue;
+                point = ClampToEdge(point, center, radius - 14f, settings.MiniMapShape);
+            }
+            DrawCollectible(point, collectible.Kind, collectible.IsCollected(level.Session));
         }
     }
 
-    private static void DrawCollectible(Vector2 point, MiniMapCollectibleKind kind, float alpha) {
+    private static void DrawCollectible(Vector2 point, MiniMapCollectibleKind kind, bool collected) {
+        float alpha = collected ? 0.42f : 1f;
         Color shadow = Color.Black * (0.82f * alpha);
         MaterialUi.Circle(point, 7f, shadow);
         switch (kind) {
@@ -213,6 +307,20 @@ public static class MiniMapRenderer {
                 DrawDiamond(point, 5.5f, gem, 2f);
                 break;
         }
+
+        if (collected && IsStrawberry(kind)) DrawCollectedBadge(point + new Vector2(5f, 5f));
+    }
+
+    private static bool IsStrawberry(MiniMapCollectibleKind kind) =>
+        kind is MiniMapCollectibleKind.Strawberry
+            or MiniMapCollectibleKind.GoldenBerry
+            or MiniMapCollectibleKind.MoonBerry;
+
+    private static void DrawCollectedBadge(Vector2 center) {
+        MaterialUi.Circle(center, 4.25f, Color.Black * 0.9f);
+        MaterialUi.Circle(center, 3.25f, new Color(76, 210, 120));
+        MaterialUi.Line(center + new Vector2(-1.8f, 0f), center + new Vector2(-0.4f, 1.5f), 1.25f, Color.White);
+        MaterialUi.Line(center + new Vector2(-0.4f, 1.5f), center + new Vector2(2f, -1.7f), 1.25f, Color.White);
     }
 
     private static void DrawDiamond(Vector2 center, float radius, Color color, float thickness) {
@@ -240,8 +348,8 @@ public static class MiniMapRenderer {
             if (!settings.MiniMapShowOffscreenPlayers) return;
             point = ClampToEdge(point, center, radius - 12f, settings.MiniMapShape);
         }
-        MaterialUi.Circle(point, 11f, Color.Black * 0.85f);
-        if (!MiaoNetBridge.TryDrawAvatar(remote.Id, point, 20f, Color.White)) {
+        DrawAvatarBackdrop(point, settings.MiniMapAvatarShape, Color.Black * 0.85f);
+        if (!MiaoNetBridge.TryDrawAvatar(remote.Id, point, 20f, Color.White, settings.MiniMapAvatarShape)) {
             MaterialUi.Circle(point, 8f, remote.Color);
             string initial = remote.Name.Length == 0 ? "?" : remote.Name[..1];
             SystemTtfFont.Draw(initial, point + new Vector2(0f, -1f), new Vector2(0.5f), 0.27f, Color.White, 1f);
@@ -258,15 +366,20 @@ public static class MiniMapRenderer {
         }
     }
 
-    private static void DrawLocalPlayer(Vector2 center) {
+    private static void DrawLocalPlayer(Vector2 center, MiniMapAvatarShape avatarShape) {
         if (MiaoNetBridge.LoggedIn && MiaoNetBridge.LocalPlayer is RemotePlayer local) {
-            MaterialUi.Circle(center, 11f, Color.Black * 0.9f);
-            if (MiaoNetBridge.TryDrawAvatar(local.Id, center, 20f, Color.White)) return;
+            DrawAvatarBackdrop(center, avatarShape, Color.Black * 0.9f);
+            if (MiaoNetBridge.TryDrawAvatar(local.Id, center, 20f, Color.White, avatarShape)) return;
             MaterialUi.Circle(center, 8f, local.Color);
             return;
         }
         MaterialUi.Circle(center, 6f, Color.Cyan);
         MaterialUi.CircleOutline(center, 7.5f, 1.5f, Color.White * 0.8f);
+    }
+
+    private static void DrawAvatarBackdrop(Vector2 center, MiniMapAvatarShape shape, Color color) {
+        if (shape == MiniMapAvatarShape.Circle) MaterialUi.Circle(center, 11f, color);
+        else MaterialUi.RoundedRect(center.X - 11f, center.Y - 11f, 22f, 22f, 2f, color);
     }
 
     private static Vector2 ClampToEdge(Vector2 point, Vector2 center, float radius, MiniMapShape shape) {

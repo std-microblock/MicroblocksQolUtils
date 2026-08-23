@@ -8,6 +8,11 @@ public enum MiniMapShape {
     Square
 }
 
+public enum MiniMapAvatarShape {
+    Circle,
+    Square
+}
+
 public enum MiniMapNameMode {
     None,
     WatchedOnly,
@@ -22,6 +27,12 @@ public enum RecordingPolicy {
 public enum BgmRecordingMode {
     CaptureGameMix,
     SfxOnlyWithPostMix
+}
+
+public enum CollisionBoxDisplayMode {
+    Hidden,
+    Visible,
+    Only
 }
 
 public sealed class QolSettings : EverestModuleSettings {
@@ -79,11 +90,25 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue(3)]
     public int MiniMapZoom { get; set; } = 3;
 
+    [SettingIgnore]
     [DefaultValue(Keys.OemPlus)]
     public Keys MiniMapZoomInKey { get; set; } = Keys.OemPlus;
 
+    [SettingIgnore]
     [DefaultValue(Keys.OemMinus)]
     public Keys MiniMapZoomOutKey { get; set; } = Keys.OemMinus;
+
+    [SettingName("放大小地图")]
+    [DefaultButtonBinding(0, Keys.OemPlus)]
+    public ButtonBinding MiniMapZoomInBinding { get; set; } = new(0, Keys.OemPlus);
+
+    [SettingName("缩小小地图")]
+    [DefaultButtonBinding(0, Keys.OemMinus)]
+    public ButtonBinding MiniMapZoomOutBinding { get; set; } = new(0, Keys.OemMinus);
+
+    [SettingIgnore]
+    [DefaultValue(false)]
+    public bool MiniMapBindingsMigrated { get; set; }
 
     [DefaultValue(MiniMapShape.Circle)]
     public MiniMapShape MiniMapShape { get; set; } = MiniMapShape.Circle;
@@ -98,10 +123,20 @@ public sealed class QolSettings : EverestModuleSettings {
     public bool MiniMapRoomBounds { get; set; } = true;
 
     [DefaultValue(true)]
+    public bool MiniMapRoomBackgrounds { get; set; } = true;
+
+    [SettingRange(0, 10)]
+    [DefaultValue(3)]
+    public int MiniMapRoomBackgroundOpacity { get; set; } = 3;
+
+    [DefaultValue(true)]
     public bool MiniMapHighlightRoute { get; set; } = true;
 
     [DefaultValue(true)]
     public bool MiniMapCollectibles { get; set; } = true;
+
+    [DefaultValue(false)]
+    public bool MiniMapShowNearbyRoomStrawberries { get; set; }
 
     [SettingRange(0, 10)]
     [DefaultValue(6)]
@@ -115,6 +150,9 @@ public sealed class QolSettings : EverestModuleSettings {
 
     [DefaultValue(true)]
     public bool MiniMapShowOffscreenPlayers { get; set; } = true;
+
+    [DefaultValue(MiniMapAvatarShape.Circle)]
+    public MiniMapAvatarShape MiniMapAvatarShape { get; set; } = MiniMapAvatarShape.Circle;
 
     [DefaultValue(MiniMapNameMode.WatchedOnly)]
     public MiniMapNameMode MiniMapNames { get; set; } = MiniMapNameMode.WatchedOnly;
@@ -141,6 +179,9 @@ public sealed class QolSettings : EverestModuleSettings {
 
     [DefaultValue(false)]
     public bool RemoveDeathAnimation { get; set; }
+
+    [DefaultValue(CollisionBoxDisplayMode.Hidden)]
+    public CollisionBoxDisplayMode CollisionBoxes { get; set; } = CollisionBoxDisplayMode.Hidden;
 
     [DefaultValue(true)]
     public bool ShowFps { get; set; } = true;
@@ -196,4 +237,16 @@ public sealed class QolSettings : EverestModuleSettings {
 
     [DefaultValue("")]
     public string BgmEventMapFile { get; set; } = "";
+
+    internal void MigrateMiniMapBindings() {
+        if (MiniMapBindingsMigrated) return;
+        SetLegacyKey(MiniMapZoomInBinding, MiniMapZoomInKey);
+        SetLegacyKey(MiniMapZoomOutBinding, MiniMapZoomOutKey);
+        MiniMapBindingsMigrated = true;
+    }
+
+    private static void SetLegacyKey(ButtonBinding binding, Keys key) {
+        binding.Keys.Clear();
+        if (key != Keys.None) binding.Keys.Add(key);
+    }
 }

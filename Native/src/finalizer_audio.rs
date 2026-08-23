@@ -119,7 +119,7 @@ pub fn build_audio_track(
         .any(|clip| bgm_map.contains_key(&clip.music_event));
     let captured_spec = sidecar
         .exists()
-        .then(|| render_mix(sidecar, clips, mixed_pcm))
+        .then(|| render_mix(sidecar, clips, mixed_pcm, &bgm_map))
         .transpose()?
         .flatten();
     if captured_spec.is_none() && !has_mapped_bgm {
@@ -144,6 +144,7 @@ fn render_mix(
     sidecar: &Path,
     clips: &[FinalizeClip],
     mixed_pcm: &Path,
+    bgm_map: &HashMap<String, PathBuf>,
 ) -> Result<Option<AudioSpec>, AudioFinalizeError> {
     let file = File::open(sidecar).map_err(|source| io_error(sidecar, source))?;
     let mut reader = BufReader::new(file);
@@ -189,6 +190,7 @@ fn render_mix(
         clips,
         first.sample_rate,
         first.channels,
+        bgm_map,
         sidecar,
     )?;
     while let Some(chunk) = read_chunk(&mut reader, sidecar)? {
@@ -207,6 +209,7 @@ fn render_mix(
             clips,
             first.sample_rate,
             first.channels,
+            bgm_map,
             sidecar,
         )?;
     }
@@ -479,9 +482,10 @@ fn mix_chunk(
     clips: &[FinalizeClip],
     sample_rate: u32,
     channels: u16,
+    bgm_map: &HashMap<String, PathBuf>,
     sidecar: &Path,
 ) -> Result<(), AudioFinalizeError> {
-    if !(1..=2).contains(&chunk.bus_id) {
+    if !(1..=3).contains(&chunk.bus_id) {
         return Err(invalid(sidecar, format!("unknown bus id {}", chunk.bus_id)));
     }
     let channel_count = usize::from(channels);
@@ -491,6 +495,12 @@ fn mix_chunk(
     let mut output_offset = 0_u64;
     for clip in clips {
         let clip_frames = seconds_to_frames(clip.duration_seconds, sample_rate)?;
+        if chunk.bus_id == 3 && bgm_map.contains_key(&clip.music_event) {
+            output_offset = output_offset
+                .checked_add(clip_frames)
+                .ok_or(AudioFinalizeError::TimelineTooLarge)?;
+            continue;
+        }
         let clip_start = seconds_to_frames(clip.start_seconds, sample_rate)?;
         let clip_end = clip_start.saturating_add(clip_frames);
         let overlap_start = chunk_start.max(clip_start);
@@ -924,6 +934,7 @@ mod tests {
                 music_timeline_milliseconds: 0,
             }],
             &mixed,
+            &HashMap::new(),
         )
         .unwrap()
         .unwrap();
@@ -935,6 +946,52 @@ mod tests {
             .collect();
         assert_eq!(values.len(), 4);
         assert!(values.iter().all(|value| (*value - 0.5).abs() < 1e-6));
+    }
+
+    #[test]
+    fn mapped_bgm_replaces_captured_music_without_doubling_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let sidecar = directory.path().join("run.mkv.sfxchunks");
+        let mixed = directory.path().join("mixed.f32");
+        let mut writer = BufWriter::new(File::create(&sidecar).unwrap());
+        writer.write_all(SIDECAR_MAGIC).unwrap();
+        for (bus_id, value) in [(1_u16, 0.2_f32), (3_u16, 0.4_f32)] {
+            write_audio_chunk(
+                &mut writer,
+                &AudioChunk {
+                    media_time_nanos: 0,
+                    sample_rate: 8_000,
+                    channels: 2,
+                    bus_id,
+                    samples: vec![value; 8],
+                },
+            )
+            .unwrap();
+        }
+        writer.flush().unwrap();
+
+        let mut bgm_map = HashMap::new();
+        bgm_map.insert("event:/music/test".to_owned(), PathBuf::from("clean.flac"));
+        render_mix(
+            &sidecar,
+            &[FinalizeClip {
+                source: "run.mkv".to_owned(),
+                start_seconds: 0.0,
+                duration_seconds: 4.0 / 8_000.0,
+                music_event: "event:/music/test".to_owned(),
+                music_timeline_milliseconds: 0,
+            }],
+            &mixed,
+            &bgm_map,
+        )
+        .unwrap();
+
+        let bytes = fs::read(mixed).unwrap();
+        let values: Vec<f32> = bytes
+            .chunks_exact(4)
+            .map(|value| f32::from_le_bytes(value.try_into().unwrap()))
+            .collect();
+        assert!(values.iter().all(|value| (*value - 0.2).abs() < 1e-6));
     }
 
     #[test]

@@ -3,13 +3,14 @@ using System.Reflection;
 namespace Celeste.Mod.MicroblocksQolUtils;
 
 /// <summary>
-/// Installs pass-through DSPs at the tail of Celeste's SFX buses. FMOD calls the
+/// Installs pass-through DSPs at the tail of Celeste's gameplay audio buses. FMOD calls the
 /// read callbacks on its mixer thread, so the callback only copies the bus audio
 /// to the output and offers the samples to the native bounded queue.
 /// </summary>
 internal sealed class FmodSfxTap : IDisposable {
     private const int GameplayBusId = 1;
     private const int UiBusId = 2;
+    private const int MusicBusId = 3;
 
     private readonly List<BusTap> taps = [];
     private int disposed;
@@ -26,6 +27,7 @@ internal sealed class FmodSfxTap : IDisposable {
             owner.TryAttachBus(studio, lowLevel, capture, "bus:/gameplay_sfx", GameplayBusId, sampleRate);
             if (includeUiSfx)
                 owner.TryAttachBus(studio, lowLevel, capture, "bus:/ui_sfx", UiBusId, sampleRate);
+            owner.TryAttachBus(studio, lowLevel, capture, "bus:/music", MusicBusId, sampleRate);
 
             if (owner.taps.Count == 0) {
                 owner.Dispose();
@@ -34,14 +36,14 @@ internal sealed class FmodSfxTap : IDisposable {
             Logger.Log(
                 LogLevel.Info,
                 "MicroblocksQolUtils/Recorder",
-                $"Attached FMOD SFX tap to {owner.taps.Count} bus(es) at {sampleRate} Hz."
+                $"Attached FMOD audio tap to {owner.taps.Count} bus(es) at {sampleRate} Hz."
             );
             return owner;
         } catch (Exception exception) {
             Logger.Log(
                 LogLevel.Warn,
                 "MicroblocksQolUtils/Recorder",
-                $"Cannot attach FMOD SFX tap; video recording will continue without SFX: {exception.Message}"
+                $"Cannot attach FMOD audio tap; video recording will continue without audio: {exception.Message}"
             );
             return null;
         }
@@ -154,7 +156,11 @@ internal sealed class FmodSfxTap : IDisposable {
 
         private static char[] DspName(string path) {
             char[] name = new char[32];
-            string value = path.EndsWith("ui_sfx", StringComparison.Ordinal) ? "MQOL UI SFX tap" : "MQOL gameplay SFX tap";
+            string value = path.EndsWith("ui_sfx", StringComparison.Ordinal)
+                ? "MQOL UI SFX tap"
+                : path.EndsWith("music", StringComparison.Ordinal)
+                    ? "MQOL music tap"
+                    : "MQOL gameplay SFX tap";
             value.AsSpan(0, Math.Min(value.Length, name.Length - 1)).CopyTo(name);
             return name;
         }
