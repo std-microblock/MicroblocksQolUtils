@@ -73,15 +73,17 @@ public static class MiniMapRenderer {
             string text = string.Join("  ·  ", data);
             Vector2 textPosition = center + new Vector2(0f, radius + 10f);
             Vector2 measured = SystemTtfFont.Measure(text, 0.42f);
-            MaterialUi.AcrylicSurface(
-                textPosition.X - measured.X / 2f - 12f,
-                textPosition.Y - 5f,
-                measured.X + 24f,
-                measured.Y + 10f,
-                14f,
-                palette.SurfaceHigh * 0.92f,
-                palette.Outline
-            );
+            if (settings.HudMaterialSurfaces) {
+                MaterialUi.AcrylicSurface(
+                    textPosition.X - measured.X / 2f - 12f,
+                    textPosition.Y - 5f,
+                    measured.X + 24f,
+                    measured.Y + 10f,
+                    14f,
+                    palette.SurfaceHigh * 0.92f,
+                    palette.Outline
+                );
+            }
             SystemTtfFont.Draw(
                 text,
                 textPosition,

@@ -26,8 +26,10 @@ internal static class RecordingHudRenderer {
         float right = ScreenWidth - Margin;
         float left = right - width;
 
-        MaterialUi.RoundedRect(left, Top, width, Height, Height / 2f, Color.Black * 0.62f);
-        MaterialUi.RoundedOutline(left, Top, width, Height, Height / 2f, 1.5f, Color.White * 0.18f);
+        if (settings.HudMaterialSurfaces) {
+            MaterialUi.RoundedRect(left, Top, width, Height, Height / 2f, Color.Black * 0.62f);
+            MaterialUi.RoundedOutline(left, Top, width, Height, Height / 2f, 1.5f, Color.White * 0.18f);
+        }
 
         if (settings.ShowRecordingIndicator) {
             Vector2 center = new(left + 19f, Top + Height / 2f);
