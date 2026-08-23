@@ -1,6 +1,4 @@
-using System.Drawing.Text;
-
-#pragma warning disable CA1416
+using SkiaSharp;
 
 namespace Celeste.Mod.MicroblocksQolUtils;
 
@@ -11,12 +9,8 @@ internal static class UiFontCatalog {
     public static IReadOnlyList<string> InstalledFamilies => installedFamilies.Value;
 
     private static IReadOnlyList<string> LoadInstalledFamilies() {
-        if (!OperatingSystem.IsWindows()) return [DefaultFontFamily];
-
         try {
-            using InstalledFontCollection collection = new();
-            string[] names = collection.Families
-                .Select(family => family.Name)
+            string[] names = SKFontManager.Default.FontFamilies
                 .Where(name => !string.IsNullOrWhiteSpace(name))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase)

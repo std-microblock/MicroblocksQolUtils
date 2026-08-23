@@ -6,7 +6,9 @@ runtime; MiaoNet+ and SpeedrunTool are not hard dependencies.
 Implemented:
 
 - HUD entity and settings model.
-- Direct Windows TTF/OTF glyph rasterization with a bounded, lazy GPU cache.
+- Skia-based TTF/OTF text-run rasterization with full hinting, physical-pixel
+  alignment, and a bounded lazy GPU cache. Material Symbols use the same Skia
+  color pipeline at their final output resolution.
 - Named Material Symbols support: rounded SVGs are embedded in the assembly and
   lazily rasterized through `MaterialIcon.Draw("icon_name", ...)`, so UI code can
   use canonical Material You icon names without hand-wiring texture atlases.
@@ -154,6 +156,14 @@ elsewhere. Build and install in one step with:
 
 ```powershell
 node scripts/build-qol-mod.mjs --install
+```
+
+The parity harness renders representative Chinese/Latin text and Material
+Symbols both directly with Skia and through the mod's raster upload/composition
+path. It fails below 99.9% foreground pixel similarity:
+
+```powershell
+node scripts/verify-skia-parity.mjs
 ```
 
 Close Celeste before using `--install`; the script refuses to replace loaded
