@@ -3,16 +3,13 @@ using System.Text.Json;
 namespace Celeste.Mod.MicroblocksQolUtils;
 
 internal static class NativeRecordingFinalizer {
-    public static async Task FinishAsync(
+    public static async Task<bool> FinishAsync(
         IReadOnlyList<RecordingClip> clips,
-        IReadOnlyList<Task> pendingStops,
-        IReadOnlyCollection<string> temporaryFiles,
-        string output
+        string output,
+        string description
     ) {
-        bool completed = false;
         try {
-            await Task.WhenAll(pendingStops).ConfigureAwait(false);
-            if (clips.Count == 0 || clips.Any(clip => !File.Exists(clip.Source))) return;
+            if (clips.Count == 0 || clips.Any(clip => !File.Exists(clip.Source))) return false;
             Directory.CreateDirectory(Path.GetDirectoryName(output)!);
             QolSettings settings = MicroblocksQolUtilsModule.Settings;
             await NativeCaptureBridge.FinalizeRecordingAsync(
@@ -28,23 +25,11 @@ internal static class NativeRecordingFinalizer {
                 output + ".timeline.json",
                 JsonSerializer.Serialize(new { clips }, new JsonSerializerOptions { WriteIndented = true })
             ).ConfigureAwait(false);
-            Logger.Log(LogLevel.Info, "MicroblocksQolUtils/Recorder", $"Saved successful run recording: {output}");
-            completed = true;
-            AutoRecorder.CleanupRecordings();
+            Logger.Log(LogLevel.Info, "MicroblocksQolUtils/Recorder", $"Saved {description}: {output}");
+            return true;
         } catch (Exception exception) {
             Logger.LogDetailed(exception, "MicroblocksQolUtils/Recorder");
-        } finally {
-            if (completed) {
-                foreach (string file in temporaryFiles) {
-                    try { File.Delete(file); } catch { }
-                }
-            } else {
-                Logger.Log(
-                    LogLevel.Warn,
-                    "MicroblocksQolUtils/Recorder",
-                    $"Finalization failed; preserved continuous recording files under {Path.GetDirectoryName(temporaryFiles.FirstOrDefault() ?? output)}"
-                );
-            }
+            return false;
         }
     }
 }

@@ -58,6 +58,14 @@ Implemented:
 - Completed recordings are pruned oldest-first at startup and after finalization;
   the recording settings can change the retention count, disable the limit,
   or run cleanup immediately.
+- Optional death replays preserve the failed attempt from the latest room or
+  respawn anchor instead of dropping it from the continuous capture. Death
+  replays have their own retention limit (30 by default) and are finalized when
+  the current continuous recording session stops.
+- The recording library can switch between recent deaths and complete videos.
+  New files are separated under `deaths/<area>` and `full/<area>` inside the
+  configured recording directory; recordings created by older versions remain
+  visible as complete videos.
 - Pass-through FMOD DSP taps capture `bus:/gameplay_sfx`, `bus:/music`, and
   optionally `bus:/ui_sfx`. Mixer callbacks feed a fixed pool of 32 native PCM
   chunks with non-blocking `try_lock`
