@@ -233,6 +233,10 @@ public sealed class QolSettings : EverestModuleSettings {
     public bool DeathReplayEnabled { get; set; }
 
     [DefaultValue(30)]
+    [SettingRange(10, 60)]
+    public int DeathReplayBufferSeconds { get; set; } = 30;
+
+    [DefaultValue(30)]
     [SettingRange(0, 200)]
     public int DeathReplayRetentionCount { get; set; } = 30;
 

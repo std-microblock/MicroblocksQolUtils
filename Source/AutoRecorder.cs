@@ -11,12 +11,13 @@ public static class AutoRecorder {
 
     private static readonly List<RecordingClip> ActivePrefix = [];
     private static readonly List<PendingDeathReplay> PendingDeathReplays = [];
+    private static readonly object FinalizationProgressLock = new();
+    private static readonly Dictionary<long, FinalizationProgressState> ActiveFinalizations = [];
     private static NativeRoomRecording? current;
     private static RecordingTimelineSnapshot? respawnAnchor;
     private static Vector2? observedRespawnPoint;
     private static MusicPosition branchMusicStart;
     private static double branchStartSeconds;
-    private static double deathReplayStartSeconds;
     private static string runKey = "";
     private static string areaSid = "";
     private static bool branchActive;
@@ -28,6 +29,8 @@ public static class AutoRecorder {
     private static bool manualMode;
     private static int finalizingCount;
     private static int cleanupRunning;
+    private static long nextFinalizationId;
+    private static long finalizationUpdateSequence;
     private static string lastOutput = "";
     private static string lastCleanupStatus = "—";
 
@@ -37,10 +40,39 @@ public static class AutoRecorder {
     public static bool IsFinalizing => Volatile.Read(ref finalizingCount) > 0;
     public static bool IsCleaning => Volatile.Read(ref cleanupRunning) != 0;
     public static double CurrentSeconds => current?.MediaTimeSeconds ?? 0;
+    public static double DisplaySeconds {
+        get {
+            double seconds = CurrentSeconds;
+            QolSettings settings = MicroblocksQolUtilsModule.Settings;
+            return !fullRecordingEnabled && !manualMode && settings.DeathReplayEnabled
+                ? Math.Min(seconds, Math.Clamp(settings.DeathReplayBufferSeconds, 10, 60))
+                : seconds;
+        }
+    }
     public static string CurrentPath => current?.Path ?? "";
     public static string LastOutput => lastOutput;
     public static string LastCleanupStatus => lastCleanupStatus;
     public static int PendingDeathReplayCount => PendingDeathReplays.Count;
+    public static double FinalizationProgress {
+        get {
+            lock (FinalizationProgressLock) {
+                double totalWeight = ActiveFinalizations.Values.Sum(state => state.Weight);
+                return totalWeight <= 0d
+                    ? 0d
+                    : ActiveFinalizations.Values.Sum(state => state.Progress * state.Weight) / totalWeight;
+            }
+        }
+    }
+    public static string FinalizationDescription {
+        get {
+            lock (FinalizationProgressLock) {
+                return ActiveFinalizations.Values
+                    .OrderByDescending(state => state.UpdateSequence)
+                    .Select(state => state.Description)
+                    .FirstOrDefault() ?? "视频";
+            }
+        }
+    }
     public static string RecordingRoot => ResolveRecordingRoot();
     public static string FullRecordingRoot => Path.Combine(ResolveRecordingRoot(), FullRecordingsDirectory);
     public static string DeathReplayRoot => Path.Combine(ResolveRecordingRoot(), DeathReplaysDirectory);
@@ -101,9 +133,9 @@ public static class AutoRecorder {
 
         if (pauseSuspended && !player.Dead && !level.Transitioning) {
             pauseSuspended = false;
-            StartBranchAtCurrentTime(resetDeathReplayStart: false);
+            StartBranchAtCurrentTime();
         } else if (waitingForStablePlayer && !player.Dead && !level.Transitioning) {
-            StartBranchAtCurrentTime(resetDeathReplayStart: true);
+            StartBranchAtCurrentTime();
         }
 
         if (branchActive && settings.BgmMode == BgmRecordingMode.SfxOnlyWithPostMix)
@@ -113,7 +145,6 @@ public static class AutoRecorder {
             if (level.Transitioning) return;
             transitioningRoom = false;
             respawnAnchor = new RecordingTimelineSnapshot(CaptureCurrentClips(recording));
-            deathReplayStartSeconds = recording.MediaTimeSeconds;
             observedRespawnPoint = level.Session.RespawnPoint;
         }
 
@@ -121,7 +152,6 @@ public static class AutoRecorder {
         if (branchActive
             && RespawnPointChanged(observedRespawnPoint, respawn)) {
             respawnAnchor = new RecordingTimelineSnapshot(CaptureCurrentClips(recording));
-            deathReplayStartSeconds = recording.MediaTimeSeconds;
         }
         observedRespawnPoint = respawn;
     }
@@ -212,6 +242,11 @@ public static class AutoRecorder {
         PlayerDeadBody? body = orig(self, direction, evenIfInvincible, registerDeathInStats);
         if (body is null || current is null) return body;
         QueueDeathReplay(self, current);
+        QolSettings settings = MicroblocksQolUtilsModule.Settings;
+        if (settings.DeathReplayEnabled && !fullRecordingEnabled) {
+            FinalizeDeathReplayCapture();
+            return body;
+        }
         ActivePrefix.Clear();
         if (respawnAnchor is not null) ActivePrefix.AddRange(respawnAnchor.Clips);
         branchActive = false;
@@ -271,14 +306,13 @@ public static class AutoRecorder {
         ActivePrefix.Clear();
         respawnAnchor = null;
         observedRespawnPoint = level.Session.RespawnPoint;
-        StartBranchAtCurrentTime(resetDeathReplayStart: true);
+        StartBranchAtCurrentTime();
     }
 
-    private static void StartBranchAtCurrentTime(bool resetDeathReplayStart) {
+    private static void StartBranchAtCurrentTime() {
         NativeRoomRecording? recording = current;
         if (recording is null) return;
         branchStartSeconds = recording.MediaTimeSeconds;
-        if (resetDeathReplayStart) deathReplayStartSeconds = branchStartSeconds;
         branchMusicStart = MusicPosition.Read();
         branchActive = true;
         waitingForStablePlayer = false;
@@ -349,8 +383,8 @@ public static class AutoRecorder {
         QolSettings settings = MicroblocksQolUtilsModule.Settings;
         if (!settings.DeathReplayEnabled) return;
 
-        double endSeconds = recording.MediaTimeSeconds;
-        List<RecordingClip> clips = CaptureClipsInRange(recording, deathReplayStartSeconds, endSeconds);
+        double bufferSeconds = Math.Clamp(settings.DeathReplayBufferSeconds, 10, 60);
+        List<RecordingClip> clips = CaptureRecentClips(recording, bufferSeconds);
         if (clips.Count == 0) return;
 
         Level? level = player.Scene as Level;
@@ -387,28 +421,39 @@ public static class AutoRecorder {
         return clips;
     }
 
-    private static List<RecordingClip> CaptureClipsInRange(
-        NativeRoomRecording recording,
-        double startSeconds,
-        double endSeconds
-    ) {
+    private static List<RecordingClip> CaptureRecentClips(NativeRoomRecording recording, double seconds) {
         List<RecordingClip> result = [];
-        foreach (RecordingClip clip in CaptureCurrentClips(recording)) {
-            double clipEnd = clip.StartSeconds + clip.DurationSeconds;
-            double retainedStart = Math.Max(startSeconds, clip.StartSeconds);
-            double retainedEnd = Math.Min(endSeconds, clipEnd);
-            double duration = retainedEnd - retainedStart;
+        double remaining = Math.Max(0d, seconds);
+        foreach (RecordingClip clip in CaptureCurrentClips(recording).AsEnumerable().Reverse()) {
+            if (remaining < MinimumClipSeconds) break;
+            double duration = Math.Min(remaining, clip.DurationSeconds);
             if (duration < MinimumClipSeconds) continue;
-            int musicOffset = (int)Math.Round((retainedStart - clip.StartSeconds) * 1_000.0);
-            result.Add(new RecordingClip(
+            double retainedStart = clip.StartSeconds + clip.DurationSeconds - duration;
+            int musicOffset = (int)Math.Round((retainedStart - clip.StartSeconds) * 1_000d);
+            result.Insert(0, new RecordingClip(
                 clip.Source,
                 retainedStart,
                 duration,
                 clip.MusicEvent,
                 clip.MusicTimelineMilliseconds + musicOffset
             ));
+            remaining -= duration;
         }
         return result;
+    }
+
+    private static void FinalizeDeathReplayCapture() {
+        NativeRoomRecording? recording = current;
+        current = null;
+        if (recording is not null) {
+            FinishStoppedRecording(recording, recording.StopAsync(), TakeDeathReplayJobs());
+        }
+        ActivePrefix.Clear();
+        respawnAnchor = null;
+        branchActive = false;
+        waitingForStablePlayer = true;
+        pauseSuspended = false;
+        transitioningRoom = false;
     }
 
     private static bool ShouldRecord(Player player, QolSettings settings) {
@@ -424,7 +469,6 @@ public static class AutoRecorder {
         }
         ActivePrefix.Clear();
         respawnAnchor = null;
-        deathReplayStartSeconds = 0;
         branchActive = false;
         waitingForStablePlayer = false;
         pauseSuspended = false;
@@ -471,26 +515,37 @@ public static class AutoRecorder {
             return;
         }
 
+        long finalizationId = BeginFinalization(jobs);
         Interlocked.Increment(ref finalizingCount);
-        _ = FinishStoppedRecordingAsync(stop, temporaryFiles, jobs);
+        _ = FinishStoppedRecordingAsync(stop, temporaryFiles, jobs, finalizationId);
     }
 
     private static async Task FinishStoppedRecordingAsync(
         Task stop,
         IReadOnlyCollection<string> temporaryFiles,
-        IReadOnlyList<RecordingFinalizationJob> jobs
+        IReadOnlyList<RecordingFinalizationJob> jobs,
+        long finalizationId
     ) {
         bool completed = true;
         try {
             await stop.ConfigureAwait(false);
+            double totalWeight = jobs.Sum(job => job.Weight);
+            double completedWeight = 0d;
             foreach (RecordingFinalizationJob job in jobs) {
+                double capturedCompletedWeight = completedWeight;
                 if (!await NativeRecordingFinalizer.FinishAsync(
                     job.Clips,
                     job.Output,
-                    job.Description
+                    job.Description,
+                    progress => UpdateFinalization(
+                        finalizationId,
+                        (capturedCompletedWeight + job.Weight * progress) / totalWeight,
+                        job.Description
+                    )
                 ).ConfigureAwait(false)) {
                     completed = false;
                 }
+                completedWeight += job.Weight;
             }
             if (completed) DeleteTemporaryFiles(temporaryFiles);
             else {
@@ -504,8 +559,36 @@ public static class AutoRecorder {
         } catch (Exception exception) {
             Logger.LogDetailed(exception, "MicroblocksQolUtils/Recorder");
         } finally {
+            EndFinalization(finalizationId);
             Interlocked.Decrement(ref finalizingCount);
         }
+    }
+
+    private static long BeginFinalization(IReadOnlyList<RecordingFinalizationJob> jobs) {
+        long id = Interlocked.Increment(ref nextFinalizationId);
+        double weight = jobs.Sum(job => job.Weight);
+        lock (FinalizationProgressLock) {
+            ActiveFinalizations[id] = new FinalizationProgressState(
+                weight,
+                0d,
+                jobs[0].Description,
+                ++finalizationUpdateSequence
+            );
+        }
+        return id;
+    }
+
+    private static void UpdateFinalization(long id, double progress, string description) {
+        lock (FinalizationProgressLock) {
+            if (!ActiveFinalizations.TryGetValue(id, out FinalizationProgressState? state)) return;
+            state.Progress = Math.Clamp(progress, 0d, 1d);
+            state.Description = description;
+            state.UpdateSequence = ++finalizationUpdateSequence;
+        }
+    }
+
+    private static void EndFinalization(long id) {
+        lock (FinalizationProgressLock) ActiveFinalizations.Remove(id);
     }
 
     private static void DeleteTemporaryFiles(IEnumerable<string> files) {
@@ -519,7 +602,6 @@ public static class AutoRecorder {
         respawnAnchor = null;
         observedRespawnPoint = null;
         branchStartSeconds = 0;
-        deathReplayStartSeconds = 0;
         branchMusicStart = default;
         branchActive = false;
         waitingForStablePlayer = false;
@@ -596,5 +678,19 @@ public static class AutoRecorder {
         IReadOnlyList<RecordingClip> Clips,
         string Output,
         string Description
-    );
+    ) {
+        public double Weight => Math.Max(0.1d, Clips.Sum(clip => clip.DurationSeconds));
+    }
+
+    private sealed class FinalizationProgressState(
+        double weight,
+        double progress,
+        string description,
+        long updateSequence
+    ) {
+        public double Weight { get; } = weight;
+        public double Progress { get; set; } = progress;
+        public string Description { get; set; } = description;
+        public long UpdateSequence { get; set; } = updateSequence;
+    }
 }
