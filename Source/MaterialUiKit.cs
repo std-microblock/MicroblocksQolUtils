@@ -34,11 +34,6 @@ internal readonly record struct MaterialRect(float X, float Y, float Width, floa
 
     public MaterialRect Offset(float x, float y) => new(X + x, Y + y, Width, Height);
 
-    public MaterialRect ScaleFromCenter(float scale) {
-        float width = Width * scale;
-        float height = Height * scale;
-        return new MaterialRect(Center.X - width / 2f, Center.Y - height / 2f, width, height);
-    }
 }
 
 internal readonly record struct MaterialInteractionTarget(
@@ -48,7 +43,7 @@ internal readonly record struct MaterialInteractionTarget(
     bool Focused = false
 );
 
-internal sealed class MaterialMotionController {
+internal sealed class MaterialMotionController : IDisposable {
     private readonly Dictionary<string, MaterialInteractionState> states = new(StringComparer.Ordinal);
     private string? capturedKey;
     private int frame;
@@ -83,15 +78,11 @@ internal sealed class MaterialMotionController {
             foreach (string key in states
                 .Where(pair => frame - pair.Value.LastSeenFrame > 120 && pair.Value.IsIdle)
                 .Select(pair => pair.Key)
-                .ToArray()) states.Remove(key);
+                .ToArray()) {
+                states[key].Dispose();
+                states.Remove(key);
+            }
         }
-    }
-
-    public MaterialRect Animate(string key, MaterialRect rect, float hoverScale = 0.012f,
-        float pressedScale = 0.018f, float hoverLift = 2f) {
-        MaterialInteractionState state = State(key);
-        float scale = 1f + state.Hover * hoverScale - state.Pressed * pressedScale;
-        return rect.ScaleFromCenter(scale).Offset(0f, -state.Hover * hoverLift + state.Pressed * hoverLift);
     }
 
     public float Emphasis(string key) {
@@ -109,11 +100,17 @@ internal sealed class MaterialMotionController {
         if (state.RippleOpacity <= 0.001f) return;
         float maximumRadius = MaxDistanceToCorner(state.RippleOrigin, rect);
         float progress = Ease.CubeOut(Math.Clamp(state.RippleProgress, 0f, 1f));
-        MaterialUi.ClippedCircle(state.RippleOrigin, Math.Max(2f, maximumRadius * progress), rect,
-            color * (alpha * state.RippleOpacity * 0.16f));
+        state.RenderRipple(rect, radius, Math.Max(2f, maximumRadius * progress),
+            color, alpha * state.RippleOpacity * 0.14f);
     }
 
     public void Pulse(string key, Vector2 origin) => State(key).BeginRipple(origin);
+
+    public void Dispose() {
+        foreach (MaterialInteractionState state in states.Values) state.Dispose();
+        states.Clear();
+        capturedKey = null;
+    }
 
     private MaterialInteractionState State(string key) {
         if (states.TryGetValue(key, out MaterialInteractionState? state)) return state;
@@ -128,7 +125,9 @@ internal sealed class MaterialMotionController {
         return MathF.Sqrt(x * x + y * y);
     }
 
-    private sealed class MaterialInteractionState {
+    private sealed class MaterialInteractionState : IDisposable {
+        private Texture2D? rippleTexture;
+        private Color[] ripplePixels = [];
         public float Hover { get; private set; }
         public float Pressed { get; private set; }
         public float Focus { get; private set; }
@@ -153,6 +152,75 @@ internal sealed class MaterialMotionController {
             RippleProgress = Math.Min(1f, RippleProgress + deltaTime * (pressed ? 2.6f : 3.8f));
             if (!pressed && RippleProgress >= 0.72f)
                 RippleOpacity = Math.Max(0f, RippleOpacity - deltaTime * 5.5f);
+            if (RippleOpacity <= 0f && rippleTexture is not null) ReleaseRippleTexture();
+        }
+
+        public void RenderRipple(MaterialRect rect, float cornerRadius, float rippleRadius,
+            Color color, float alpha) {
+            int width = Math.Max(1, (int)MathF.Round(rect.Width));
+            int height = Math.Max(1, (int)MathF.Round(rect.Height));
+            EnsureRippleTexture(width, height);
+
+            float centerX = RippleOrigin.X - rect.X;
+            float centerY = RippleOrigin.Y - rect.Y;
+            float softness = Math.Clamp(rippleRadius * 0.16f, 14f, 34f);
+            float innerEdge = Math.Max(0f, rippleRadius - softness * 0.55f);
+            float outerEdge = rippleRadius + softness * 0.45f;
+            float roundedRadius = Math.Clamp(cornerRadius, 0f, Math.Min(width, height) / 2f);
+
+            for (int y = 0; y < height; y++) {
+                float py = y + 0.5f;
+                for (int x = 0; x < width; x++) {
+                    float px = x + 0.5f;
+                    float dx = px - centerX;
+                    float dy = py - centerY;
+                    float distance = MathF.Sqrt(dx * dx + dy * dy);
+                    float ripple = 1f - SmoothStep(innerEdge, outerEdge, distance);
+                    float clip = RoundedCoverage(px, py, width, height, roundedRadius);
+                    float centerFade = MathHelper.Lerp(0.76f, 1f,
+                        1f - Math.Clamp(distance / Math.Max(1f, rippleRadius), 0f, 1f));
+                    byte value = (byte)Math.Clamp((int)MathF.Round(
+                        ripple * clip * centerFade * 255f), 0, 255);
+                    ripplePixels[y * width + x] = new Color(value, value, value, value);
+                }
+            }
+
+            rippleTexture!.SetData(ripplePixels);
+            Draw.SpriteBatch.Draw(rippleTexture,
+                new Rectangle((int)MathF.Round(rect.X), (int)MathF.Round(rect.Y), width, height),
+                color * alpha);
+        }
+
+        public void Dispose() => ReleaseRippleTexture();
+
+        private void EnsureRippleTexture(int width, int height) {
+            if (rippleTexture is { IsDisposed: false }
+                && rippleTexture.Width == width && rippleTexture.Height == height) return;
+            ReleaseRippleTexture();
+            rippleTexture = new Texture2D(Engine.Graphics.GraphicsDevice, width, height);
+            ripplePixels = new Color[width * height];
+        }
+
+        private void ReleaseRippleTexture() {
+            rippleTexture?.Dispose();
+            rippleTexture = null;
+            ripplePixels = [];
+        }
+
+        private static float RoundedCoverage(float x, float y, float width, float height, float radius) {
+            if (radius <= 0f) return 1f;
+            float nearestX = Math.Clamp(x, radius, width - radius);
+            float nearestY = Math.Clamp(y, radius, height - radius);
+            float dx = x - nearestX;
+            float dy = y - nearestY;
+            float distance = MathF.Sqrt(dx * dx + dy * dy);
+            return 1f - SmoothStep(radius - 0.75f, radius + 0.75f, distance);
+        }
+
+        private static float SmoothStep(float from, float to, float value) {
+            if (to <= from) return value >= to ? 1f : 0f;
+            float amount = Math.Clamp((value - from) / (to - from), 0f, 1f);
+            return amount * amount * (3f - 2f * amount);
         }
 
         private static float Smooth(float value, float target, float speed, float deltaTime) {
