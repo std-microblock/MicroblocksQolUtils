@@ -777,6 +777,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                     value => settings.RemoveRoomTransitions = value),
                 Toggle("完全移除死亡动画", () => settings.RemoveDeathAnimation,
                     value => settings.RemoveDeathAnimation = value),
+                EnumRow("碰撞箱", () => settings.CollisionBoxes, value => settings.CollisionBoxes = value),
                 Toggle("关心玩家过面通知", () => settings.WatchedPlayerNotifications,
                     value => settings.WatchedPlayerNotifications = value)
             ])
@@ -903,6 +904,9 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         RecordingPolicy.GoldenRunsOnly => "仅金草莓",
         BgmRecordingMode.CaptureGameMix => "直接录制混音",
         BgmRecordingMode.SfxOnlyWithPostMix => "仅音效，后期对齐 BGM",
+        CollisionBoxDisplayMode.Hidden => "不显示碰撞箱",
+        CollisionBoxDisplayMode.Visible => "显示碰撞箱",
+        CollisionBoxDisplayMode.Only => "只显示碰撞箱",
         _ => value.ToString()
     };
 
