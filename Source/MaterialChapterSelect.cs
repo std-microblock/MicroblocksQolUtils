@@ -141,13 +141,8 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
             palette with { SurfaceHigh = palette.Surface * (acrylicActive ? 0.78f : 0.94f) }, eased);
 
         MaterialUiKit.Text(UiText("microblocks_qol_chapter_title", "选择章节"),
-            new Vector2(layout.Header.X, layout.Header.Y), Vector2.Zero, MaterialTextRole.Display,
-            palette.OnSurface, eased);
-        string subtitle = CollabUtils2Bridge.Available
-            ? UiText("microblocks_qol_chapter_subtitle_collab", "Material You  ·  键盘 / 鼠标  ·  CollabUtils2")
-            : UiText("microblocks_qol_chapter_subtitle", "Material You  ·  键盘 / 鼠标");
-        MaterialUiKit.Text(subtitle, new Vector2(layout.Header.X + 2f, layout.Header.Y + 55f), Vector2.Zero,
-            MaterialTextRole.Body, palette.OnSurfaceVariant, eased);
+            new Vector2(layout.Header.X, layout.Search.Center.Y), new Vector2(0f, 0.5f),
+            MaterialTextRole.Display, palette.OnSurface, eased);
         RenderSearchBox(palette, layout, eased);
 
         RenderLevelSets(palette, layout, eased, renderMatrix);
@@ -359,8 +354,9 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         MaterialUiKit.Surface(layout.Sidebar,
             28f, palette with { SurfaceHigh = palette.SurfaceHigh * 0.82f }, alpha);
         MaterialUiKit.Text(UiText("microblocks_qol_chapter_level_sets", "地图集"),
-            new Vector2(layout.Sidebar.X + MaterialSpacing.Lg, layout.Sidebar.Y + MaterialSpacing.Md), Vector2.Zero,
-            MaterialTextRole.Section, palette.OnSurface, alpha);
+            new Vector2(layout.Sidebar.X + MaterialSpacing.Lg,
+                layout.Sidebar.Y + ChapterLayout.SidebarHeaderHeight / 2f),
+            new Vector2(0f, 0.5f), MaterialTextRole.Section, palette.OnSurface, alpha);
         levelSetViewport.Render(layout.SidebarItems, renderMatrix, () => {
             for (int index = 0; index < levelSets.Count; index++) {
                 MaterialRect item = layout.SidebarItem(index, levelSetScroll.Offset);
@@ -369,8 +365,8 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
                 MaterialUiKit.NavigationPill(item, palette, selected, alpha);
                 SystemTtfFont.Draw(
                     Trim(levelSets[index].Title, 20),
-                    new Vector2(item.X + 20f, item.Y + 10f),
-                    Vector2.Zero,
+                    new Vector2(item.X + 20f, item.Center.Y),
+                    new Vector2(0f, 0.5f),
                     0.37f,
                     (selected ? palette.OnPrimary : palette.OnSurfaceVariant) * alpha,
                     weight: selected ? UiFontWeight.Bold : UiFontWeight.Regular
@@ -409,8 +405,6 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         MaterialPalette palette,
         float alpha
     ) {
-        float x = card.X;
-        float y = card.Y;
         MaterialRect content = card.Inset(20f, 18f);
         float iconSize = 48f;
         if (!string.IsNullOrWhiteSpace(entry.Area.Icon) && GFX.Gui.Has(entry.Area.Icon)) {
@@ -430,30 +424,57 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
 
         AreaStats? stats = SaveData.Instance?.GetAreaStatsFor(entry.Area.ToKey());
         AreaModeStats? mode = stats?.Modes is { Length: > 0 } ? stats.Modes[0] : null;
-        float statsY = card.Bottom - 35f;
+        const float bottomRowHeight = 32f;
+        float bottomRowY = card.Bottom - 48f;
         string state = mode is null
             ? UiText("microblocks_qol_chapter_never_entered", "尚未游玩")
             : UiText(mode.Completed ? "microblocks_qol_chapter_cleared" : "microblocks_qol_chapter_uncleared",
                 mode.Completed ? "已完成" : "进行中");
-        SystemTtfFont.Draw(state, new Vector2(content.X, statsY - 8f), Vector2.Zero, 0.27f,
-            mode?.Completed == true ? palette.Primary * alpha : palette.OnSurfaceVariant * alpha,
-            weight: mode?.Completed == true ? UiFontWeight.Bold : UiFontWeight.Regular);
+        RenderStatusPill(state, mode, new MaterialRect(content.X, bottomRowY, 86f, bottomRowHeight),
+            palette, alpha);
         if (mode is not null) {
             DrawStat("collectables/strawberry", mode.TotalStrawberries,
-                new Vector2(content.X + 92f, statsY), palette.OnSurfaceVariant, alpha);
+                new Vector2(content.X + 112f, bottomRowY + bottomRowHeight / 2f),
+                palette.OnSurfaceVariant, alpha);
             DrawStat("collectables/skullBlue", mode.Deaths,
-                new Vector2(content.X + 160f, statsY), palette.OnSurfaceVariant, alpha);
+                new Vector2(content.X + 180f, bottomRowY + bottomRowHeight / 2f),
+                palette.OnSurfaceVariant, alpha);
         }
 
         MaterialUiKit.Chip(entry.Badge,
-            new Vector2(card.Right - 16f, card.Bottom - 44f), palette, selected, alpha);
+            new Vector2(card.Right - 16f, bottomRowY), palette, selected, alpha);
+    }
+
+    private static void RenderStatusPill(
+        string text,
+        AreaModeStats? mode,
+        MaterialRect rect,
+        MaterialPalette palette,
+        float alpha
+    ) {
+        bool completed = mode?.Completed == true;
+        bool inProgress = mode is not null && !completed;
+        Color fill = completed
+            ? palette.Primary
+            : inProgress ? palette.SurfaceHighest : palette.SurfaceHigh;
+        Color foreground = completed
+            ? palette.OnPrimary
+            : inProgress ? palette.Primary : palette.OnSurfaceVariant;
+        MaterialUi.RoundedRect(rect.X, rect.Y, rect.Width, rect.Height, rect.Height / 2f,
+            fill * (completed ? 0.96f : 0.82f) * alpha);
+        if (!completed) {
+            MaterialUi.RoundedOutline(rect.X, rect.Y, rect.Width, rect.Height, rect.Height / 2f,
+                inProgress ? 2f : 1f, (inProgress ? palette.Primary : palette.Outline) * alpha);
+        }
+        SystemTtfFont.Draw(text, rect.Center, new Vector2(0.5f), 0.29f, foreground * alpha,
+            weight: completed || inProgress ? UiFontWeight.Bold : UiFontWeight.Regular);
     }
 
     private static void DrawStat(string texture, int value, Vector2 position, Color color, float alpha) {
         MTexture icon = GFX.Gui[texture];
         float scale = 20f / Math.Max(icon.Width, icon.Height);
         icon.DrawCentered(position, Color.White * alpha, scale);
-        SystemTtfFont.Draw(value.ToString(), position + new Vector2(16f, -8f), Vector2.Zero, 0.27f,
+        SystemTtfFont.Draw(value.ToString(), position + new Vector2(16f, 0f), new Vector2(0f, 0.5f), 0.27f,
             color * alpha);
     }
 
@@ -466,11 +487,8 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         string detail = selected is null
             ? UiText("microblocks_qol_chapter_no_available", "没有可用章节")
             : selected.Sid;
-        SystemTtfFont.Draw(Trim(detail, 72), new Vector2(layout.Footer.X, layout.Footer.Y), Vector2.Zero, 0.31f,
-            palette.OnSurfaceVariant * alpha);
-        SystemTtfFont.Draw(UiText("microblocks_qol_chapter_controls",
-                "Enter / 左键：打开   Esc：返回   Tab：切换地图集   滚轮：滚动"),
-            new Vector2(layout.Footer.Right, layout.Footer.Y), new Vector2(1f, 0f), 0.31f,
+        SystemTtfFont.Draw(Trim(detail, 72), new Vector2(layout.Footer.X, layout.Footer.Center.Y),
+            new Vector2(0f, 0.5f), 0.31f,
             palette.OnSurfaceVariant * alpha);
     }
 
@@ -521,8 +539,8 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         string shown = searchText + (searchFocused ? imeText : "");
         string text = shown.Length == 0 ? "搜索地图、地图集或 SID…" : shown;
         Color color = shown.Length == 0 ? palette.OnSurfaceVariant * 0.68f : palette.OnSurface;
-        Vector2 textPosition = new(layout.Search.X + 24f, layout.Search.Y + 12f);
-        SystemTtfFont.Draw(Trim(text, 46), textPosition, Vector2.Zero, 0.36f, color * alpha);
+        Vector2 textPosition = new(layout.Search.X + 24f, layout.Search.Center.Y);
+        SystemTtfFont.Draw(Trim(text, 46), textPosition, new Vector2(0f, 0.5f), 0.36f, color * alpha);
         if (searchFocused && Scene.BetweenInterval(0.5f)) {
             float caretX = textPosition.X + SystemTtfFont.Measure(Trim(shown, 46), 0.36f).X + 2f;
             MaterialUi.Line(new Vector2(caretX, layout.Search.Y + 11f),
@@ -625,7 +643,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         MaterialRect Cards,
         MaterialRect Footer
     ) {
-        private const float SidebarHeaderHeight = 64f;
+        public const float SidebarHeaderHeight = 64f;
         public const float SidebarItemHeight = 50f;
         public const float SidebarItemGap = MaterialSpacing.Xs;
 
@@ -636,7 +654,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
                 inner,
                 MaterialAxis.Vertical,
                 18f,
-                MaterialTrack.Fixed(95f),
+                MaterialTrack.Fixed(72f),
                 MaterialTrack.Flex(),
                 MaterialTrack.Fixed(44f)
             );
@@ -647,7 +665,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
                 MaterialTrack.Fixed(296f),
                 MaterialTrack.Flex()
             );
-            MaterialRect search = new(rows[0].Right - 620f, rows[0].Y + 8f, 620f, 54f);
+            MaterialRect search = new(rows[0].Right - 620f, rows[0].Center.Y - 27f, 620f, 54f);
             MaterialRect sidebarItems = new(
                 body[0].X + MaterialSpacing.Sm,
                 body[0].Y + SidebarHeaderHeight,
