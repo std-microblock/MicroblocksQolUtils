@@ -92,3 +92,26 @@ resolved against the JSON file's directory, for example:
 
 The music bus itself is never captured, so deaths cannot bake an interrupted or
 restarted BGM track into the continuous room recording.
+
+## Build and install
+
+The standalone repository now contains the complete native crate, its pinned
+and patched `scap` dependency, and the packaging scripts that previously lived
+in `celeste-next-gym`.
+
+Install Rust (MSVC toolchain), the .NET 8 SDK, Node.js, and LLVM/Clang, then run:
+
+```powershell
+node scripts/build-qol-mod.mjs
+```
+
+The packaged Everest mod is written to `Build`. Managed references default to
+`C:\SteamLibrary\steamapps\common\Celeste`; set `CELESTE_ROOT` if the game is
+elsewhere. Build and install in one step with:
+
+```powershell
+node scripts/build-qol-mod.mjs --install
+```
+
+Close Celeste before using `--install`; the script refuses to replace loaded
+DLLs while the game is running.

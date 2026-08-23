@@ -1,0 +1,4 @@
+[target.x86_64-pc-windows-msvc]
+# Everest restricts native dependency probing. Keep the training bridge
+# self-contained instead of relying on a machine-wide Visual C++ runtime.
+rustflags = ["-C", "target-feature=+crt-static"]

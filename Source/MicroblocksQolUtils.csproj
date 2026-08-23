@@ -8,7 +8,8 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <CelesteRoot>$(MSBuildThisFileDirectory)..\..\..\vendor\celeste-game</CelesteRoot>
+    <CelesteRoot Condition="'$(CelesteRoot)' == '' and '$(CELESTE_ROOT)' != ''">$(CELESTE_ROOT)</CelesteRoot>
+    <CelesteRoot Condition="'$(CelesteRoot)' == ''">C:\SteamLibrary\steamapps\common\Celeste</CelesteRoot>
   </PropertyGroup>
 
   <ItemGroup>

@@ -1,4 +1,6 @@
 /Build
+/.cache
+/target
 bin
 obj
 /.work

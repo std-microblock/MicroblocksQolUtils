@@ -1,0 +1,436 @@
+use std::collections::HashSet;
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use ffmpeg::{Dictionary, Packet, Rational, codec, encoder, format, frame, software};
+use ffmpeg_next as ffmpeg;
+use thiserror::Error;
+
+use crate::{CaptureConfig, CapturedFrame};
+
+#[derive(Debug, Error)]
+pub enum EncoderError {
+    #[error("FFmpeg initialization failed: {0}")]
+    Initialize(ffmpeg::Error),
+    #[error("output path has no parent directory: {0}")]
+    MissingParent(PathBuf),
+    #[error("cannot create output directory {path}: {source}")]
+    CreateDirectory {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    #[error("no usable H.264 encoder was found; tried {0}")]
+    NoEncoder(String),
+    #[error("cannot create FFmpeg output {path}: {source}")]
+    CreateOutput {
+        path: PathBuf,
+        source: ffmpeg::Error,
+    },
+    #[error("cannot add the {encoder} video stream: {source}")]
+    AddStream {
+        encoder: String,
+        source: ffmpeg::Error,
+    },
+    #[error("cannot open the {encoder} video encoder: {source}")]
+    OpenEncoder {
+        encoder: String,
+        source: ffmpeg::Error,
+    },
+    #[error("cannot write the output header: {0}")]
+    Header(ffmpeg::Error),
+    #[error("cannot initialize BGRA conversion: {0}")]
+    Scale(ffmpeg::Error),
+    #[error("invalid BGRA frame buffer: got {actual} bytes for {width}x{height}")]
+    InvalidFrame {
+        actual: usize,
+        width: u32,
+        height: u32,
+    },
+    #[error("frame conversion failed: {0}")]
+    Convert(ffmpeg::Error),
+    #[error("video encoder rejected a frame: {0}")]
+    SendFrame(ffmpeg::Error),
+    #[error("cannot write an encoded packet: {0}")]
+    WritePacket(ffmpeg::Error),
+    #[error("cannot flush the video encoder: {0}")]
+    Flush(ffmpeg::Error),
+    #[error("cannot write the output trailer: {0}")]
+    Trailer(ffmpeg::Error),
+}
+
+pub struct VideoFileEncoder {
+    output: format::context::Output,
+    encoder: encoder::video::Encoder,
+    scaler: software::scaling::Context,
+    converted: frame::Video,
+    output_width: u32,
+    output_height: u32,
+    input_width: u32,
+    input_height: u32,
+    pixel_format: ffmpeg::format::Pixel,
+    stream_index: usize,
+    encoder_time_base: Rational,
+    stream_time_base: Rational,
+    fps: u32,
+    origin_unix_nanos: Option<u64>,
+    last_pts: i64,
+    finished: bool,
+}
+
+impl VideoFileEncoder {
+    pub fn create(config: &CaptureConfig, first: &CapturedFrame) -> Result<Self, EncoderError> {
+        ffmpeg::init().map_err(EncoderError::Initialize)?;
+        let path = Path::new(
+            config
+                .output_path
+                .as_deref()
+                .expect("VideoFileEncoder requires an output path"),
+        );
+        let parent = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .ok_or_else(|| EncoderError::MissingParent(path.to_owned()))?;
+        fs::create_dir_all(parent).map_err(|source| EncoderError::CreateDirectory {
+            path: parent.to_owned(),
+            source,
+        })?;
+        let _ = fs::remove_file(path);
+
+        let output_width = even_dimension(first.width);
+        let output_height = even_dimension(first.height);
+        let mut failures = Vec::new();
+        for name in encoder_candidates(&config.encoder) {
+            match Self::try_create(
+                path,
+                name,
+                output_width,
+                output_height,
+                first.width,
+                first.height,
+                config.fps,
+                config.bitrate_kbps,
+            ) {
+                Ok(encoder) => return Ok(encoder),
+                Err(error) => failures.push(format!("{name}: {error}")),
+            }
+        }
+        Err(EncoderError::NoEncoder(failures.join("; ")))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn try_create(
+        path: &Path,
+        encoder_name: &str,
+        output_width: u32,
+        output_height: u32,
+        input_width: u32,
+        input_height: u32,
+        fps: u32,
+        bitrate_kbps: u32,
+    ) -> Result<Self, EncoderError> {
+        let codec = encoder::find_by_name(encoder_name).ok_or_else(|| {
+            EncoderError::NoEncoder(format!("{encoder_name} is absent from this FFmpeg build"))
+        })?;
+        let pixel_format = pixel_format_for_encoder(encoder_name);
+        let encoder_time_base = Rational(1, fps as i32);
+        let mut output = format::output(path).map_err(|source| EncoderError::CreateOutput {
+            path: path.to_owned(),
+            source,
+        })?;
+        let global_header = output
+            .format()
+            .flags()
+            .contains(format::Flags::GLOBAL_HEADER);
+
+        let mut video = codec::context::Context::new_with_codec(codec)
+            .encoder()
+            .video()
+            .map_err(|source| EncoderError::OpenEncoder {
+                encoder: encoder_name.to_owned(),
+                source,
+            })?;
+        video.set_width(output_width);
+        video.set_height(output_height);
+        video.set_format(pixel_format);
+        video.set_time_base(encoder_time_base);
+        video.set_frame_rate(Some(Rational(fps as i32, 1)));
+        video.set_bit_rate(bitrate_kbps as usize * 1_000);
+        video.set_gop(fps.saturating_mul(2));
+        video.set_max_b_frames(0);
+        if global_header {
+            video.set_flags(codec::Flags::GLOBAL_HEADER);
+        }
+        let opened = video
+            .open_as_with(codec, encoder_options(encoder_name))
+            .map_err(|source| EncoderError::OpenEncoder {
+                encoder: encoder_name.to_owned(),
+                source,
+            })?;
+
+        let stream_index;
+        {
+            let mut stream =
+                output
+                    .add_stream(codec)
+                    .map_err(|source| EncoderError::AddStream {
+                        encoder: encoder_name.to_owned(),
+                        source,
+                    })?;
+            stream.set_time_base(encoder_time_base);
+            stream.set_avg_frame_rate(Rational(fps as i32, 1));
+            stream.set_parameters(&opened);
+            stream_index = stream.index();
+        }
+        output.write_header().map_err(EncoderError::Header)?;
+        let stream_time_base = output
+            .stream(stream_index)
+            .expect("newly added FFmpeg stream disappeared")
+            .time_base();
+        let scaler = software::scaling::Context::get(
+            ffmpeg::format::Pixel::BGRA,
+            input_width,
+            input_height,
+            pixel_format,
+            output_width,
+            output_height,
+            software::scaling::Flags::BILINEAR,
+        )
+        .map_err(EncoderError::Scale)?;
+
+        Ok(Self {
+            output,
+            encoder: opened,
+            scaler,
+            converted: frame::Video::new(pixel_format, output_width, output_height),
+            output_width,
+            output_height,
+            input_width,
+            input_height,
+            pixel_format,
+            stream_index,
+            encoder_time_base,
+            stream_time_base,
+            fps,
+            origin_unix_nanos: None,
+            last_pts: -1,
+            finished: false,
+        })
+    }
+
+    pub fn encode(&mut self, captured: &CapturedFrame) -> Result<(), EncoderError> {
+        let origin = *self
+            .origin_unix_nanos
+            .get_or_insert(captured.captured_at_unix_nanos);
+        let elapsed = captured.captured_at_unix_nanos.saturating_sub(origin) as u128;
+        let timestamp =
+            ((elapsed * self.fps as u128) / 1_000_000_000_u128).min(i64::MAX as u128) as i64;
+        if timestamp <= self.last_pts {
+            return Ok(());
+        }
+
+        if captured.width != self.input_width || captured.height != self.input_height {
+            self.input_width = captured.width;
+            self.input_height = captured.height;
+            self.scaler.cached(
+                ffmpeg::format::Pixel::BGRA,
+                captured.width,
+                captured.height,
+                self.pixel_format,
+                self.output_width,
+                self.output_height,
+                software::scaling::Flags::BILINEAR,
+            );
+        }
+
+        let mut input =
+            frame::Video::new(ffmpeg::format::Pixel::BGRA, captured.width, captured.height);
+        copy_bgra(captured, &mut input)?;
+        self.scaler
+            .run(&input, &mut self.converted)
+            .map_err(EncoderError::Convert)?;
+
+        self.last_pts = timestamp;
+        self.converted.set_pts(Some(timestamp));
+        self.encoder
+            .send_frame(&self.converted)
+            .map_err(EncoderError::SendFrame)?;
+        self.write_available_packets()
+    }
+
+    pub fn finish(&mut self) -> Result<(), EncoderError> {
+        if self.finished {
+            return Ok(());
+        }
+        self.encoder.send_eof().map_err(EncoderError::Flush)?;
+        self.write_available_packets()?;
+        self.output.write_trailer().map_err(EncoderError::Trailer)?;
+        self.finished = true;
+        Ok(())
+    }
+
+    fn write_available_packets(&mut self) -> Result<(), EncoderError> {
+        let mut packet = Packet::empty();
+        while self.encoder.receive_packet(&mut packet).is_ok() {
+            packet.set_stream(self.stream_index);
+            packet.set_position(-1);
+            packet.rescale_ts(self.encoder_time_base, self.stream_time_base);
+            packet
+                .write_interleaved(&mut self.output)
+                .map_err(EncoderError::WritePacket)?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for VideoFileEncoder {
+    fn drop(&mut self) {
+        let _ = self.finish();
+    }
+}
+
+fn copy_bgra(captured: &CapturedFrame, output: &mut frame::Video) -> Result<(), EncoderError> {
+    let row_bytes = captured.width as usize * 4;
+    let height = captured.height as usize;
+    let expected = row_bytes.saturating_mul(height);
+    if captured.bgra.len() < expected || height == 0 || captured.bgra.len() % height != 0 {
+        return Err(EncoderError::InvalidFrame {
+            actual: captured.bgra.len(),
+            width: captured.width,
+            height: captured.height,
+        });
+    }
+    let input_stride = captured.bgra.len() / height;
+    if input_stride < row_bytes {
+        return Err(EncoderError::InvalidFrame {
+            actual: captured.bgra.len(),
+            width: captured.width,
+            height: captured.height,
+        });
+    }
+    let output_stride = output.stride(0);
+    let data = output.data_mut(0);
+    for row in 0..height {
+        let source = &captured.bgra[row * input_stride..row * input_stride + row_bytes];
+        let destination = &mut data[row * output_stride..row * output_stride + row_bytes];
+        destination.copy_from_slice(source);
+    }
+    Ok(())
+}
+
+pub(crate) fn even_dimension(value: u32) -> u32 {
+    value.max(2) & !1
+}
+
+pub(crate) fn encoder_candidates(preferred: &str) -> Vec<&str> {
+    const AUTOMATIC: [&str; 5] = [
+        "h264_nvenc",
+        "h264_qsv",
+        "h264_amf",
+        "h264_mf",
+        "libopenh264",
+    ];
+    let mut result = Vec::with_capacity(AUTOMATIC.len() + 1);
+    let mut seen = HashSet::new();
+    let preferred = preferred.trim();
+    if !preferred.is_empty() && !preferred.eq_ignore_ascii_case("auto") {
+        result.push(preferred);
+        seen.insert(preferred);
+    }
+    for candidate in AUTOMATIC {
+        if seen.insert(candidate) {
+            result.push(candidate);
+        }
+    }
+    result
+}
+
+pub(crate) fn pixel_format_for_encoder(name: &str) -> ffmpeg::format::Pixel {
+    if name.eq_ignore_ascii_case("libopenh264") {
+        ffmpeg::format::Pixel::YUV420P
+    } else {
+        ffmpeg::format::Pixel::NV12
+    }
+}
+
+pub(crate) fn encoder_options(name: &str) -> Dictionary<'static> {
+    let mut options = Dictionary::new();
+    match name {
+        "h264_nvenc" => {
+            options.set("preset", "p4");
+            options.set("tune", "ll");
+        }
+        "h264_qsv" => {
+            options.set("preset", "veryfast");
+            options.set("async_depth", "1");
+        }
+        "h264_amf" => {
+            options.set("usage", "lowlatency");
+            options.set("quality", "balanced");
+        }
+        "libopenh264" => {
+            options.set("profile", "high");
+        }
+        _ => {}
+    }
+    options
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn automatic_encoder_order_honors_preference_without_duplicates() {
+        assert_eq!(encoder_candidates("auto")[0], "h264_nvenc");
+        let candidates = encoder_candidates("h264_mf");
+        assert_eq!(candidates[0], "h264_mf");
+        assert_eq!(
+            candidates
+                .iter()
+                .filter(|value| **value == "h264_mf")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn direct_ffmpeg_encoder_writes_a_video_when_enabled() {
+        if std::env::var_os("MQOL_TEST_FFMPEG").is_none() {
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("test.mkv");
+        let config = CaptureConfig {
+            output_path: Some(path.to_string_lossy().into_owned()),
+            encoder: "libopenh264".to_owned(),
+            fps: 30,
+            bitrate_kbps: 1_000,
+            ..CaptureConfig::default()
+        };
+        let start = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
+        let mut first = CapturedFrame {
+            width: 64,
+            height: 64,
+            captured_at_unix_nanos: start,
+            bgra: vec![0; 64 * 64 * 4],
+        };
+        let mut encoder = VideoFileEncoder::create(&config, &first).unwrap();
+        for index in 0..30_u64 {
+            first.captured_at_unix_nanos = start + index * 1_000_000_000 / 30;
+            for pixel in first.bgra.chunks_exact_mut(4) {
+                pixel[0] = (index * 7) as u8;
+                pixel[1] = 80;
+                pixel[2] = 180;
+                pixel[3] = 255;
+            }
+            encoder.encode(&first).unwrap();
+        }
+        encoder.finish().unwrap();
+        drop(encoder);
+        assert!(fs::metadata(path).unwrap().len() > 1_000);
+    }
+}
