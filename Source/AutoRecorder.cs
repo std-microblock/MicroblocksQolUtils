@@ -21,14 +21,18 @@ public static class AutoRecorder {
     private static bool completing;
     private static bool manualMode;
     private static int finalizingCount;
+    private static int cleanupRunning;
     private static string lastOutput = "";
+    private static string lastCleanupStatus = "—";
 
     public static bool ManualMode => manualMode;
     public static bool IsRecording => current is not null;
     public static bool IsFinalizing => Volatile.Read(ref finalizingCount) > 0;
+    public static bool IsCleaning => Volatile.Read(ref cleanupRunning) != 0;
     public static double CurrentSeconds => current?.MediaTimeSeconds ?? 0;
     public static string CurrentPath => current?.Path ?? "";
     public static string LastOutput => lastOutput;
+    public static string LastCleanupStatus => lastCleanupStatus;
 
     public static void Load(string directory) {
         _ = directory;
@@ -36,6 +40,7 @@ public static class AutoRecorder {
         On.Celeste.Level.TransitionTo += LevelTransitionTo;
         On.Celeste.Level.RegisterAreaComplete += RegisterAreaComplete;
         SpeedrunToolBridge.Load();
+        CleanupRecordings();
     }
 
     public static void Unload() {
@@ -108,6 +113,27 @@ public static class AutoRecorder {
         if (current is null) return;
         if (save && level is not null) FinalizeCurrent(level);
         else DiscardCurrentRecording();
+    }
+
+    public static void CleanupRecordings() {
+        int retentionCount = Math.Max(0, MicroblocksQolUtilsModule.Settings.RecordingRetentionCount);
+        if (retentionCount == 0) {
+            lastCleanupStatus = "未启用保留上限";
+            return;
+        }
+        if (Interlocked.Exchange(ref cleanupRunning, 1) != 0) return;
+        lastCleanupStatus = "清理中";
+        _ = Task.Run(() => {
+            try {
+                int deleted = DeleteOldCompletedRecordings(ResolveRecordingRoot(), retentionCount);
+                lastCleanupStatus = deleted == 0 ? "无需清理" : $"已清理 {deleted} 个";
+            } catch (Exception exception) {
+                lastCleanupStatus = "清理失败";
+                Logger.LogDetailed(exception, "MicroblocksQolUtils/Recorder/Cleanup");
+            } finally {
+                Volatile.Write(ref cleanupRunning, 0);
+            }
+        });
     }
 
     public static RecordingTimelineSnapshot? CaptureTimeline(Level level) {
@@ -346,6 +372,31 @@ public static class AutoRecorder {
         roomName = "";
         areaSid = "";
         completing = false;
+    }
+
+    private static int DeleteOldCompletedRecordings(string root, int retentionCount) {
+        if (!Directory.Exists(root)) return 0;
+        FileInfo[] completed = Directory
+            .EnumerateFiles(root, "*.mp4", SearchOption.AllDirectories)
+            .Select(path => new FileInfo(path))
+            .Where(file => File.Exists(file.FullName + ".timeline.json"))
+            .OrderByDescending(file => file.LastWriteTimeUtc)
+            .ToArray();
+        int deleted = 0;
+        foreach (FileInfo file in completed.Skip(retentionCount)) {
+            try {
+                File.Delete(file.FullName);
+                try { File.Delete(file.FullName + ".timeline.json"); } catch { }
+                deleted++;
+            } catch (Exception exception) {
+                Logger.Log(
+                    LogLevel.Warn,
+                    "MicroblocksQolUtils/Recorder/Cleanup",
+                    $"Cannot delete old recording {file.FullName}: {exception.Message}"
+                );
+            }
+        }
+        return deleted;
     }
 
     private static string ResolveRecordingRoot() {
