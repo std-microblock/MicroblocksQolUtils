@@ -33,6 +33,7 @@ public static class AutoRecorder {
     public static string CurrentPath => current?.Path ?? "";
     public static string LastOutput => lastOutput;
     public static string LastCleanupStatus => lastCleanupStatus;
+    public static string RecordingRoot => ResolveRecordingRoot();
 
     public static void Load(string directory) {
         _ = directory;
