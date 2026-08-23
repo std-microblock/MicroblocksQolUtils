@@ -1,0 +1,287 @@
+using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Graphics;
+using Monocle;
+
+namespace Celeste.Mod.MicroblocksQolUtils;
+
+internal enum MaterialTextRole {
+    Display,
+    Title,
+    Section,
+    Body,
+    Label,
+    Caption
+}
+
+internal readonly record struct MaterialRect(float X, float Y, float Width, float Height) {
+    public Vector2 Center => new(X + Width / 2f, Y + Height / 2f);
+    public float Right => X + Width;
+    public float Bottom => Y + Height;
+    public bool Contains(Vector2 point) => MaterialUi.Contains(point, X, Y, Width, Height);
+
+    public MaterialRect Inset(float all) => Inset(all, all, all, all);
+
+    public MaterialRect Inset(float horizontal, float vertical) =>
+        Inset(horizontal, vertical, horizontal, vertical);
+
+    public MaterialRect Inset(float left, float top, float right, float bottom) => new(
+        X + left,
+        Y + top,
+        Math.Max(0f, Width - left - right),
+        Math.Max(0f, Height - top - bottom)
+    );
+
+    public MaterialRect Offset(float x, float y) => new(X + x, Y + y, Width, Height);
+}
+
+internal enum MaterialAxis {
+    Horizontal,
+    Vertical
+}
+
+internal readonly record struct MaterialTrack(float Value, bool Flexible) {
+    public static MaterialTrack Fixed(float pixels) => new(Math.Max(0f, pixels), false);
+    public static MaterialTrack Flex(float weight = 1f) => new(Math.Max(0.001f, weight), true);
+}
+
+internal static class MaterialSpacing {
+    public const float Xs = 8f;
+    public const float Sm = 12f;
+    public const float Md = 16f;
+    public const float Lg = 24f;
+    public const float Xl = 32f;
+    public const float Xxl = 40f;
+}
+
+internal static class MaterialLayout {
+    public static MaterialRect[] Split(
+        MaterialRect bounds,
+        MaterialAxis axis,
+        float gap,
+        params MaterialTrack[] tracks
+    ) {
+        if (tracks.Length == 0) return [];
+        float available = (axis == MaterialAxis.Horizontal ? bounds.Width : bounds.Height)
+            - gap * Math.Max(0, tracks.Length - 1);
+        float fixedSize = tracks.Where(track => !track.Flexible).Sum(track => track.Value);
+        float totalWeight = tracks.Where(track => track.Flexible).Sum(track => track.Value);
+        float flexibleSize = Math.Max(0f, available - fixedSize);
+        MaterialRect[] result = new MaterialRect[tracks.Length];
+        float cursor = axis == MaterialAxis.Horizontal ? bounds.X : bounds.Y;
+        for (int index = 0; index < tracks.Length; index++) {
+            MaterialTrack track = tracks[index];
+            float size = track.Flexible ? flexibleSize * track.Value / totalWeight : track.Value;
+            result[index] = axis == MaterialAxis.Horizontal
+                ? new MaterialRect(cursor, bounds.Y, size, bounds.Height)
+                : new MaterialRect(bounds.X, cursor, bounds.Width, size);
+            cursor += size + gap;
+        }
+        return result;
+    }
+
+    public static MaterialRect GridCell(
+        MaterialRect bounds,
+        int columns,
+        int rows,
+        float columnGap,
+        float rowGap,
+        int index
+    ) {
+        columns = Math.Max(1, columns);
+        rows = Math.Max(1, rows);
+        int column = Math.Clamp(index % columns, 0, columns - 1);
+        int row = Math.Clamp(index / columns, 0, rows - 1);
+        float width = Math.Max(0f, (bounds.Width - columnGap * (columns - 1)) / columns);
+        float height = Math.Max(0f, (bounds.Height - rowGap * (rows - 1)) / rows);
+        return new MaterialRect(
+            bounds.X + column * (width + columnGap),
+            bounds.Y + row * (height + rowGap),
+            width,
+            height
+        );
+    }
+}
+
+internal sealed class MaterialScrollController {
+    public float Offset { get; private set; }
+    public float Target { get; private set; }
+
+    public void Update(float maximum) {
+        maximum = Math.Max(0f, maximum);
+        Target = Math.Clamp(Target, 0f, maximum);
+        float speed = Math.Max(420f, Math.Abs(Target - Offset) * 10f);
+        Offset = Calc.Approach(Offset, Target, speed * Engine.RawDeltaTime);
+        Offset = Math.Clamp(Offset, 0f, maximum);
+    }
+
+    public void Scroll(float pixels, float maximum) {
+        Target = Math.Clamp(Target + pixels, 0f, Math.Max(0f, maximum));
+    }
+
+    public void EnsureVisible(float top, float bottom, float viewportHeight, float maximum) {
+        if (top < Target) Target = top;
+        else if (bottom > Target + viewportHeight) Target = bottom - viewportHeight;
+        Target = Math.Clamp(Target, 0f, Math.Max(0f, maximum));
+    }
+
+    public void Reset() {
+        Offset = 0f;
+        Target = 0f;
+    }
+}
+
+internal sealed class MaterialScrollViewport : IDisposable {
+    private readonly string name;
+    private VirtualRenderTarget? target;
+
+    public MaterialScrollViewport(string name) {
+        this.name = name;
+    }
+
+    public void Render(MaterialRect bounds, System.Action drawContents) {
+        int width = Math.Max(1, (int)MathF.Ceiling(bounds.Width));
+        int height = Math.Max(1, (int)MathF.Ceiling(bounds.Height));
+        EnsureTarget(width, height);
+        if (target is null) return;
+
+        GraphicsDevice graphics = Engine.Graphics.GraphicsDevice;
+        RenderTargetBinding[] previousTargets = graphics.GetRenderTargets();
+        Viewport previousViewport = graphics.Viewport;
+        Draw.SpriteBatch.End();
+        graphics.SetRenderTarget(target);
+        graphics.Viewport = new Viewport(0, 0, width, height);
+        graphics.Clear(Color.Transparent);
+        Draw.SpriteBatch.Begin(
+            SpriteSortMode.Deferred,
+            BlendState.AlphaBlend,
+            SamplerState.LinearClamp,
+            DepthStencilState.None,
+            RasterizerState.CullNone,
+            null,
+            Matrix.CreateTranslation(-bounds.X, -bounds.Y, 0f)
+        );
+        drawContents();
+        Draw.SpriteBatch.End();
+
+        if (previousTargets.Length == 0) graphics.SetRenderTarget(null);
+        else graphics.SetRenderTargets(previousTargets);
+        graphics.Viewport = previousViewport;
+        Draw.SpriteBatch.Begin(
+            SpriteSortMode.Deferred,
+            BlendState.AlphaBlend,
+            SamplerState.LinearClamp,
+            DepthStencilState.None,
+            RasterizerState.CullNone,
+            null,
+            Engine.ScreenMatrix
+        );
+        Draw.SpriteBatch.Draw(target, new Rectangle(
+            (int)MathF.Round(bounds.X),
+            (int)MathF.Round(bounds.Y),
+            width,
+            height
+        ), Color.White);
+    }
+
+    public void Dispose() {
+        target?.Dispose();
+        target = null;
+    }
+
+    private void EnsureTarget(int width, int height) {
+        if (target?.Width == width && target.Height == height) return;
+        target?.Dispose();
+        target = VirtualContent.CreateRenderTarget(name, width, height);
+    }
+}
+
+/// <summary>
+/// Shared Material You widget primitives. Chapter select and the in-level settings
+/// overlay use the same typography hierarchy, surfaces, focus state and AA geometry.
+/// </summary>
+internal static class MaterialUiKit {
+    public static void Surface(
+        MaterialRect rect,
+        float radius,
+        MaterialPalette palette,
+        float alpha = 1f,
+        bool elevated = true
+    ) {
+        if (elevated) {
+            MaterialUi.AcrylicSurface(
+                rect.X, rect.Y, rect.Width, rect.Height, radius,
+                palette.SurfaceHigh * alpha, palette.Outline * alpha
+            );
+        } else {
+            MaterialUi.RoundedRect(rect.X, rect.Y, rect.Width, rect.Height, radius,
+                palette.Surface * alpha);
+        }
+    }
+
+    public static void Card(
+        MaterialRect rect,
+        MaterialPalette palette,
+        bool selected,
+        float alpha = 1f
+    ) {
+        Color fill = selected ? palette.SurfaceHighest : palette.SurfaceHigh * 0.90f;
+        Color outline = selected ? palette.Primary : palette.Outline;
+        MaterialUi.RoundedRect(rect.X, rect.Y + 6f, rect.Width, rect.Height, 30f,
+            Color.Black * 0.18f * alpha);
+        MaterialUi.RoundedRect(rect.X, rect.Y, rect.Width, rect.Height, 30f, fill * alpha);
+        MaterialUi.RoundedOutline(rect.X, rect.Y, rect.Width, rect.Height, 30f,
+            selected ? 3f : 1f, outline * alpha);
+    }
+
+    public static void NavigationPill(
+        MaterialRect rect,
+        MaterialPalette palette,
+        bool selected,
+        float alpha = 1f
+    ) {
+        if (!selected) return;
+        MaterialUi.RoundedRect(rect.X, rect.Y, rect.Width, rect.Height, rect.Height / 2f,
+            palette.Primary * 0.92f * alpha);
+    }
+
+    public static void Chip(
+        string text,
+        Vector2 rightTop,
+        MaterialPalette palette,
+        bool selected,
+        float alpha = 1f
+    ) {
+        const float scale = 0.27f;
+        float width = Math.Max(82f, SystemTtfFont.Measure(text, scale, UiFontWeight.Bold).X + 30f);
+        MaterialUi.RoundedRect(rightTop.X - width, rightTop.Y, width, 32f, 16f,
+            (selected ? palette.Primary : palette.SurfaceHighest) * alpha);
+        Text(text, new Vector2(rightTop.X - width / 2f, rightTop.Y + 5f),
+            new Vector2(0.5f, 0f), MaterialTextRole.Label,
+            selected ? palette.OnPrimary : palette.OnSurfaceVariant, alpha, scaleOverride: scale);
+    }
+
+    public static void Text(
+        string text,
+        Vector2 position,
+        Vector2 justify,
+        MaterialTextRole role,
+        Color color,
+        float alpha = 1f,
+        float? scaleOverride = null
+    ) {
+        (float scale, UiFontWeight weight) = role switch {
+            MaterialTextRole.Display => (0.88f, UiFontWeight.Bold),
+            MaterialTextRole.Title => (0.48f, UiFontWeight.Bold),
+            MaterialTextRole.Section => (0.46f, UiFontWeight.Bold),
+            MaterialTextRole.Body => (0.38f, UiFontWeight.Regular),
+            MaterialTextRole.Label => (0.31f, UiFontWeight.Bold),
+            _ => (0.31f, UiFontWeight.Regular)
+        };
+        SystemTtfFont.Draw(text, position, justify, scaleOverride ?? scale, color * alpha, weight: weight);
+    }
+
+    public static void Cursor(Vector2 position, MaterialPalette palette, float alpha) {
+        MaterialUi.Circle(position, 10f, Color.Black * 0.55f * alpha);
+        MaterialUi.Circle(position, 7f, palette.Primary * alpha);
+    }
+}

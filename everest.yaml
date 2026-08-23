@@ -1,0 +1,7 @@
+- Name: MicroblocksQolUtils
+  Version: 0.1.0
+  DLL: Code/MicroblocksQolUtils.dll
+  Dependencies:
+    - Name: EverestCore
+      Version: 1.6418.0
+

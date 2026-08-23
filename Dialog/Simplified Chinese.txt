@@ -1,0 +1,22 @@
+modoptions_microblocksqolutils_title=microblock 的 QoL 工具
+modoptions_microblocksqolutils_materialyouinterface=Material You 界面
+modoptions_microblocksqolutils_materialacrylicbackground=亚克力模糊背景
+modoptions_microblocksqolutils_materialacrylicblurstrength=亚克力模糊强度
+modoptions_microblocksqolutils_replacechapterselect=替换原版选关页面
+modoptions_microblocksqolutils_chapterselectshowcollabmaps=直接显示 Collab 地图
+modoptions_microblocksqolutils_minimapadaptivecolors=小地图颜色自动适配背景
+
+microblocks_qol_chapter_title=选择章节
+microblocks_qol_chapter_subtitle=Material You  ·  键盘 / 鼠标
+microblocks_qol_chapter_subtitle_collab=Material You  ·  键盘 / 鼠标  ·  CollabUtils2
+microblocks_qol_chapter_all_maps=全部地图
+microblocks_qol_chapter_official=官方
+microblocks_qol_chapter_level_sets=地图集
+microblocks_qol_chapter_empty=这个地图集中没有可选章节
+microblocks_qol_chapter_never_entered=尚未游玩
+microblocks_qol_chapter_cleared=已完成
+microblocks_qol_chapter_uncleared=进行中
+microblocks_qol_chapter_berries=草莓
+microblocks_qol_chapter_deaths=死亡
+microblocks_qol_chapter_no_available=没有可用章节
+microblocks_qol_chapter_controls=Enter / 左键：打开   Esc：返回   Tab：切换地图集   滚轮：滚动
