@@ -58,7 +58,9 @@ public static class NativeCaptureCommands {
     public static void RecordingStatus() {
         Engine.Commands.Log(
             $"manual={AutoRecorder.ManualMode} recording={AutoRecorder.IsRecording} "
+            + $"deathReplay={AutoRecorder.IsDeathReplayRecording} "
             + $"finalizing={AutoRecorder.IsFinalizing} media={AutoRecorder.CurrentSeconds:0.000}s "
+            + $"deathMedia={AutoRecorder.DeathReplaySeconds:0.000}s "
             + $"path={AutoRecorder.CurrentPath} last={AutoRecorder.LastOutput}"
         );
     }

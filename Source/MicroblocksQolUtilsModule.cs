@@ -75,6 +75,7 @@ public sealed class MicroblocksQolUtilsModule : EverestModule {
         FrameProfiler.BeginUpdate();
         try {
             orig(self, gameTime);
+            AutoRecorder.AfterEngineUpdate();
             MaterialUiSmoke.Update();
             WindowsInputLanguage.Update();
         } finally {
