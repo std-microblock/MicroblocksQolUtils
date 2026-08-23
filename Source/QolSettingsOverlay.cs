@@ -1466,6 +1466,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                     value => settings.ReplaceChapterSelect = value),
                 Toggle("选关页显示 Collab 地图", () => settings.ChapterSelectShowCollabMaps,
                     value => settings.ChapterSelectShowCollabMaps = value),
+                Toggle("输入框中文、游戏内英文输入法", () => settings.AutoSwitchInputLanguage,
+                    value => settings.AutoSwitchInputLanguage = value),
                 Toggle("完全移除场景过渡", () => settings.RemoveRoomTransitions,
                     value => settings.RemoveRoomTransitions = value),
                 Toggle("完全移除死亡动画", () => settings.RemoveDeathAnimation,
