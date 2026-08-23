@@ -122,7 +122,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
     }
 
     public override void Render() {
-        if (SuppressNormalRender || !MicroblocksQolUtilsModule.Settings.MaterialYouInterface) return;
+        if (SuppressNormalRender) return;
         RenderMaterialContent(acrylicActive: false);
     }
 
@@ -564,7 +564,6 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
     private static IEnumerator DetourGotoRoutine(GotoRoutineOrig orig, Overworld self, Oui next) {
         if (next is OuiChapterSelect vanilla
             && MicroblocksQolUtilsModule.Settings.ReplaceChapterSelect
-            && MicroblocksQolUtilsModule.Settings.MaterialYouInterface
             && (replaceNextChapterSelect || materialSessionActive && self.Current is OuiChapterPanel)
             && !IsAutoAdvancing(vanilla)
             && self.GetUI<MaterialChapterSelect>() is { } material) {

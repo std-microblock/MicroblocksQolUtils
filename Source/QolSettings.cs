@@ -29,9 +29,6 @@ public sealed class QolSettings : EverestModuleSettings {
     public bool Enabled { get; set; } = true;
 
     [DefaultValue(true)]
-    public bool MaterialYouInterface { get; set; } = true;
-
-    [DefaultValue(true)]
     public bool MaterialAcrylicBackground { get; set; } = true;
 
     [SettingRange(1, 12)]

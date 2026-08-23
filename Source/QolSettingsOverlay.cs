@@ -343,8 +343,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                     2000, 50000, 1000, value => $"{value / 1000f:0.#} Mbps")
             ]),
             new SettingsTab("界面与系统", [
-                Toggle("Material You 界面", () => settings.MaterialYouInterface,
-                    value => settings.MaterialYouInterface = value),
                 Toggle("亚克力模糊背景", () => settings.MaterialAcrylicBackground,
                     value => settings.MaterialAcrylicBackground = value),
                 Range("模糊强度", () => settings.MaterialAcrylicBlurStrength,
