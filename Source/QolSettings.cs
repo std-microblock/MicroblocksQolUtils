@@ -79,11 +79,25 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue(3)]
     public int MiniMapZoom { get; set; } = 3;
 
+    [SettingIgnore]
     [DefaultValue(Keys.OemPlus)]
     public Keys MiniMapZoomInKey { get; set; } = Keys.OemPlus;
 
+    [SettingIgnore]
     [DefaultValue(Keys.OemMinus)]
     public Keys MiniMapZoomOutKey { get; set; } = Keys.OemMinus;
+
+    [SettingName("放大小地图")]
+    [DefaultButtonBinding(0, Keys.OemPlus)]
+    public ButtonBinding MiniMapZoomInBinding { get; set; } = new(0, Keys.OemPlus);
+
+    [SettingName("缩小小地图")]
+    [DefaultButtonBinding(0, Keys.OemMinus)]
+    public ButtonBinding MiniMapZoomOutBinding { get; set; } = new(0, Keys.OemMinus);
+
+    [SettingIgnore]
+    [DefaultValue(false)]
+    public bool MiniMapBindingsMigrated { get; set; }
 
     [DefaultValue(MiniMapShape.Circle)]
     public MiniMapShape MiniMapShape { get; set; } = MiniMapShape.Circle;
@@ -196,4 +210,16 @@ public sealed class QolSettings : EverestModuleSettings {
 
     [DefaultValue("")]
     public string BgmEventMapFile { get; set; } = "";
+
+    internal void MigrateMiniMapBindings() {
+        if (MiniMapBindingsMigrated) return;
+        SetLegacyKey(MiniMapZoomInBinding, MiniMapZoomInKey);
+        SetLegacyKey(MiniMapZoomOutBinding, MiniMapZoomOutKey);
+        MiniMapBindingsMigrated = true;
+    }
+
+    private static void SetLegacyKey(ButtonBinding binding, Keys key) {
+        binding.Keys.Clear();
+        if (key != Keys.None) binding.Keys.Add(key);
+    }
 }

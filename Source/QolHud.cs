@@ -57,9 +57,9 @@ public sealed class QolHud : Entity {
 
     private static void UpdateMiniMapZoom() {
         QolSettings settings = MicroblocksQolUtilsModule.Settings;
-        if (MInput.Keyboard.Pressed(settings.MiniMapZoomInKey))
+        if (settings.MiniMapZoomInBinding.Pressed)
             settings.MiniMapZoom = Math.Min(12, settings.MiniMapZoom + 1);
-        if (MInput.Keyboard.Pressed(settings.MiniMapZoomOutKey))
+        if (settings.MiniMapZoomOutBinding.Pressed)
             settings.MiniMapZoom = Math.Max(0, settings.MiniMapZoom - 1);
     }
 }
