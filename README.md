@@ -32,8 +32,10 @@ Implemented:
 - Optional suppression of MiaoNet's off-screen name labels.
 - Near-instant room transitions (camera/player/light interpolation removed).
 - Optional instant respawns that skip the death animation and death screen wipe.
-- Opt-in frame-spike sampling grouped by owning assembly for entity Update and
-  Render, with an on-screen top offender and CSV logs under LocalAppData.
+- A self-drawn Profiler settings tab can launch a 10-second in-process EventPipe
+  stack sample, split hot methods between Engine Update and Render, identify
+  owning mod assemblies and MonoMod hook targets, and retain CSV plus `.nettrace`
+  reports under LocalAppData. The lightweight frame-spike HUD remains available.
 - A Rust `cdylib` capture backend built directly on `scap`/WGC. Captured BGRA
   frames use an intentional CPU copy, stay outside managed memory, and pass
   through a fixed-capacity latest-frame queue; a slow encoder cannot grow

@@ -5,7 +5,8 @@ import { ensureQolFfmpeg, findLibclangDirectory } from "./qol-ffmpeg.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const output = resolve(root, "Build");
-const dll = resolve(root, "Source/bin/Release/net8.0/MicroblocksQolUtils.dll");
+const managedOutput = resolve(root, "Source/bin/Release/net8.0");
+const dll = resolve(managedOutput, "MicroblocksQolUtils.dll");
 const celesteRoot = resolve(process.env.CELESTE_ROOT ?? "C:/SteamLibrary/steamapps/common/Celeste");
 const nativeName = process.platform === "win32"
   ? "microblocks_qol_native.dll"
@@ -41,6 +42,21 @@ run("dotnet", ["build", resolve(root, "Source/MicroblocksQolUtils.csproj"), "-c"
 rmSync(output, { recursive: true, force: true });
 mkdirSync(resolve(output, "Code"), { recursive: true });
 cpSync(dll, resolve(output, "Code/MicroblocksQolUtils.dll"));
+for (const dependency of [
+  "Microsoft.Diagnostics.FastSerialization.dll",
+  "Microsoft.Diagnostics.NETCore.Client.dll",
+  "Microsoft.Diagnostics.Tracing.TraceEvent.dll",
+  "Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+  "Microsoft.Extensions.Logging.Abstractions.dll",
+  "System.Collections.Immutable.dll",
+  "System.IO.Pipelines.dll",
+  "System.Reflection.Metadata.dll",
+  "System.Text.Encodings.Web.dll",
+  "System.Text.Json.dll",
+]) {
+  const source = resolve(managedOutput, dependency);
+  if (existsSync(source)) cpSync(source, resolve(output, "Code", dependency));
+}
 cpSync(resolve(root, "target", "release", nativeName), resolve(output, "Code", nativeName));
 if (ffmpeg) {
   for (const dependency of ffmpeg.dlls) {

@@ -116,7 +116,11 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             SelectTab(selectedTab + (backwards ? -1 : 1));
         }
 
-        if (CurrentRows.Count > 0) {
+        if (ProfilerTabSelected) {
+            if (Input.MenuConfirm.Pressed
+                || MInput.Keyboard.Pressed(Keys.Enter)
+                || MInput.Keyboard.Pressed(Keys.Space)) StartProfilerSampling();
+        } else if (CurrentRows.Count > 0) {
             if (Input.MenuUp.Pressed) SelectRow(selectedRow - 1);
             else if (Input.MenuDown.Pressed) SelectRow(selectedRow + 1);
             else if (Input.MenuLeft.Pressed) AdjustSelected(-1);
@@ -154,7 +158,9 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         RenderNavigation(layout, palette);
         RenderContent(layout, palette);
 
-        string footer = editingRow is not null
+        string footer = ProfilerTabSelected
+            ? "点击开始后会自动返回游戏，采样 10 秒；完成后回到这里查看报告"
+            : editingRow is not null
             ? "输入后按 Enter 保存，Esc 取消"
             : capturingKey
                 ? "按下新的按键，Esc 取消"
@@ -200,6 +206,10 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         MaterialUiKit.Text(tabs[selectedTab].Title, new Vector2(layout.ContentHeader.X, layout.ContentHeader.Y),
             Vector2.Zero, MaterialTextRole.Title, palette.OnSurface, ease * contentEase,
             scaleOverride: 0.48f);
+        if (ProfilerTabSelected) {
+            RenderProfilerContent(layout, palette);
+            return;
+        }
         MaterialUiKit.Text($"{CurrentRows.Count} 项", new Vector2(layout.ContentHeader.Right, layout.ContentHeader.Y + 8f),
             new Vector2(1f, 0f), MaterialTextRole.Caption, palette.OnSurfaceVariant,
             ease * contentEase, scaleOverride: 0.28f);
@@ -411,6 +421,11 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         for (int index = 0; index < tabs.Count; index++) {
             if (!layout.Tab(index, tabs.Count).Contains(mouse)) continue;
             if (MInput.Mouse.PressedLeftButton) SelectTab(index);
+            return;
+        }
+        if (ProfilerTabSelected) {
+            if (MInput.Mouse.PressedLeftButton && ProfilerStartRect(layout).Contains(mouse))
+                StartProfilerSampling();
             return;
         }
         if (!layout.Rows.Contains(mouse)) return;
@@ -709,6 +724,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private List<SettingRow> CurrentRows => tabs[selectedTab].Rows;
 
+    private bool ProfilerTabSelected => tabs[selectedTab].IsProfiler;
+
     private List<SettingsTab> BuildTabs() {
         QolSettings settings = MicroblocksQolUtilsModule.Settings;
         return [
@@ -728,6 +745,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                 Toggle("显示地图人数", () => settings.ShowMapPlayerCount, value => settings.ShowMapPlayerCount = value),
                 Toggle("显示当前时间", () => settings.ShowClock, value => settings.ShowClock = value)
             ]),
+            new SettingsTab("Profiler", "10 秒托管 CPU 采样", [], IsProfiler: true),
             new SettingsTab("小地图", "尺寸、玩家与外观", [
                 Toggle("启用小地图", () => settings.MiniMapEnabled, value => settings.MiniMapEnabled = value),
                 EnumRow("裁剪形状", () => settings.MiniMapShape, value => settings.MiniMapShape = value),
@@ -931,6 +949,150 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         ? "—"
         : Path.GetFileName(path);
 
+    private void StartProfilerSampling() {
+        if (!ManagedCpuSampler.Start(10d)) {
+            Audio.Play("event:/ui/main/button_invalid");
+            return;
+        }
+        Audio.Play("event:/ui/main/button_select");
+        BeginClose(CloseDestination.Game);
+    }
+
+    private void RenderProfilerContent(OverlayLayout layout, MaterialPalette palette) {
+        float alpha = ease * contentEase;
+        ManagedSamplingStage stage = ManagedCpuSampler.Stage;
+        ManagedProfileReport? report = ManagedCpuSampler.LatestReport;
+        string status = stage switch {
+            ManagedSamplingStage.WarmingUp => "准备返回游戏…",
+            ManagedSamplingStage.Sampling => $"采样中 · 剩余 {ManagedCpuSampler.RemainingSeconds:0.0} 秒",
+            ManagedSamplingStage.Analyzing => "正在解析托管调用栈…",
+            ManagedSamplingStage.Complete => "报告已生成",
+            ManagedSamplingStage.Failed => "采样失败",
+            _ => report is null ? "尚未采样" : "上次报告"
+        };
+        MaterialUiKit.Text(status, new Vector2(layout.ContentHeader.Right, layout.ContentHeader.Y + 8f),
+            new Vector2(1f, 0f), MaterialTextRole.Caption,
+            stage == ManagedSamplingStage.Failed ? Color.OrangeRed : palette.Primary,
+            alpha, scaleOverride: 0.29f);
+
+        MaterialRect summary = ProfilerSummaryRect(layout);
+        MaterialUi.RoundedRect(summary.X, summary.Y, summary.Width, summary.Height, 25f,
+            palette.SurfaceHigh * (0.82f * alpha));
+        MaterialUi.RoundedOutline(summary.X, summary.Y, summary.Width, summary.Height, 25f, 1f,
+            palette.Outline * (0.42f * alpha));
+
+        string headline;
+        string detail;
+        if (stage == ManagedSamplingStage.Failed) {
+            headline = "无法启动 .NET 采样器";
+            detail = Trim(ManagedCpuSampler.Failure, 96);
+        } else if (stage is ManagedSamplingStage.WarmingUp or ManagedSamplingStage.Sampling) {
+            headline = "正在记录主线程 Update / Render 调用栈";
+            detail = "采样期间正常游玩并复现卡顿；不要停在暂停菜单。";
+        } else if (stage == ManagedSamplingStage.Analyzing) {
+            headline = "采样完成，正在生成报告";
+            detail = "正在解析方法、程序集以及 MonoMod hook 目标。";
+        } else if (report is not null) {
+            headline = $"{report.DurationSeconds:0} 秒 · {report.StackSamples} 个主循环样本 · 最慢帧 {report.MaximumFrameMilliseconds:0.0} ms";
+            detail = $"平均帧 {report.AverageFrameMilliseconds:0.0} ms · Update 峰值 {report.MaximumUpdateMilliseconds:0.0} ms · Render 峰值 {report.MaximumRenderMilliseconds:0.0} ms";
+        } else {
+            headline = "采样真实托管调用栈，包括其他 Mod 安装的 hook";
+            detail = "点击后自动返回游戏，等待约 1 秒再开始连续采样 10 秒。";
+        }
+        MaterialUiKit.Text(headline, new Vector2(summary.X + 24f, summary.Y + 24f), Vector2.Zero,
+            MaterialTextRole.Label, palette.OnSurface, alpha, scaleOverride: 0.34f);
+        MaterialUiKit.Text(detail, new Vector2(summary.X + 24f, summary.Y + 62f), Vector2.Zero,
+            MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.27f);
+
+        MaterialRect button = ProfilerStartRect(layout);
+        bool busy = ManagedCpuSampler.IsBusy;
+        MaterialUi.RoundedRect(button.X, button.Y, button.Width, button.Height, 18f,
+            (busy ? palette.Outline : palette.Primary) * (alpha * (busy ? 0.26f : 0.92f)));
+        MaterialUiKit.Text(busy ? "正在采样" : "开始 10 秒采样", button.Center + new Vector2(0f, -8f),
+            new Vector2(0.5f), MaterialTextRole.Label,
+            busy ? palette.OnSurfaceVariant : palette.OnPrimary, alpha, scaleOverride: 0.29f);
+
+        if (busy) {
+            float progress = ManagedCpuSampler.Progress;
+            MaterialUi.RoundedRect(summary.X + 24f, summary.Bottom - 16f, summary.Width - 48f, 5f, 2.5f,
+                palette.Outline * (0.32f * alpha));
+            MaterialUi.RoundedRect(summary.X + 24f, summary.Bottom - 16f,
+                (summary.Width - 48f) * progress, 5f, 2.5f, palette.Primary * alpha);
+        }
+
+        if (report is null) {
+            MaterialUiKit.Text("报告会分别列出 Update 与 Render 中最常占用 CPU 的方法。\n若方法是 MonoMod detour，下面会额外显示 hook 的目标方法。",
+                new Vector2(layout.Rows.X + 18f, summary.Bottom + 40f), Vector2.Zero,
+                MaterialTextRole.Body, palette.OnSurfaceVariant, alpha, scaleOverride: 0.31f);
+            return;
+        }
+
+        float gap = 16f;
+        float top = summary.Bottom + 18f;
+        float columnWidth = (layout.Rows.Width - gap) / 2f;
+        MaterialRect updateColumn = new(layout.Rows.X, top, columnWidth, layout.Rows.Bottom - top);
+        MaterialRect renderColumn = new(updateColumn.Right + gap, top, columnWidth, layout.Rows.Bottom - top);
+        RenderProfileColumn(updateColumn, "UPDATE", report.UpdateCpuMilliseconds, report.Update, palette, alpha);
+        RenderProfileColumn(renderColumn, "RENDER", report.RenderCpuMilliseconds, report.Render, palette, alpha);
+
+        MaterialUiKit.Text($"原始 trace: {Path.GetFileName(report.TracePath)}",
+            new Vector2(layout.Rows.X + 4f, layout.Rows.Bottom - 22f), Vector2.Zero,
+            MaterialTextRole.Caption, palette.OnSurfaceVariant * 0.72f, alpha, scaleOverride: 0.22f);
+    }
+
+    private static void RenderProfileColumn(
+        MaterialRect bounds,
+        string title,
+        double totalMilliseconds,
+        IReadOnlyList<ManagedProfileEntry> entries,
+        MaterialPalette palette,
+        float alpha
+    ) {
+        MaterialUiKit.Text(title, new Vector2(bounds.X + 4f, bounds.Y + 2f), Vector2.Zero,
+            MaterialTextRole.Label, palette.Primary, alpha, scaleOverride: 0.30f);
+        MaterialUiKit.Text($"采样 CPU {totalMilliseconds:0} ms", new Vector2(bounds.Right - 4f, bounds.Y + 4f),
+            new Vector2(1f, 0f), MaterialTextRole.Caption, palette.OnSurfaceVariant,
+            alpha, scaleOverride: 0.23f);
+        float y = bounds.Y + 34f;
+        int count = Math.Min(8, entries.Count);
+        for (int index = 0; index < count; index++) {
+            ManagedProfileEntry entry = entries[index];
+            MaterialRect row = new(bounds.X, y + index * 66f, bounds.Width, 58f);
+            MaterialUi.RoundedRect(row.X, row.Y, row.Width, row.Height, 16f,
+                palette.SurfaceHigh * (0.68f * alpha));
+            float bar = Math.Clamp((float)entry.Percent / 100f, 0f, 1f);
+            MaterialUi.RoundedRect(row.X, row.Bottom - 4f, row.Width * bar, 4f, 2f,
+                palette.Primary * (0.82f * alpha));
+            string owner = entry.HookTarget is null ? entry.Owner : entry.Owner + "  ·  HOOK";
+            MaterialUiKit.Text(Trim(owner, 32), new Vector2(row.X + 12f, row.Y + 7f), Vector2.Zero,
+                MaterialTextRole.Caption, entry.HookTarget is null ? palette.OnSurfaceVariant : Color.Orange,
+                alpha, scaleOverride: 0.22f);
+            MaterialUiKit.Text(Trim(entry.Method, 54), new Vector2(row.X + 12f, row.Y + 28f), Vector2.Zero,
+                MaterialTextRole.Label, palette.OnSurface, alpha, scaleOverride: 0.24f);
+            MaterialUiKit.Text($"{entry.Percent:0.0}%", new Vector2(row.Right - 12f, row.Y + 7f),
+                new Vector2(1f, 0f), MaterialTextRole.Caption, palette.Primary,
+                alpha, scaleOverride: 0.22f);
+            if (entry.HookTarget is not null) {
+                MaterialUiKit.Text(Trim("→ " + entry.HookTarget, 58), new Vector2(row.X + 12f, row.Bottom - 18f),
+                    Vector2.Zero, MaterialTextRole.Caption, palette.OnSurfaceVariant,
+                    alpha, scaleOverride: 0.18f);
+            }
+        }
+        if (count == 0) {
+            MaterialUiKit.Text("没有捕获到该阶段的主线程样本", new Vector2(bounds.X + 4f, y + 14f),
+                Vector2.Zero, MaterialTextRole.Caption, palette.OnSurfaceVariant,
+                alpha, scaleOverride: 0.25f);
+        }
+    }
+
+    private static MaterialRect ProfilerSummaryRect(OverlayLayout layout) =>
+        new(layout.Rows.X, layout.Rows.Y, layout.Rows.Width, 112f);
+
+    private static MaterialRect ProfilerStartRect(OverlayLayout layout) {
+        MaterialRect summary = ProfilerSummaryRect(layout);
+        return new MaterialRect(summary.Right - 232f, summary.Y + 26f, 204f, 54f);
+    }
+
     private static string FormatEnum<T>(T value) where T : struct, Enum => value switch {
         MiniMapShape.Circle => "圆形",
         MiniMapShape.Square => "方形",
@@ -989,7 +1151,12 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         Game
     }
 
-    private sealed record SettingsTab(string Title, string Summary, List<SettingRow> Rows);
+    private sealed record SettingsTab(
+        string Title,
+        string Summary,
+        List<SettingRow> Rows,
+        bool IsProfiler = false
+    );
 
     private sealed class SettingRow {
         public string Label { get; }

@@ -32,6 +32,7 @@ public static class FrameProfiler {
     }
 
     public static void Unload() {
+        ManagedCpuSampler.Unload();
         IL.Monocle.EntityList.Update -= InstrumentEntityUpdate;
         UpdateWatch.Reset();
         RenderWatch.Reset();
@@ -46,7 +47,6 @@ public static class FrameProfiler {
 
     public static void BeginUpdate() {
         samplingUpdate = MicroblocksQolUtilsModule.Settings.EnableFrameProfiler;
-        if (samplingUpdate) UpdateTicks.Clear();
         UpdateWatch.Restart();
     }
 
@@ -63,11 +63,16 @@ public static class FrameProfiler {
     public static void EndRender() {
         RenderWatch.Stop();
         double renderMilliseconds = RenderWatch.Elapsed.TotalMilliseconds;
-        LastFrameMilliseconds = pendingUpdateMilliseconds + renderMilliseconds;
+        double updateMilliseconds = pendingUpdateMilliseconds;
+        LastFrameMilliseconds = updateMilliseconds + renderMilliseconds;
         pendingUpdateMilliseconds = 0;
+        ManagedCpuSampler.RecordFrame(updateMilliseconds, renderMilliseconds);
         RenderTicks["Engine.Draw"] = (long)(renderMilliseconds * Stopwatch.Frequency / 1000.0);
         QolSettings settings = MicroblocksQolUtilsModule.Settings;
-        if (!settings.EnableFrameProfiler || LastFrameMilliseconds < settings.FrameSpikeThresholdMs) return;
+        if (!settings.EnableFrameProfiler || LastFrameMilliseconds < settings.FrameSpikeThresholdMs) {
+            UpdateTicks.Clear();
+            return;
+        }
 
         latestSpike = new SpikeReport(
             DateTime.Now,
@@ -79,6 +84,7 @@ public static class FrameProfiler {
             lastWrittenAt = DateTime.UtcNow;
             WriteSpike(latestSpike);
         }
+        UpdateTicks.Clear();
     }
 
     public static void RenderHud(Vector2 position) {
@@ -112,7 +118,8 @@ public static class FrameProfiler {
         if (!samplingUpdate) return;
         Type type = entity.GetType();
         if (!OwnerNames.TryGetValue(type, out sampleOwner)) {
-            sampleOwner = type.Assembly.GetName().Name ?? type.Namespace ?? "unknown";
+            string assembly = type.Assembly.GetName().Name ?? "unknown";
+            sampleOwner = $"{assembly}!{type.FullName ?? type.Name}";
             OwnerNames[type] = sampleOwner;
         }
         sampleTarget = target;

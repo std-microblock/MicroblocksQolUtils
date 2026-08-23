@@ -8,9 +8,15 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <CelesteRoot Condition="'$(CelesteRoot)' == '' and '$(CELESTE_ROOT)' != ''">$(CELESTE_ROOT)</CelesteRoot>
     <CelesteRoot Condition="'$(CelesteRoot)' == ''">C:\SteamLibrary\steamapps\common\Celeste</CelesteRoot>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Diagnostics.NETCore.Client" Version="0.2.661903" />
+    <PackageReference Include="Microsoft.Diagnostics.Tracing.TraceEvent" Version="3.2.6" />
+  </ItemGroup>
 
   <ItemGroup>
     <Reference Include="Celeste"><HintPath>$(CelesteRoot)\Celeste.dll</HintPath><Private>false</Private></Reference>
