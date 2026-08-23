@@ -18,6 +18,8 @@ Implemented:
 - Optional CollabUtils2 `LobbyHelper` interop. Lobby entries stay visible while
   hidden Collab maps and gyms are omitted by default; an advanced setting can
   expose them for direct selection without making CollabUtils2 a dependency.
+  Multi-lobby collabs are split into collapsible lobby sections, with the lobby
+  card kept visible while its maps are folded.
 - Rolling FPS display.
 - Persistent watched-player list and Everest console commands.
 - Circular/square current-room minimap rendered from the live solid-tile grid,

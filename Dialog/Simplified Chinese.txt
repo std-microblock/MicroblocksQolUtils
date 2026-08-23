@@ -19,3 +19,6 @@ microblocks_qol_chapter_uncleared=进行中
 microblocks_qol_chapter_berries=草莓
 microblocks_qol_chapter_deaths=死亡
 microblocks_qol_chapter_no_available=没有可用章节
+microblocks_qol_chapter_group_count={0} 张地图
+microblocks_qol_chapter_controls=Enter / 左键：打开   Esc：返回   Tab：切换地图集   滚轮：滚动
+microblocks_qol_chapter_controls_grouped=打开：Enter / 左键   分组：点击标题或大厅卡 ←→   Esc：返回   Tab：地图集   滚轮：滚动

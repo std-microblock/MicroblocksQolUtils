@@ -15,6 +15,9 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
     private const float CardHorizontalGap = 18f;
     private const float CardVerticalGap = 18f;
     private const string RecentGroupId = "__microblocks_recently_played";
+    private const float GroupHeaderHeight = 58f;
+    private const float GroupHeaderGap = 12f;
+    private const float GroupVerticalGap = 24f;
 
     private static Hook? gotoRoutineHook;
     private static bool hookFailed;
@@ -24,6 +27,9 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
     private readonly List<ChapterEntry> allEntries = [];
     private readonly List<ChapterEntry> entries = [];
     private readonly List<LevelSetEntry> levelSets = [];
+    private readonly List<ChapterEntry> ungroupedEntries = [];
+    private readonly List<ChapterSection> sections = [];
+    private readonly Dictionary<string, bool> collapsedSections = new(StringComparer.Ordinal);
     private readonly MaterialScrollController cardScroll = new();
     private readonly MaterialScrollController levelSetScroll = new();
     private readonly MaterialScrollViewport cardViewport = new("mqol-chapter-cards");
@@ -141,7 +147,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
 
         RenderLevelSets(palette, layout, eased);
         RenderCards(palette, layout, eased);
-        RenderFooter(palette, selected, layout, eased);
+        RenderFooter(palette, selected, sections.Count > 0, layout, eased);
         RenderMouseCursor(palette, eased);
     }
 
@@ -182,10 +188,10 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         }
 
         if (entries.Count > 0) {
-            if (Input.MenuLeft.Pressed) MoveSelection(-1);
-            else if (Input.MenuRight.Pressed) MoveSelection(1);
-            else if (Input.MenuUp.Pressed) MoveSelection(-Columns);
-            else if (Input.MenuDown.Pressed) MoveSelection(Columns);
+            if (Input.MenuLeft.Pressed) MoveSelection(-Vector2.UnitX);
+            else if (Input.MenuRight.Pressed) MoveSelection(Vector2.UnitX);
+            else if (Input.MenuUp.Pressed) MoveSelection(-Vector2.UnitY);
+            else if (Input.MenuDown.Pressed) MoveSelection(Vector2.UnitY);
             else if (Input.MenuConfirm.Pressed || MInput.Keyboard.Pressed(Keys.Enter)) ActivateSelected();
         }
 
@@ -204,6 +210,11 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
             int sidebar = SidebarIndexAt(mouse, layout);
             if (sidebar >= 0) {
                 if (MInput.Mouse.PressedLeftButton) SelectLevelSet(sidebar);
+                return;
+            }
+            int header = SectionHeaderIndexAt(mouse, layout);
+            if (header >= 0 && MInput.Mouse.PressedLeftButton) {
+                ToggleSection(header);
                 return;
             }
             int card = CardIndexAt(mouse, layout);
@@ -253,7 +264,11 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
                 : collabGym ? "GYM"
                 : collabMap ? "COLLAB"
                 : levelSet == "Celeste" ? UiText("microblocks_qol_chapter_official", "官方") : "MOD";
-            allEntries.Add(new ChapterEntry(area, sid, levelSet, groupId, title, levelSetTitle, badge));
+            string? lobbySid = collabLobby ? sid : CollabUtils2Bridge.GetLobbyForMap(sid);
+            if (string.IsNullOrWhiteSpace(lobbySid)) lobbySid = null;
+            allEntries.Add(new ChapterEntry(
+                area, sid, levelSet, groupId, title, levelSetTitle, badge, collabLobby, lobbySid
+            ));
             if (levelSets.All(item => !string.Equals(item.Id, groupId, StringComparison.Ordinal)))
                 levelSets.Add(new LevelSetEntry(groupId, groupTitle));
         }
@@ -268,7 +283,6 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         string? previousSid = keepArea && entries.Count > 0 && selectedIndex < entries.Count
             ? entries[selectedIndex].Sid
             : SaveData.Instance?.LastArea_Safe.SID;
-        entries.Clear();
         string group = levelSets.Count == 0 ? "" : levelSets[selectedLevelSet].Id;
         IEnumerable<ChapterEntry> filtered;
         if (group == RecentGroupId) {
@@ -292,10 +306,72 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
                 || entry.Sid.Contains(search, StringComparison.OrdinalIgnoreCase)
             );
         }
-        entries.AddRange(filtered);
-        selectedIndex = Math.Max(0, entries.FindIndex(entry => entry.Sid == previousSid));
+        BuildSections(group, filtered.ToList());
+        RebuildVisibleEntries(previousSid, resetScroll: true);
+    }
+
+    private void BuildSections(string group, List<ChapterEntry> filtered) {
+        sections.Clear();
+        ungroupedEntries.Clear();
+
+        List<ChapterEntry> groupEntries = group.Length == 0
+            ? []
+            : allEntries.Where(entry => entry.GroupId == group).ToList();
+        List<ChapterEntry> lobbies = groupEntries.Where(entry => entry.CollabLobby).ToList();
+        HashSet<string> lobbySids = lobbies.Select(entry => entry.Sid).ToHashSet(StringComparer.Ordinal);
+        bool hasGroupedMaps = group.Length > 0
+            && lobbies.Count >= 2
+            && groupEntries.Any(entry => entry.LobbySid is { } lobbySid
+                && lobbySids.Contains(lobbySid)
+                && !entry.CollabLobby);
+
+        if (!hasGroupedMaps) {
+            ungroupedEntries.AddRange(filtered);
+            return;
+        }
+
+        ungroupedEntries.AddRange(filtered.Where(entry => entry.LobbySid is not { } lobbySid
+            || !lobbySids.Contains(lobbySid)));
+        string currentSid = SaveData.Instance?.LastArea_Safe.SID ?? "";
+        string? currentLobbySid = allEntries.FirstOrDefault(entry => entry.Sid == currentSid)?.LobbySid;
+        foreach (ChapterEntry lobby in lobbies) {
+            List<ChapterEntry> sectionEntries = filtered
+                .Where(entry => string.Equals(entry.LobbySid, lobby.Sid, StringComparison.Ordinal))
+                .ToList();
+            if (sectionEntries.Count == 0) continue;
+            if (!collapsedSections.ContainsKey(lobby.Sid))
+                collapsedSections[lobby.Sid] = !string.Equals(lobby.Sid, currentLobbySid, StringComparison.Ordinal);
+            int totalMapCount = Math.Max(0, groupEntries.Count(entry =>
+                string.Equals(entry.LobbySid, lobby.Sid, StringComparison.Ordinal)) - 1);
+            sections.Add(new ChapterSection(lobby.Sid, lobby, sectionEntries, totalMapCount));
+        }
+    }
+
+    private void RebuildVisibleEntries(string? previousSid, bool resetScroll) {
+        entries.Clear();
+        entries.AddRange(ungroupedEntries);
+        bool searching = !string.IsNullOrWhiteSpace(searchText);
+        foreach (ChapterSection section in sections) {
+            section.VisibleStart = entries.Count;
+            bool collapsed = !searching && collapsedSections.GetValueOrDefault(section.Id);
+            if (collapsed) {
+                ChapterEntry? lobby = section.Entries.FirstOrDefault(entry => entry.CollabLobby);
+                if (lobby is not null) entries.Add(lobby);
+            } else {
+                entries.AddRange(section.Entries);
+            }
+            section.VisibleCount = entries.Count - section.VisibleStart;
+        }
+
+        selectedIndex = entries.FindIndex(entry => entry.Sid == previousSid);
+        if (selectedIndex < 0 && previousSid is not null) {
+            string? lobbySid = allEntries.FirstOrDefault(entry => entry.Sid == previousSid)?.LobbySid;
+            if (lobbySid is not null)
+                selectedIndex = entries.FindIndex(entry => entry.Sid == lobbySid);
+        }
+        selectedIndex = Math.Max(0, selectedIndex);
         if (entries.Count == 0) selectedIndex = 0;
-        cardScroll.Reset();
+        if (resetScroll) cardScroll.Reset();
         EnsureSelectionVisible();
         EnsureLevelSetVisible();
     }
@@ -309,20 +385,59 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         FilterEntries(keepArea: false);
     }
 
-    private void MoveSelection(int delta) {
+    private void MoveSelection(Vector2 direction) {
         if (entries.Count == 0) return;
-        int next = Math.Clamp(selectedIndex + delta, 0, entries.Count - 1);
+        int lobbySection = sections.FindIndex(section =>
+            string.Equals(section.Lobby.Sid, entries[selectedIndex].Sid, StringComparison.Ordinal));
+        if (lobbySection >= 0 && string.IsNullOrWhiteSpace(searchText)) {
+            bool collapsed = collapsedSections.GetValueOrDefault(sections[lobbySection].Id);
+            if (direction.X > 0f && collapsed) {
+                SetSectionCollapsed(lobbySection, collapsed: false,
+                    entries[selectedIndex].Sid, playSound: false);
+            } else if (direction.X < 0f && !collapsed) {
+                SetSectionCollapsed(lobbySection, collapsed: true,
+                    entries[selectedIndex].Sid, playSound: true);
+                return;
+            }
+        }
+
+        ChapterLayout layout = ChapterLayout.Create(0f);
+        List<CardPlacement> placements = BuildContentLayout(layout, 0f).Cards;
+        CardPlacement? current = placements.FirstOrDefault(item => item.EntryIndex == selectedIndex);
+        if (current is null) return;
+
+        int next = selectedIndex;
+        float bestScore = float.MaxValue;
+        foreach (CardPlacement candidate in placements) {
+            if (candidate.EntryIndex == selectedIndex) continue;
+            Vector2 offset = candidate.Rect.Center - current.Rect.Center;
+            float primary = Vector2.Dot(offset, direction);
+            if (primary <= 1f) continue;
+            float secondary = Math.Abs(Vector2.Dot(offset,
+                direction.X == 0f ? Vector2.UnitX : Vector2.UnitY));
+            if (direction.X != 0f && secondary > CardHeight * 0.45f) continue;
+            float score = primary * 1000f + secondary;
+            if (score >= bestScore) continue;
+            bestScore = score;
+            next = candidate.EntryIndex;
+        }
         if (next == selectedIndex) return;
         selectedIndex = next;
-        Audio.Play(delta < 0 ? "event:/ui/world_map/icon/roll_left" : "event:/ui/world_map/icon/roll_right");
+        Audio.Play(direction.X < 0f || direction.Y < 0f
+            ? "event:/ui/world_map/icon/roll_left"
+            : "event:/ui/world_map/icon/roll_right");
         EnsureSelectionVisible();
     }
 
     private void EnsureSelectionVisible() {
+        if (entries.Count == 0) return;
         ChapterLayout layout = ChapterLayout.Create(0f);
-        int row = selectedIndex / Columns;
-        float top = row * (CardHeight + CardVerticalGap);
-        cardScroll.EnsureVisible(top, top + CardHeight, layout.Cards.Height, MaxCardScroll(layout));
+        ChapterContentLayout content = BuildContentLayout(layout, 0f);
+        CardPlacement? placement = content.Cards.FirstOrDefault(item => item.EntryIndex == selectedIndex);
+        if (placement is null) return;
+        float top = placement.Rect.Y - layout.Cards.Y;
+        cardScroll.EnsureVisible(top, top + placement.Rect.Height,
+            layout.Cards.Height, MaxCardScroll(layout));
     }
 
     private void EnsureLevelSetVisible() {
@@ -385,8 +500,16 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         float alpha
     ) {
         cardViewport.Render(layout.Cards, () => {
-            for (int index = 0; index < entries.Count; index++) {
-                MaterialRect card = layout.Card(index, cardScroll.Offset);
+            ChapterContentLayout content = BuildContentLayout(layout, cardScroll.Offset);
+            foreach (SectionPlacement placement in content.Sections) {
+                if (placement.Rect.Bottom < layout.Cards.Y || placement.Rect.Y > layout.Cards.Bottom) continue;
+                ChapterSection section = sections[placement.SectionIndex];
+                RenderSectionHeader(section, placement.Rect,
+                    collapsedSections.GetValueOrDefault(section.Id), palette, alpha);
+            }
+            foreach (CardPlacement placement in content.Cards) {
+                int index = placement.EntryIndex;
+                MaterialRect card = placement.Rect;
                 if (card.Bottom < layout.Cards.Y || card.Y > layout.Cards.Bottom) continue;
                 bool selected = index == selectedIndex;
                 Color surface = selected ? palette.SurfaceHighest : palette.SurfaceHigh;
@@ -402,6 +525,52 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
                     layout.Cards.Center, new Vector2(0.5f), 0.56f, palette.OnSurfaceVariant * alpha);
             }
         });
+    }
+
+    private static void RenderSectionHeader(
+        ChapterSection section,
+        MaterialRect header,
+        bool collapsed,
+        MaterialPalette palette,
+        float alpha
+    ) {
+        MaterialUi.RoundedRect(header.X, header.Y, header.Width, header.Height, 20f,
+            palette.SurfaceHighest * 0.78f * alpha);
+        MaterialUi.RoundedOutline(header.X, header.Y, header.Width, header.Height, 20f, 1f,
+            palette.Outline * 0.72f * alpha);
+
+        float iconSize = 34f;
+        Vector2 iconCenter = new(header.X + 28f, header.Center.Y);
+        if (!string.IsNullOrWhiteSpace(section.Lobby.Area.Icon) && GFX.Gui.Has(section.Lobby.Area.Icon)) {
+            MTexture icon = GFX.Gui[section.Lobby.Area.Icon];
+            float scale = Math.Min(1f, iconSize / Math.Max(icon.Width, icon.Height));
+            icon.DrawCentered(iconCenter, Color.White * alpha, scale);
+        } else {
+            MaterialUi.RoundedRect(iconCenter.X - iconSize / 2f, iconCenter.Y - iconSize / 2f,
+                iconSize, iconSize, 12f, palette.Primary * 0.42f * alpha);
+        }
+
+        SystemTtfFont.Draw(Trim(section.Lobby.Title, 34),
+            new Vector2(header.X + 54f, header.Y + 10f), Vector2.Zero, 0.39f,
+            palette.OnSurface * alpha, weight: UiFontWeight.Bold);
+        string count = string.Format(
+            UiText("microblocks_qol_chapter_group_count", "{0} 张地图"), section.TotalMapCount
+        );
+        SystemTtfFont.Draw(count, new Vector2(header.Right - 54f, header.Y + 15f),
+            new Vector2(1f, 0f), 0.29f, palette.OnSurfaceVariant * alpha);
+
+        Vector2 arrow = new(header.Right - 25f, header.Center.Y);
+        if (collapsed) {
+            MaterialUi.Line(arrow + new Vector2(-4f, -7f), arrow + new Vector2(4f, 0f),
+                2.5f, palette.Primary * alpha);
+            MaterialUi.Line(arrow + new Vector2(4f, 0f), arrow + new Vector2(-4f, 7f),
+                2.5f, palette.Primary * alpha);
+        } else {
+            MaterialUi.Line(arrow + new Vector2(-7f, -4f), arrow + new Vector2(0f, 4f),
+                2.5f, palette.Primary * alpha);
+            MaterialUi.Line(arrow + new Vector2(0f, 4f), arrow + new Vector2(7f, -4f),
+                2.5f, palette.Primary * alpha);
+        }
     }
 
     private static void RenderCard(
@@ -487,6 +656,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
     private static void RenderFooter(
         MaterialPalette palette,
         ChapterEntry? selected,
+        bool grouped,
         ChapterLayout layout,
         float alpha
     ) {
@@ -495,6 +665,14 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
             : selected.Sid;
         SystemTtfFont.Draw(Trim(detail, 72), new Vector2(layout.Footer.X, layout.Footer.Center.Y),
             new Vector2(0f, 0.5f), 0.31f,
+            palette.OnSurfaceVariant * alpha);
+        string controls = grouped
+            ? UiText("microblocks_qol_chapter_controls_grouped",
+                "打开：Enter / 左键   分组：点击标题或大厅卡 ←→   Esc：返回   Tab：地图集   滚轮：滚动")
+            : UiText("microblocks_qol_chapter_controls",
+                "Enter / 左键：打开   Esc：返回   Tab：切换地图集   滚轮：滚动");
+        SystemTtfFont.Draw(controls,
+            new Vector2(layout.Footer.Right, layout.Footer.Center.Y), new Vector2(1f, 0.5f), 0.31f,
             palette.OnSurfaceVariant * alpha);
     }
 
@@ -513,18 +691,83 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
 
     private int CardIndexAt(Vector2 mouse, ChapterLayout layout) {
         if (!layout.Cards.Contains(mouse)) return -1;
-        for (int index = 0; index < entries.Count; index++) {
-            if (layout.Card(index, cardScroll.Offset).Contains(mouse)) return index;
+        foreach (CardPlacement placement in BuildContentLayout(layout, cardScroll.Offset).Cards) {
+            if (placement.Rect.Contains(mouse)) return placement.EntryIndex;
         }
         return -1;
     }
 
+    private int SectionHeaderIndexAt(Vector2 mouse, ChapterLayout layout) {
+        if (!layout.Cards.Contains(mouse) || !string.IsNullOrWhiteSpace(searchText)) return -1;
+        foreach (SectionPlacement placement in BuildContentLayout(layout, cardScroll.Offset).Sections) {
+            if (placement.Rect.Contains(mouse)) return placement.SectionIndex;
+        }
+        return -1;
+    }
+
+    private void ToggleSection(int sectionIndex) {
+        if (sectionIndex < 0 || sectionIndex >= sections.Count
+            || !string.IsNullOrWhiteSpace(searchText)) return;
+        string? previousSid = entries.Count == 0 ? null : entries[selectedIndex].Sid;
+        ChapterSection section = sections[sectionIndex];
+        SetSectionCollapsed(sectionIndex, !collapsedSections.GetValueOrDefault(section.Id),
+            previousSid, playSound: true);
+    }
+
+    private void SetSectionCollapsed(
+        int sectionIndex,
+        bool collapsed,
+        string? previousSid,
+        bool playSound
+    ) {
+        ChapterSection section = sections[sectionIndex];
+        collapsedSections[section.Id] = collapsed;
+        if (playSound) Audio.Play(collapsed
+            ? "event:/ui/world_map/icon/roll_left"
+            : "event:/ui/world_map/icon/roll_right");
+        RebuildVisibleEntries(previousSid, resetScroll: false);
+    }
+
+    private ChapterContentLayout BuildContentLayout(ChapterLayout layout, float scrollOffset) {
+        List<CardPlacement> cards = [];
+        List<SectionPlacement> headers = [];
+        float cardWidth = (layout.Cards.Width - CardHorizontalGap * (Columns - 1)) / Columns;
+        float y = layout.Cards.Y - scrollOffset;
+
+        AddCardGrid(0, ungroupedEntries.Count);
+        if (ungroupedEntries.Count > 0 && sections.Count > 0) y += GroupVerticalGap;
+
+        for (int sectionIndex = 0; sectionIndex < sections.Count; sectionIndex++) {
+            ChapterSection section = sections[sectionIndex];
+            headers.Add(new SectionPlacement(sectionIndex,
+                new MaterialRect(layout.Cards.X, y, layout.Cards.Width, GroupHeaderHeight)));
+            y += GroupHeaderHeight + GroupHeaderGap;
+            AddCardGrid(section.VisibleStart, section.VisibleCount);
+            if (sectionIndex < sections.Count - 1) y += GroupVerticalGap;
+        }
+
+        float contentHeight = Math.Max(0f, y - (layout.Cards.Y - scrollOffset));
+        return new ChapterContentLayout(cards, headers, contentHeight);
+
+        void AddCardGrid(int start, int count) {
+            if (count <= 0) return;
+            int rows = (count + Columns - 1) / Columns;
+            for (int localIndex = 0; localIndex < count; localIndex++) {
+                int column = localIndex % Columns;
+                int row = localIndex / Columns;
+                cards.Add(new CardPlacement(start + localIndex, new MaterialRect(
+                    layout.Cards.X + column * (cardWidth + CardHorizontalGap),
+                    y + row * (CardHeight + CardVerticalGap),
+                    cardWidth,
+                    CardHeight
+                )));
+            }
+            y += rows * CardHeight + (rows - 1) * CardVerticalGap;
+        }
+    }
+
     private float MaxCardScroll(ChapterLayout layout) {
-        int rows = (entries.Count + Columns - 1) / Columns;
-        float contentHeight = rows == 0
-            ? 0f
-            : rows * CardHeight + (rows - 1) * CardVerticalGap;
-        return Math.Max(0f, contentHeight - layout.Cards.Height);
+        return Math.Max(0f, BuildContentLayout(layout, 0f).ContentHeight - layout.Cards.Height);
     }
 
     private float MaxLevelSetScroll(ChapterLayout layout) {
@@ -723,7 +966,27 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         string GroupId,
         string Title,
         string LevelSetTitle,
-        string Badge
+        string Badge,
+        bool CollabLobby,
+        string? LobbySid
+    );
+
+    private sealed record ChapterSection(
+        string Id,
+        ChapterEntry Lobby,
+        List<ChapterEntry> Entries,
+        int TotalMapCount
+    ) {
+        public int VisibleStart { get; set; }
+        public int VisibleCount { get; set; }
+    }
+
+    private sealed record CardPlacement(int EntryIndex, MaterialRect Rect);
+    private sealed record SectionPlacement(int SectionIndex, MaterialRect Rect);
+    private sealed record ChapterContentLayout(
+        List<CardPlacement> Cards,
+        List<SectionPlacement> Sections,
+        float ContentHeight
     );
 
     private sealed record LevelSetEntry(string Id, string Title);
