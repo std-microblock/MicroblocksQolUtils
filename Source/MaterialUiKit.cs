@@ -454,36 +454,6 @@ internal static class MaterialUiKit {
         bool filled = false
     ) => MaterialIcon.Draw(filled ? name + "-fill" : name, center, size, color, alpha);
 
-    public static void IconBubble(
-        string name,
-        Vector2 center,
-        float diameter,
-        MaterialPalette palette,
-        float alpha = 1f,
-        bool selected = false
-    ) {
-        Color fill = selected ? palette.Primary : palette.Primary * 0.14f;
-        Color icon = selected ? palette.OnPrimary : palette.Primary;
-        MaterialUi.Circle(center, diameter / 2f, fill * alpha);
-        Icon(name, center, diameter * 0.52f, icon, alpha, filled: selected);
-    }
-
-    public static void PageHeading(
-        string title,
-        string eyebrow,
-        string icon,
-        MaterialRect bounds,
-        MaterialPalette palette,
-        float alpha = 1f
-    ) {
-        Vector2 center = new(bounds.X + 20f, bounds.Y + 20f);
-        IconBubble(icon, center, 40f, palette, alpha);
-        Text(title, new Vector2(bounds.X + 52f, bounds.Y - 2f), Vector2.Zero,
-            MaterialTextRole.Title, palette.OnSurface, alpha, scaleOverride: 0.48f);
-        Text(eyebrow.ToUpperInvariant(), new Vector2(bounds.X + 53f, bounds.Y + 33f), Vector2.Zero,
-            MaterialTextRole.Caption, palette.Primary, alpha * 0.82f, scaleOverride: 0.19f);
-    }
-
     public static void Surface(
         MaterialRect rect,
         float radius,
