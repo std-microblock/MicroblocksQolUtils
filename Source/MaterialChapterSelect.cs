@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Input;
 using Monocle;
@@ -18,6 +19,13 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
     private const float GroupHeaderHeight = 58f;
     private const float GroupHeaderGap = 12f;
     private const float GroupVerticalGap = 24f;
+    private const float MetadataTagHeight = 28f;
+    private static readonly Regex CollabTagRegex = new(
+        "^{cu2_tag(\\s+(?<key>\\w+)=\"(?<value>[^\"]+)\")*}\\s*(?<text>.*)$",
+        RegexOptions.Compiled
+    );
+    private static readonly Regex DialogCommandRegex = new("\\{[^}]*}", RegexOptions.Compiled);
+    private static readonly Regex WhitespaceRegex = new("[ \\t]+", RegexOptions.Compiled);
 
     private static Hook? gotoRoutineHook;
     private static bool hookFailed;
@@ -147,6 +155,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
 
         RenderLevelSets(palette, layout, eased);
         RenderCards(palette, layout, eased);
+        RenderSelectedMetadata(palette, selected, layout, eased);
         RenderFooter(palette, selected, sections.Count > 0, layout, eased);
         RenderMouseCursor(palette, eased);
     }
@@ -266,8 +275,10 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
                 : levelSet == "Celeste" ? UiText("microblocks_qol_chapter_official", "官方") : "MOD";
             string? lobbySid = collabLobby ? sid : CollabUtils2Bridge.GetLobbyForMap(sid);
             if (string.IsNullOrWhiteSpace(lobbySid)) lobbySid = null;
+            ChapterMetadata metadata = ResolveMetadata(area);
             allEntries.Add(new ChapterEntry(
-                area, sid, levelSet, groupId, title, levelSetTitle, badge, collabLobby, lobbySid
+                area, sid, levelSet, groupId, title, levelSetTitle, badge, collabLobby, lobbySid,
+                metadata.Author, metadata.Description, metadata.Tags
             ));
             if (levelSets.All(item => !string.Equals(item.Id, groupId, StringComparison.Ordinal)))
                 levelSets.Add(new LevelSetEntry(groupId, groupTitle));
@@ -304,6 +315,9 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
                 entry.Title.Contains(search, StringComparison.CurrentCultureIgnoreCase)
                 || entry.LevelSetTitle.Contains(search, StringComparison.CurrentCultureIgnoreCase)
                 || entry.Sid.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || entry.Author.Contains(search, StringComparison.CurrentCultureIgnoreCase)
+                || entry.Description.Contains(search, StringComparison.CurrentCultureIgnoreCase)
+                || entry.Tags.Any(tag => tag.Text.Contains(search, StringComparison.CurrentCultureIgnoreCase))
             );
         }
         BuildSections(group, filtered.ToList());
@@ -594,8 +608,14 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         float textX = content.X + iconSize + 14f;
         SystemTtfFont.DrawVisual(Trim(entry.Title, 17), new Vector2(textX, content.Y),
             Vector2.Zero, 0.40f, palette.OnSurface * alpha, weight: UiFontWeight.Bold);
-        SystemTtfFont.DrawVisual(Trim(entry.LevelSetTitle, 22), new Vector2(textX, content.Y + 34f),
+        string subtitle = entry.Author.Length > 0 ? entry.Author : entry.LevelSetTitle;
+        SystemTtfFont.DrawVisual(Trim(subtitle, 22), new Vector2(textX, content.Y + 34f),
             Vector2.Zero, 0.27f, palette.OnSurfaceVariant * alpha);
+        if (entry.Tags.Count > 0) {
+            string tagSummary = string.Join(" · ", entry.Tags.Select(tag => tag.Text));
+            SystemTtfFont.DrawVisual(Trim(tagSummary, 28), new Vector2(content.X, content.Y + 68f),
+                Vector2.Zero, 0.24f, palette.Primary * alpha, weight: UiFontWeight.Bold);
+        }
 
         AreaStats? stats = SaveData.Instance?.GetAreaStatsFor(entry.Area.ToKey());
         AreaModeStats? mode = stats?.Modes is { Length: > 0 } ? stats.Modes[0] : null;
@@ -618,6 +638,94 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
 
         MaterialUiKit.Chip(entry.Badge,
             new Vector2(card.Right - 16f, bottomRowY), palette, selected, alpha);
+    }
+
+    private static void RenderSelectedMetadata(
+        MaterialPalette palette,
+        ChapterEntry? selected,
+        ChapterLayout layout,
+        float alpha
+    ) {
+        MaterialUiKit.Surface(layout.Details, 24f,
+            palette with { SurfaceHigh = palette.SurfaceHigh * 0.82f }, alpha);
+        MaterialRect content = layout.Details.Inset(22f, 14f);
+        if (selected is null) {
+            SystemTtfFont.DrawVisual(UiText("microblocks_qol_chapter_no_available", "没有可用章节"),
+                content.Center, new Vector2(0.5f), 0.38f, palette.OnSurfaceVariant * alpha);
+            return;
+        }
+
+        const float identityWidth = 360f;
+        SystemTtfFont.DrawVisual(TrimToWidth(selected.Title, identityWidth, 0.38f, UiFontWeight.Bold),
+            new Vector2(content.X, content.Y), Vector2.Zero, 0.38f, palette.OnSurface * alpha,
+            weight: UiFontWeight.Bold);
+        SystemTtfFont.DrawVisual(TrimToWidth(selected.LevelSetTitle, identityWidth, 0.27f),
+            new Vector2(content.X, content.Y + 34f), Vector2.Zero, 0.27f,
+            palette.OnSurfaceVariant * alpha);
+        if (selected.Author.Length > 0) {
+            string author = string.Format(UiText("microblocks_qol_chapter_author", "作者：{0}"), selected.Author);
+            SystemTtfFont.DrawVisual(TrimToWidth(author, identityWidth, 0.27f),
+                new Vector2(content.X, content.Y + 64f), Vector2.Zero, 0.27f,
+                palette.Primary * alpha, weight: UiFontWeight.Bold);
+        }
+
+        MaterialRect metadata = new(
+            content.X + identityWidth + 28f,
+            content.Y,
+            content.Width - identityWidth - 28f,
+            content.Height
+        );
+        float descriptionY = metadata.Y;
+        if (selected.Tags.Count > 0) {
+            descriptionY = RenderMetadataTags(selected.Tags,
+                new MaterialRect(metadata.X, metadata.Y, metadata.Width, MetadataTagHeight * 2f + 8f),
+                palette, alpha) + 8f;
+        }
+        string description = selected.Description.Length > 0
+            ? selected.Description
+            : UiText("microblocks_qol_chapter_no_description", "此地图没有提供描述");
+        int maxLines = descriptionY > metadata.Y + MetadataTagHeight ? 2 : 3;
+        List<string> lines = WrapText(description, metadata.Width, 0.25f, maxLines);
+        for (int index = 0; index < lines.Count; index++) {
+            SystemTtfFont.DrawVisual(lines[index], new Vector2(metadata.X, descriptionY + index * 25f),
+                Vector2.Zero, 0.25f, palette.OnSurfaceVariant * alpha);
+        }
+    }
+
+    private static float RenderMetadataTags(
+        IReadOnlyList<ChapterMetadataTag> tags,
+        MaterialRect bounds,
+        MaterialPalette palette,
+        float alpha
+    ) {
+        const float scale = 0.25f;
+        const float gap = 8f;
+        float x = bounds.X;
+        float y = bounds.Y;
+        float lastBottom = y;
+        foreach (ChapterMetadataTag tag in tags) {
+            string text = TrimToWidth(tag.Text, Math.Min(280f, bounds.Width), scale, UiFontWeight.Bold);
+            float width = Math.Min(bounds.Width,
+                SystemTtfFont.MeasureVisible(text, scale, UiFontWeight.Bold).X + 24f);
+            if (x > bounds.X && x + width > bounds.Right) {
+                x = bounds.X;
+                y += MetadataTagHeight + gap;
+            }
+            if (y + MetadataTagHeight > bounds.Bottom) break;
+
+            Color fill = tag.FillColor ?? palette.Primary;
+            Color foreground = tag.TextColor ?? ContrastColor(fill);
+            Color border = tag.BorderColor ?? fill;
+            MaterialUi.RoundedRect(x, y, width, MetadataTagHeight, MetadataTagHeight / 2f,
+                fill * 0.92f * alpha);
+            MaterialUi.RoundedOutline(x, y, width, MetadataTagHeight, MetadataTagHeight / 2f, 1f,
+                border * alpha);
+            SystemTtfFont.DrawVisual(text, new Vector2(x + width / 2f, y + MetadataTagHeight / 2f),
+                new Vector2(0.5f), scale, foreground * alpha, weight: UiFontWeight.Bold);
+            x += width + gap;
+            lastBottom = y + MetadataTagHeight;
+        }
+        return lastBottom;
     }
 
     private static void RenderStatusPill(
@@ -853,6 +961,120 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         return string.IsNullOrWhiteSpace(value) || value == dialogKey ? fallback : value;
     }
 
+    private static ChapterMetadata ResolveMetadata(AreaData area) {
+        string key = area.Name ?? "";
+        string author = CleanDialogValue(key + "_author", multiline: false);
+        string description = FirstDialogValue(
+            multiline: true,
+            key + "_description",
+            key + "_collabcredits"
+        );
+        List<ChapterMetadataTag> tags = ResolveMetadataTags(key + "_collabcreditstags");
+        return new ChapterMetadata(author, description, tags);
+    }
+
+    private static string FirstDialogValue(bool multiline, params string[] keys) {
+        foreach (string key in keys) {
+            string value = CleanDialogValue(key, multiline);
+            if (value.Length > 0) return value;
+        }
+        return "";
+    }
+
+    private static string CleanDialogValue(string key, bool multiline) {
+        if (key.Length == 0 || !Dialog.Has(key)) return "";
+        string cleaned = Dialog.Clean(key).Replace("\r", "");
+        IEnumerable<string> lines = cleaned.Split('\n')
+            .Select(line => WhitespaceRegex.Replace(line, " ").Trim())
+            .Where(line => line.Length > 0);
+        return multiline ? string.Join("\n", lines) : string.Join(" ", lines);
+    }
+
+    private static List<ChapterMetadataTag> ResolveMetadataTags(string key) {
+        if (key.Length == 0 || !Dialog.Has(key)) return [];
+        string raw = Dialog.Get(key).Replace("{break}", "\n").Replace("{n}", "\n");
+        List<ChapterMetadataTag> tags = [];
+        foreach (string rawLine in raw.Split('\n')) {
+            string line = rawLine.Trim();
+            if (line.Length == 0) continue;
+            Color? textColor = null;
+            Color? borderColor = null;
+            Color? fillColor = null;
+            Match match = CollabTagRegex.Match(line);
+            if (match.Success) {
+                line = match.Groups["text"].Value.Trim();
+                CaptureCollection keys = match.Groups["key"].Captures;
+                CaptureCollection values = match.Groups["value"].Captures;
+                for (int index = 0; index < Math.Min(keys.Count, values.Count); index++) {
+                    Color? color = TryParseColor(values[index].Value);
+                    switch (keys[index].Value) {
+                        case "color": textColor = color; break;
+                        case "borderColor": borderColor = color; break;
+                        case "fillColor": fillColor = color; break;
+                    }
+                }
+            } else {
+                line = DialogCommandRegex.Replace(line, "").Trim();
+            }
+            if (line.Length > 0) tags.Add(new ChapterMetadataTag(line, textColor, borderColor, fillColor));
+        }
+        return tags;
+    }
+
+    private static Color? TryParseColor(string value) {
+        try {
+            return Calc.HexToColor(value);
+        } catch {
+            return null;
+        }
+    }
+
+    private static Color ContrastColor(Color background) {
+        float luminance = (background.R * 0.2126f + background.G * 0.7152f + background.B * 0.0722f) / 255f;
+        return luminance > 0.58f ? new Color(28, 24, 31) : Color.White;
+    }
+
+    private static List<string> WrapText(string value, float maxWidth, float scale, int maxLines) {
+        List<string> lines = [];
+        bool truncated = false;
+        foreach (string paragraph in value.Replace("\r", "").Split('\n')) {
+            string remaining = paragraph.Trim();
+            if (remaining.Length == 0) continue;
+            while (remaining.Length > 0) {
+                if (lines.Count >= maxLines) {
+                    truncated = true;
+                    break;
+                }
+                int take = remaining.Length;
+                while (take > 1 && SystemTtfFont.MeasureVisible(remaining[..take], scale).X > maxWidth) take--;
+                if (take < remaining.Length) {
+                    int whitespace = remaining.LastIndexOf(' ', take - 1, take);
+                    if (whitespace > 0) take = whitespace;
+                }
+                lines.Add(remaining[..take].Trim());
+                remaining = remaining[take..].TrimStart();
+            }
+            if (truncated) break;
+        }
+        if (truncated && lines.Count > 0)
+            lines[^1] = TrimToWidth(lines[^1] + "…", maxWidth, scale);
+        return lines;
+    }
+
+    private static string TrimToWidth(
+        string value,
+        float maxWidth,
+        float scale,
+        UiFontWeight weight = UiFontWeight.Regular
+    ) {
+        if (SystemTtfFont.MeasureVisible(value, scale, weight).X <= maxWidth) return value;
+        const string ellipsis = "…";
+        int length = value.Length;
+        while (length > 1
+               && SystemTtfFont.MeasureVisible(value[..length] + ellipsis, scale, weight).X > maxWidth) length--;
+        return value[..Math.Max(1, length)].TrimEnd() + ellipsis;
+    }
+
     private static string UiText(string key, string fallback) {
         string value = Dialog.Clean(key);
         return string.IsNullOrWhiteSpace(value) || value == key ? fallback : value;
@@ -905,6 +1127,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         MaterialRect Sidebar,
         MaterialRect SidebarItems,
         MaterialRect Cards,
+        MaterialRect Details,
         MaterialRect Footer
     ) {
         public const float SidebarHeaderHeight = 64f;
@@ -917,9 +1140,10 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
             MaterialRect[] rows = MaterialLayout.Split(
                 inner,
                 MaterialAxis.Vertical,
-                18f,
+                14f,
                 MaterialTrack.Fixed(72f),
                 MaterialTrack.Flex(),
+                MaterialTrack.Fixed(146f),
                 MaterialTrack.Fixed(44f)
             );
             MaterialRect[] body = MaterialLayout.Split(
@@ -936,7 +1160,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
                 body[0].Width - MaterialSpacing.Lg,
                 body[0].Height - SidebarHeaderHeight - MaterialSpacing.Md
             );
-            return new ChapterLayout(frame, rows[0], search, body[0], sidebarItems, body[1], rows[2]);
+            return new ChapterLayout(frame, rows[0], search, body[0], sidebarItems, body[1], rows[2], rows[3]);
         }
 
         public MaterialRect SidebarItem(int index, float scrollOffset) => new(
@@ -968,7 +1192,23 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         string LevelSetTitle,
         string Badge,
         bool CollabLobby,
-        string? LobbySid
+        string? LobbySid,
+        string Author,
+        string Description,
+        List<ChapterMetadataTag> Tags
+    );
+
+    private sealed record ChapterMetadata(
+        string Author,
+        string Description,
+        List<ChapterMetadataTag> Tags
+    );
+
+    private sealed record ChapterMetadataTag(
+        string Text,
+        Color? TextColor,
+        Color? BorderColor,
+        Color? FillColor
     );
 
     private sealed record ChapterSection(
