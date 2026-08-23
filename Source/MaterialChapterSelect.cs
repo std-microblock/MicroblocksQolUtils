@@ -87,21 +87,16 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
             ? new Color(126, 99, 184)
             : entries[Math.Clamp(selectedIndex, 0, entries.Count - 1)].Area.TitleBaseColor;
         materialSessionActive = true;
-        TextInput.OnInput += OnTextInput;
-        TextInputEXT.TextEditing += OnTextEditing;
         Audio.Play("event:/ui/world_map/icon/roll_right");
         yield return null;
     }
 
     public override IEnumerator Leave(Oui next) {
         display = false;
+        SetSearchFocused(false);
         float duration = 0.16f;
         for (float timer = 0f; timer < duration; timer += Engine.DeltaTime) yield return null;
         Visible = false;
-        TextInput.OnInput -= OnTextInput;
-        TextInputEXT.TextEditing -= OnTextEditing;
-        searchFocused = false;
-        imeText = "";
         Overworld.ShowInputUI = true;
         Overworld.Mountain.AllowUserRotation = true;
     }
@@ -116,8 +111,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
     }
 
     public override void Removed(Scene scene) {
-        TextInput.OnInput -= OnTextInput;
-        TextInputEXT.TextEditing -= OnTextEditing;
+        SetSearchFocused(false);
         cardViewport.Dispose();
         levelSetViewport.Dispose();
         base.Removed(scene);
@@ -156,24 +150,22 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         ChapterLayout layout = ChapterLayout.Create(0f);
         Vector2 mouse = MInput.Mouse.Position;
         if (MInput.Mouse.PressedLeftButton && layout.Search.Contains(mouse)) {
-            searchFocused = true;
+            SetSearchFocused(true);
             Audio.Play("event:/ui/main/button_select");
             return;
         }
         if (MInput.Keyboard.Check(Keys.LeftControl, Keys.RightControl)
             && MInput.Keyboard.Pressed(Keys.F)) {
-            searchFocused = true;
+            SetSearchFocused(true);
             return;
         }
         if (searchFocused) {
-            if (Input.MenuCancel.Pressed || MInput.Keyboard.Pressed(Keys.Escape)) {
-                searchFocused = false;
-                imeText = "";
-            } else if (MInput.Keyboard.Pressed(Keys.Enter)) {
-                searchFocused = false;
-                imeText = "";
+            if (Input.MenuCancel.Pressed || MaterialTextInputFocus.Pressed(Keys.Escape)) {
+                SetSearchFocused(false);
+            } else if (MaterialTextInputFocus.Pressed(Keys.Enter)) {
+                SetSearchFocused(false);
             } else if (MInput.Mouse.PressedLeftButton && !layout.Search.Contains(mouse)) {
-                searchFocused = false;
+                SetSearchFocused(false);
             }
             return;
         }
@@ -584,6 +576,21 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         }
         imeText = "";
         FilterEntries(keepArea: true);
+    }
+
+    private void SetSearchFocused(bool focused) {
+        if (searchFocused == focused) return;
+        searchFocused = focused;
+        if (focused) {
+            TextInput.OnInput += OnTextInput;
+            TextInputEXT.TextEditing += OnTextEditing;
+            MaterialTextInputFocus.Focus(this);
+        } else {
+            TextInput.OnInput -= OnTextInput;
+            TextInputEXT.TextEditing -= OnTextEditing;
+            MaterialTextInputFocus.Blur(this);
+            imeText = "";
+        }
     }
 
     private void OnTextEditing(string? text, int start, int length) {

@@ -31,6 +31,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private SettingRow? editingRow;
     private string editBuffer = "";
     private string imeText = "";
+    private bool textInputSubscribed;
     private float editError;
     private SettingRow? draggedSlider;
     private CloseDestination closeDestination;
@@ -56,14 +57,11 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     public override void Added(Scene scene) {
         base.Added(scene);
         activePage = this;
-        TextInput.OnInput += OnTextInput;
-        TextInputEXT.TextEditing += OnTextEditing;
     }
 
     public override void Removed(Scene scene) {
         if (activePage == this) activePage = null;
-        TextInput.OnInput -= OnTextInput;
-        TextInputEXT.TextEditing -= OnTextEditing;
+        ReleaseFocusedInput();
         rowViewport.Dispose();
         base.Removed(scene);
     }
@@ -468,11 +466,11 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     }
 
     private void UpdateTextEdit(OverlayLayout layout) {
-        if (MInput.Keyboard.Pressed(Keys.Escape) || Input.MenuCancel.Pressed) {
+        if (MaterialTextInputFocus.Pressed(Keys.Escape) || Input.MenuCancel.Pressed) {
             CancelEdit();
             return;
         }
-        if (MInput.Keyboard.Pressed(Keys.Enter)) {
+        if (MaterialTextInputFocus.Pressed(Keys.Enter)) {
             CommitEdit();
             return;
         }
@@ -493,6 +491,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         editBuffer = row.EditValue();
         imeText = "";
         editError = 0f;
+        SubscribeTextInput();
+        MaterialTextInputFocus.Focus(this);
         Audio.Play("event:/ui/main/button_select");
     }
 
@@ -511,6 +511,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         editingRow = null;
         editBuffer = "";
         imeText = "";
+        ReleaseFocusedInput();
         Audio.Play("event:/ui/main/button_select");
     }
 
@@ -519,6 +520,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         editBuffer = "";
         imeText = "";
         editError = 0f;
+        ReleaseFocusedInput();
         Audio.Play("event:/ui/main/button_back");
     }
 
@@ -543,18 +545,20 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     }
 
     private void UpdateKeyCapture() {
-        if (Input.ESC.Pressed || MInput.Keyboard.Pressed(Keys.Escape)) {
+        if (MaterialTextInputFocus.Pressed(Keys.Escape)) {
             capturingKey = false;
             keyRow = null;
+            ReleaseFocusedInput();
             Audio.Play("event:/ui/main/button_back");
             return;
         }
-        foreach (Keys key in MInput.Keyboard.CurrentState.GetPressedKeys()) {
-            if (!MInput.Keyboard.Pressed(key) || key is Keys.None or Keys.Escape) continue;
+        foreach (Keys key in MaterialTextInputFocus.GetPressedKeys()) {
+            if (!MaterialTextInputFocus.Pressed(key) || key is Keys.None or Keys.Escape) continue;
             keyRow?.AssignKey?.Invoke(key);
             if (keyRow is not null) keyRow.Pulse = 1f;
             capturingKey = false;
             keyRow = null;
+            ReleaseFocusedInput();
             Audio.Play("event:/ui/main/button_select");
             return;
         }
@@ -585,6 +589,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             case SettingKind.Key:
                 capturingKey = true;
                 keyRow = row;
+                MaterialTextInputFocus.Focus(this);
                 Audio.Play("event:/ui/main/button_select");
                 return;
             case SettingKind.Status:
@@ -667,14 +672,30 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private void BeginClose(CloseDestination destination) {
         if (closeDestination != CloseDestination.None) return;
-        if (editingRow is not null && !editingRow.CommitEdit!(editBuffer)) {
-            editingRow = null;
-        }
+        if (editingRow is not null) editingRow.CommitEdit!(editBuffer);
+        editingRow = null;
         closeDestination = destination;
         draggedSlider = null;
         capturingKey = false;
         keyRow = null;
+        ReleaseFocusedInput();
         Audio.Play("event:/ui/main/button_back");
+    }
+
+    private void SubscribeTextInput() {
+        if (textInputSubscribed) return;
+        textInputSubscribed = true;
+        TextInput.OnInput += OnTextInput;
+        TextInputEXT.TextEditing += OnTextEditing;
+    }
+
+    private void ReleaseFocusedInput() {
+        if (textInputSubscribed) {
+            textInputSubscribed = false;
+            TextInput.OnInput -= OnTextInput;
+            TextInputEXT.TextEditing -= OnTextEditing;
+        }
+        MaterialTextInputFocus.Blur(this);
     }
 
     private void FinishClose() {

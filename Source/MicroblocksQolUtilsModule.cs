@@ -16,6 +16,7 @@ public sealed class MicroblocksQolUtilsModule : EverestModule {
     public override void Load() {
         Logger.Log(LogLevel.Info, "MicroblocksQolUtils", "Loading microblock's QoL Utils");
         FrameRateCounter.Reset();
+        MaterialTextInputFocus.Load();
         CollabUtils2Bridge.Load();
         MaterialChapterSelect.Load();
         QolPauseMenu.Load();
@@ -48,6 +49,7 @@ public sealed class MicroblocksQolUtilsModule : EverestModule {
         FrameProfiler.Unload();
         MiaoNetBridge.Unload();
         MotionSmoothingBridge.Unload();
+        MaterialTextInputFocus.Unload();
         FrameRateCounter.Reset();
         MaterialUi.Dispose();
         SystemTtfFont.Dispose();
@@ -59,6 +61,7 @@ public sealed class MicroblocksQolUtilsModule : EverestModule {
     }
 
     private static void EngineUpdate(On.Monocle.Engine.orig_Update orig, Engine self, Microsoft.Xna.Framework.GameTime gameTime) {
+        MaterialTextInputFocus.BeginFrame();
         FrameProfiler.BeginUpdate();
         try {
             orig(self, gameTime);
