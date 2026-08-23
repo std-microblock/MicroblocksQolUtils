@@ -7,6 +7,9 @@ Implemented:
 
 - HUD entity and settings model.
 - Direct Windows TTF/OTF glyph rasterization with a bounded, lazy GPU cache.
+- Named Material Symbols support: rounded SVGs are embedded in the assembly and
+  lazily rasterized through `MaterialIcon.Draw("icon_name", ...)`, so UI code can
+  use canonical Material You icon names without hand-wiring texture atlases.
 - Material You surfaces for the HUD and chapter browser, using the selected
   chapter's accent color and the same direct system-font renderer.
 - Toggleable GPU acrylic rendering for the custom chapter browser. The

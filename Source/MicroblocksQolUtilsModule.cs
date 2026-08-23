@@ -62,6 +62,7 @@ public sealed class MicroblocksQolUtilsModule : EverestModule {
         FrameRateCounter.Reset();
         MaterialUi.Dispose();
         MiniMapRenderer.Dispose();
+        MaterialIcon.Dispose();
         SystemTtfFont.Dispose();
     }
 
