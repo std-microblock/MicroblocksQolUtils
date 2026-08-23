@@ -15,6 +15,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private const float RecorderSettingHeight = 92f;
     private const float DropdownItemHeight = 42f;
     private const int DropdownMaxVisibleItems = 7;
+    private const float ProfilerRowHeight = 76f;
+    private const float ProfilerRowGap = 10f;
 
     private static QolSettingsOverlay? activePage;
 
@@ -153,6 +155,10 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         }
 
         if (IsProfilerTab) {
+            if (Input.MenuLeft.Pressed) SetProfilerSimpleMode(true);
+            else if (Input.MenuRight.Pressed) SetProfilerSimpleMode(false);
+            if (Input.MenuUp.Pressed) rowScroll.Scroll(-172f, MaxRowScroll(layout));
+            else if (Input.MenuDown.Pressed) rowScroll.Scroll(172f, MaxRowScroll(layout));
             if (Input.MenuConfirm.Pressed
                 || MInput.Keyboard.Pressed(Keys.Enter)
                 || MInput.Keyboard.Pressed(Keys.Space)) StartProfilerSampling();
@@ -200,7 +206,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         if (dropdownRow is not null) RenderDropdown(layout, palette);
 
         string footer = IsProfilerTab
-            ? "点击开始后会自动返回游戏，采样 10 秒；完成后回到这里查看报告"
+            ? "←→ 切换模式  ·  ↑↓ / 滚轮浏览完整报告  ·  Enter 开始 10 秒采样"
             : dropdownRow is not null
                 ? "↑↓ 选择  ·  Enter 确认  ·  Esc 关闭下拉框"
             : editingRow is not null
@@ -953,8 +959,11 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             return;
         }
         if (IsProfilerTab) {
-            if (MInput.Mouse.PressedLeftButton && ProfilerStartRect(layout).Contains(mouse))
-                StartProfilerSampling();
+            if (MInput.Mouse.PressedLeftButton) {
+                if (ProfilerStartRect(layout).Contains(mouse)) StartProfilerSampling();
+                else if (ProfilerSimpleModeRect(layout).Contains(mouse)) SetProfilerSimpleMode(true);
+                else if (ProfilerProfessionalModeRect(layout).Contains(mouse)) SetProfilerSimpleMode(false);
+            }
             return;
         }
         if (!layout.Rows.Contains(mouse)) return;
@@ -1297,6 +1306,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private float MaxRowScroll(OverlayLayout layout) {
         if (IsRecorderTab) return Math.Max(0f, RecorderContentHeight(layout) - layout.Rows.Height);
+        if (IsProfilerTab) return ProfilerMaxScroll(layout);
         int bands = (CurrentRows.Count + Columns - 1) / Columns;
         float contentHeight = bands == 0 ? 0f : bands * RowHeight + (bands - 1) * RowGap;
         return Math.Max(0f, contentHeight - layout.Rows.Height);
@@ -1672,69 +1682,131 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                 (summary.Width - 48f) * progress, 5f, 2.5f, palette.Primary * alpha);
         }
 
+        bool simpleMode = MicroblocksQolUtilsModule.Settings.ProfilerSimpleMode;
+        MaterialRect mode = ProfilerModeRect(layout);
+        MaterialUi.RoundedRect(mode.X, mode.Y, mode.Width, mode.Height, 16f,
+            palette.SurfaceHigh * (0.72f * alpha));
+        MaterialRect selectedMode = simpleMode
+            ? ProfilerSimpleModeRect(layout)
+            : ProfilerProfessionalModeRect(layout);
+        MaterialUi.RoundedRect(selectedMode.X, selectedMode.Y, selectedMode.Width, selectedMode.Height, 14f,
+            palette.Primary * (0.88f * alpha));
+        MaterialUiKit.Text("简单 · 仅 Mod", ProfilerSimpleModeRect(layout).Center + new Vector2(0f, -7f),
+            new Vector2(0.5f), MaterialTextRole.Label,
+            simpleMode ? palette.OnPrimary : palette.OnSurfaceVariant, alpha, scaleOverride: 0.25f);
+        MaterialUiKit.Text("专业 · 全部", ProfilerProfessionalModeRect(layout).Center + new Vector2(0f, -7f),
+            new Vector2(0.5f), MaterialTextRole.Label,
+            simpleMode ? palette.OnSurfaceVariant : palette.OnPrimary, alpha, scaleOverride: 0.25f);
+        MaterialUiKit.Text("百分比为阶段总 CPU 的独占（自身）耗时", new Vector2(layout.Rows.Right, mode.Y + 11f),
+            new Vector2(1f, 0f), MaterialTextRole.Caption, palette.OnSurfaceVariant,
+            alpha, scaleOverride: 0.23f);
+
         if (report is null) {
             MaterialUiKit.Text("报告会分别列出 Update 与 Render 中最常占用 CPU 的方法。\n若方法是 MonoMod detour，下面会额外显示 hook 的目标方法。",
-                new Vector2(layout.Rows.X + 18f, summary.Bottom + 40f), Vector2.Zero,
+                new Vector2(layout.Rows.X + 18f, mode.Bottom + 28f), Vector2.Zero,
                 MaterialTextRole.Body, palette.OnSurfaceVariant, alpha, scaleOverride: 0.31f);
             return;
         }
 
         float gap = 16f;
-        float top = summary.Bottom + 18f;
+        MaterialRect reportViewport = ProfilerReportViewport(layout);
         float columnWidth = (layout.Rows.Width - gap) / 2f;
-        MaterialRect updateColumn = new(layout.Rows.X, top, columnWidth, layout.Rows.Bottom - top);
-        MaterialRect renderColumn = new(updateColumn.Right + gap, top, columnWidth, layout.Rows.Bottom - top);
-        RenderProfileColumn(updateColumn, "UPDATE", report.UpdateCpuMilliseconds, report.Update, palette, alpha);
-        RenderProfileColumn(renderColumn, "RENDER", report.RenderCpuMilliseconds, report.Render, palette, alpha);
+        MaterialRect updateColumn = new(layout.Rows.X, reportViewport.Y, columnWidth, reportViewport.Height);
+        MaterialRect renderColumn = new(updateColumn.Right + gap, reportViewport.Y, columnWidth,
+            reportViewport.Height);
+        RenderProfileColumnHeader(updateColumn, "UPDATE", report.UpdateCpuMilliseconds, palette, alpha);
+        RenderProfileColumnHeader(renderColumn, "RENDER", report.RenderCpuMilliseconds, palette, alpha);
+
+        MaterialRect listViewport = ProfilerListViewport(layout);
+        rowViewport.Render(listViewport, () => {
+            RenderProfileRows(updateColumn, listViewport, report.Update, simpleMode, palette, alpha, rowScroll.Offset);
+            RenderProfileRows(renderColumn, listViewport, report.Render, simpleMode, palette, alpha, rowScroll.Offset);
+        });
+
+        float maximum = ProfilerMaxScroll(layout);
+        if (maximum > 0f) RenderProfilerScrollbar(listViewport, maximum, palette, alpha);
 
         MaterialUiKit.Text($"原始 trace: {Path.GetFileName(report.TracePath)}",
             new Vector2(layout.Rows.X + 4f, layout.Rows.Bottom - 22f), Vector2.Zero,
             MaterialTextRole.Caption, palette.OnSurfaceVariant * 0.72f, alpha, scaleOverride: 0.22f);
     }
 
-    private static void RenderProfileColumn(
+    private static void RenderProfileColumnHeader(
         MaterialRect bounds,
         string title,
         double totalMilliseconds,
-        IReadOnlyList<ManagedProfileEntry> entries,
         MaterialPalette palette,
         float alpha
     ) {
         MaterialUiKit.Text(title, new Vector2(bounds.X + 4f, bounds.Y + 2f), Vector2.Zero,
             MaterialTextRole.Label, palette.Primary, alpha, scaleOverride: 0.30f);
-        MaterialUiKit.Text($"采样 CPU {totalMilliseconds:0} ms", new Vector2(bounds.Right - 4f, bounds.Y + 4f),
+        MaterialUiKit.Text($"独占 CPU {totalMilliseconds:0} ms", new Vector2(bounds.Right - 4f, bounds.Y + 4f),
             new Vector2(1f, 0f), MaterialTextRole.Caption, palette.OnSurfaceVariant,
             alpha, scaleOverride: 0.23f);
-        float y = bounds.Y + 34f;
-        int count = Math.Min(8, entries.Count);
-        for (int index = 0; index < count; index++) {
-            ManagedProfileEntry entry = entries[index];
-            MaterialRect row = new(bounds.X, y + index * 66f, bounds.Width, 58f);
+    }
+
+    private static void RenderProfileRows(
+        MaterialRect column,
+        MaterialRect viewport,
+        IReadOnlyList<ManagedProfileEntry> entries,
+        bool simpleMode,
+        MaterialPalette palette,
+        float alpha,
+        float scrollOffset
+    ) {
+        int visibleIndex = 0;
+        foreach (ManagedProfileEntry entry in entries) {
+            if (simpleMode && !entry.IsMod) continue;
+            MaterialRect row = new(column.X,
+                viewport.Y + visibleIndex * (ProfilerRowHeight + ProfilerRowGap) - scrollOffset,
+                column.Width, ProfilerRowHeight);
+            visibleIndex++;
+            if (row.Bottom < viewport.Y || row.Y > viewport.Bottom) continue;
             MaterialUi.RoundedRect(row.X, row.Y, row.Width, row.Height, 16f,
                 palette.SurfaceHigh * (0.68f * alpha));
             float bar = Math.Clamp((float)entry.Percent / 100f, 0f, 1f);
             MaterialUi.RoundedRect(row.X, row.Bottom - 4f, row.Width * bar, 4f, 2f,
                 palette.Primary * (0.82f * alpha));
             string owner = entry.HookTarget is null ? entry.Owner : entry.Owner + "  ·  HOOK";
-            MaterialUiKit.Text(Trim(owner, 32), new Vector2(row.X + 12f, row.Y + 7f), Vector2.Zero,
+            MaterialUiKit.Text(TrimToWidth(owner, row.Width - 88f, 0.22f),
+                new Vector2(row.X + 12f, row.Y + 7f), Vector2.Zero,
                 MaterialTextRole.Caption, entry.HookTarget is null ? palette.OnSurfaceVariant : Color.Orange,
                 alpha, scaleOverride: 0.22f);
-            MaterialUiKit.Text(Trim(entry.Method, 54), new Vector2(row.X + 12f, row.Y + 28f), Vector2.Zero,
+            MaterialUiKit.Text(TrimToWidth(entry.Method, row.Width - 24f, 0.24f, UiFontWeight.Bold),
+                new Vector2(row.X + 12f, row.Y + 31f), Vector2.Zero,
                 MaterialTextRole.Label, palette.OnSurface, alpha, scaleOverride: 0.24f);
             MaterialUiKit.Text($"{entry.Percent:0.0}%", new Vector2(row.Right - 12f, row.Y + 7f),
                 new Vector2(1f, 0f), MaterialTextRole.Caption, palette.Primary,
                 alpha, scaleOverride: 0.22f);
             if (entry.HookTarget is not null) {
-                MaterialUiKit.Text(Trim("→ " + entry.HookTarget, 58), new Vector2(row.X + 12f, row.Bottom - 18f),
+                MaterialUiKit.Text(TrimToWidth("→ " + entry.HookTarget, row.Width - 24f, 0.18f),
+                    new Vector2(row.X + 12f, row.Bottom - 20f),
                     Vector2.Zero, MaterialTextRole.Caption, palette.OnSurfaceVariant,
                     alpha, scaleOverride: 0.18f);
             }
         }
-        if (count == 0) {
-            MaterialUiKit.Text("没有捕获到该阶段的主线程样本", new Vector2(bounds.X + 4f, y + 14f),
+        if (visibleIndex == 0) {
+            string empty = simpleMode ? "没有捕获到 Mod 的主线程样本" : "没有捕获到该阶段的主线程样本";
+            MaterialUiKit.Text(empty, new Vector2(column.X + 4f, viewport.Y + 14f),
                 Vector2.Zero, MaterialTextRole.Caption, palette.OnSurfaceVariant,
                 alpha, scaleOverride: 0.25f);
         }
+    }
+
+    private void RenderProfilerScrollbar(
+        MaterialRect viewport,
+        float maximum,
+        MaterialPalette palette,
+        float alpha
+    ) {
+        float contentHeight = viewport.Height + maximum;
+        float thumbHeight = Math.Max(48f, viewport.Height * viewport.Height / contentHeight);
+        float travel = viewport.Height - thumbHeight;
+        float y = viewport.Y + rowScroll.Offset / maximum * travel;
+        MaterialUi.RoundedRect(viewport.Right + 8f, viewport.Y, 5f, viewport.Height, 2.5f,
+            palette.Outline * (0.18f * alpha));
+        MaterialUi.RoundedRect(viewport.Right + 8f, y, 5f, thumbHeight, 2.5f,
+            palette.Primary * (0.68f * alpha));
     }
 
     private static MaterialRect ProfilerSummaryRect(OverlayLayout layout) =>
@@ -1743,6 +1815,57 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private static MaterialRect ProfilerStartRect(OverlayLayout layout) {
         MaterialRect summary = ProfilerSummaryRect(layout);
         return new MaterialRect(summary.Right - 232f, summary.Y + 26f, 204f, 54f);
+    }
+
+    private static MaterialRect ProfilerModeRect(OverlayLayout layout) {
+        MaterialRect summary = ProfilerSummaryRect(layout);
+        return new MaterialRect(layout.Rows.X, summary.Bottom + 12f, 300f, 42f);
+    }
+
+    private static MaterialRect ProfilerSimpleModeRect(OverlayLayout layout) {
+        MaterialRect mode = ProfilerModeRect(layout);
+        return new MaterialRect(mode.X + 3f, mode.Y + 3f, mode.Width / 2f - 3f, mode.Height - 6f);
+    }
+
+    private static MaterialRect ProfilerProfessionalModeRect(OverlayLayout layout) {
+        MaterialRect mode = ProfilerModeRect(layout);
+        return new MaterialRect(mode.X + mode.Width / 2f, mode.Y + 3f,
+            mode.Width / 2f - 3f, mode.Height - 6f);
+    }
+
+    private static MaterialRect ProfilerReportViewport(OverlayLayout layout) {
+        MaterialRect mode = ProfilerModeRect(layout);
+        float top = mode.Bottom + 12f;
+        return new MaterialRect(layout.Rows.X, top, layout.Rows.Width,
+            Math.Max(0f, layout.Rows.Bottom - 30f - top));
+    }
+
+    private static MaterialRect ProfilerListViewport(OverlayLayout layout) {
+        MaterialRect report = ProfilerReportViewport(layout);
+        return new MaterialRect(report.X, report.Y + 34f, report.Width,
+            Math.Max(0f, report.Height - 34f));
+    }
+
+    private float ProfilerMaxScroll(OverlayLayout layout) {
+        ManagedProfileReport? report = ManagedCpuSampler.LatestReport;
+        if (report is null) return 0f;
+        bool simpleMode = MicroblocksQolUtilsModule.Settings.ProfilerSimpleMode;
+        int updateCount = simpleMode ? report.Update.Count(entry => entry.IsMod) : report.Update.Count;
+        int renderCount = simpleMode ? report.Render.Count(entry => entry.IsMod) : report.Render.Count;
+        int count = Math.Max(updateCount, renderCount);
+        float contentHeight = count == 0
+            ? 0f
+            : count * ProfilerRowHeight + (count - 1) * ProfilerRowGap;
+        return Math.Max(0f, contentHeight - ProfilerListViewport(layout).Height);
+    }
+
+    private void SetProfilerSimpleMode(bool simple) {
+        QolSettings settings = MicroblocksQolUtilsModule.Settings;
+        if (settings.ProfilerSimpleMode == simple) return;
+        settings.ProfilerSimpleMode = simple;
+        rowScroll.Reset();
+        contentEase = 0f;
+        Audio.Play("event:/ui/main/rollover_down");
     }
 
     private bool IsRecorderTab => tabs[selectedTab].RecorderPage;
@@ -1995,6 +2118,26 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private static string TrimFromLeft(string value, int maxCharacters) => value.Length <= maxCharacters
         ? value
         : "…" + value[^Math.Max(1, maxCharacters - 1)..];
+
+    private static string TrimToWidth(
+        string value,
+        float maxWidth,
+        float scale,
+        UiFontWeight weight = UiFontWeight.Regular
+    ) {
+        if (string.IsNullOrEmpty(value) || SystemTtfFont.MeasureVisible(value, scale, weight).X <= maxWidth)
+            return value;
+        const string ellipsis = "…";
+        int low = 0;
+        int high = value.Length;
+        while (low < high) {
+            int middle = (low + high + 1) / 2;
+            string candidate = value[..middle].TrimEnd() + ellipsis;
+            if (SystemTtfFont.MeasureVisible(candidate, scale, weight).X <= maxWidth) low = middle;
+            else high = middle - 1;
+        }
+        return value[..Math.Max(0, low)].TrimEnd() + ellipsis;
+    }
 
     private enum SettingKind {
         Toggle,

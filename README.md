@@ -37,7 +37,9 @@ Implemented:
 - A self-drawn Profiler settings tab can launch a 10-second in-process EventPipe
   stack sample, split hot methods between Engine Update and Render, identify
   owning mod assemblies and MonoMod hook targets, and retain CSV plus `.nettrace`
-  reports under LocalAppData. The lightweight frame-spike HUD remains available.
+  reports under LocalAppData. Reports use exclusive/self time, provide a simple
+  Mod-only view plus a full professional view, and scroll through the extended
+  result list. The lightweight frame-spike HUD remains available.
 - A Rust `cdylib` capture backend built directly on `scap`/WGC. Captured BGRA
   frames use an intentional CPU copy, stay outside managed memory, and pass
   through a fixed-capacity latest-frame queue; a slow encoder cannot grow

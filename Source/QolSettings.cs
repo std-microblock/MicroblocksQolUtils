@@ -195,6 +195,9 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue(false)]
     public bool EnableFrameProfiler { get; set; }
 
+    [DefaultValue(true)]
+    public bool ProfilerSimpleMode { get; set; } = true;
+
     [SettingRange(20, 250)]
     [DefaultValue(34)]
     public int FrameSpikeThresholdMs { get; set; } = 34;

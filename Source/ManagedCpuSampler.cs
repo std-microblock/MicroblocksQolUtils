@@ -26,6 +26,7 @@ internal sealed record ManagedProfileEntry(
     string Owner,
     string Method,
     string? HookTarget,
+    bool IsMod,
     double Milliseconds,
     double Percent
 );
@@ -116,7 +117,8 @@ internal static class ManagedCpuSampler {
             stage = ManagedSamplingStage.WarmingUp;
             StageWatch.Restart();
             lock (FrameLock) frames = default;
-            worker = Task.Run(() => RunAsync(requestedDuration, cancellation.Token));
+            ModAssemblySnapshot mods = ModAssemblySnapshot.Capture();
+            worker = Task.Run(() => RunAsync(requestedDuration, mods, cancellation.Token));
             return true;
         }
     }
@@ -149,7 +151,11 @@ internal static class ManagedCpuSampler {
         source?.Dispose();
     }
 
-    private static async Task RunAsync(double durationSeconds, CancellationToken token) {
+    private static async Task RunAsync(
+        double durationSeconds,
+        ModAssemblySnapshot mods,
+        CancellationToken token
+    ) {
         string? tracePath = null;
         string? etlxPath = null;
         try {
@@ -177,7 +183,7 @@ internal static class ManagedCpuSampler {
             lock (StateLock) activeSession = null;
 
             SetStage(ManagedSamplingStage.Analyzing);
-            ManagedProfileReport report = Analyze(tracePath, etlxPath, durationSeconds, hooks);
+            ManagedProfileReport report = Analyze(tracePath, etlxPath, durationSeconds, hooks, mods);
             lock (StateLock) {
                 latestReport = report;
                 stage = ManagedSamplingStage.Complete;
@@ -213,7 +219,8 @@ internal static class ManagedCpuSampler {
         string tracePath,
         string etlxPath,
         double durationSeconds,
-        HookSnapshot hooks
+        HookSnapshot hooks,
+        ModAssemblySnapshot mods
     ) {
         TraceLog.CreateFromEventPipeDataFile(tracePath, etlxPath);
         using TraceLog trace = new(etlxPath);
@@ -239,11 +246,15 @@ internal static class ManagedCpuSampler {
             }
 
             sampleCount++;
-            string? actionable = FindActionableFrame(framesForSample);
-            if (actionable is null) actionable = phase == ProfilePhase.Update ? "unknown!Update" : "unknown!Render";
-            string owner = FrameOwner(actionable);
-            string? hookTarget = hooks.TargetFor(actionable, framesForSample);
-            ProfileKey key = new(owner, CleanMethod(actionable), hookTarget);
+            // A sample is charged to exactly one leaf-most actionable frame. This is exclusive/self
+            // time: if hook A calls orig and execution is currently in hook B or the original method,
+            // that sample belongs to B/orig rather than being counted again against A.
+            string? exclusiveFrame = FindExclusiveFrame(framesForSample);
+            if (exclusiveFrame is null)
+                exclusiveFrame = phase == ProfilePhase.Update ? "unknown!Update" : "unknown!Render";
+            string owner = FrameOwner(exclusiveFrame);
+            string? hookTarget = hooks.TargetFor(exclusiveFrame, framesForSample);
+            ProfileKey key = new(owner, CleanMethod(exclusiveFrame), hookTarget);
             Dictionary<ProfileKey, double> target = phase == ProfilePhase.Update ? update : render;
             target[key] = target.GetValueOrDefault(key) + metric;
             if (phase == ProfilePhase.Update) updateTotal += metric;
@@ -252,8 +263,8 @@ internal static class ManagedCpuSampler {
 
         FrameStatistics frameStats;
         lock (FrameLock) frameStats = frames;
-        IReadOnlyList<ManagedProfileEntry> updateEntries = MakeEntries(update, updateTotal);
-        IReadOnlyList<ManagedProfileEntry> renderEntries = MakeEntries(render, renderTotal);
+        IReadOnlyList<ManagedProfileEntry> updateEntries = MakeEntries(update, updateTotal, mods);
+        IReadOnlyList<ManagedProfileEntry> renderEntries = MakeEntries(render, renderTotal, mods);
         string summaryPath = Path.ChangeExtension(tracePath, ".csv");
         ManagedProfileReport report = new(
             DateTime.Now,
@@ -301,7 +312,7 @@ internal static class ManagedCpuSampler {
         return ProfilePhase.Other;
     }
 
-    private static string? FindActionableFrame(IReadOnlyList<string> framesForSample) {
+    private static string? FindExclusiveFrame(IReadOnlyList<string> framesForSample) {
         string? fallback = null;
         foreach (string frame in framesForSample) {
             if (IsPseudoFrame(frame)) continue;
@@ -344,21 +355,25 @@ internal static class ManagedCpuSampler {
 
     private static IReadOnlyList<ManagedProfileEntry> MakeEntries(
         Dictionary<ProfileKey, double> values,
-        double total
+        double total,
+        ModAssemblySnapshot mods
     ) => values
         .Select(pair => new ManagedProfileEntry(
             pair.Key.Owner,
             pair.Key.Method,
             pair.Key.HookTarget,
+            mods.Contains(pair.Key.Owner)
+                || pair.Key.HookTarget is not null
+                || pair.Key.Method.StartsWith("Celeste.Mod.", StringComparison.Ordinal),
             pair.Value,
             total <= 0d ? 0d : pair.Value / total * 100d
         ))
         .OrderByDescending(entry => entry.Milliseconds)
-        .Take(16)
+        .Take(128)
         .ToList();
 
     private static void WriteSummary(ManagedProfileReport report) {
-        StringBuilder csv = new("phase,owner,method,hook_target,cpu_ms,percent\n");
+        StringBuilder csv = new("phase,owner,method,hook_target,is_mod,exclusive_cpu_ms,percent_of_phase\n");
         foreach ((string phase, IReadOnlyList<ManagedProfileEntry> entries) in new[] {
             ("update", report.Update),
             ("render", report.Render)
@@ -368,6 +383,7 @@ internal static class ManagedCpuSampler {
                     .Append(Csv(entry.Owner)).Append(',')
                     .Append(Csv(entry.Method)).Append(',')
                     .Append(Csv(entry.HookTarget ?? "")).Append(',')
+                    .Append(entry.IsMod ? "true" : "false").Append(',')
                     .Append(entry.Milliseconds.ToString("0.###", CultureInfo.InvariantCulture)).Append(',')
                     .Append(entry.Percent.ToString("0.###", CultureInfo.InvariantCulture)).AppendLine();
             }
@@ -456,4 +472,23 @@ internal static class ManagedCpuSampler {
     }
 
     private sealed record HookDescriptor(string Owner, string FramePrefix, string Target);
+
+    private sealed class ModAssemblySnapshot {
+        private readonly HashSet<string> owners;
+
+        private ModAssemblySnapshot(HashSet<string> owners) {
+            this.owners = owners;
+        }
+
+        public static ModAssemblySnapshot Capture() {
+            HashSet<string> result = new(StringComparer.OrdinalIgnoreCase);
+            foreach (EverestModule module in Everest.Modules) {
+                string? assembly = module.GetType().Assembly.GetName().Name;
+                if (!string.IsNullOrWhiteSpace(assembly)) result.Add(assembly);
+            }
+            return new ModAssemblySnapshot(result);
+        }
+
+        public bool Contains(string owner) => owners.Contains(owner);
+    }
 }
