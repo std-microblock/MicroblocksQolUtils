@@ -7,6 +7,7 @@ public sealed class MicroblocksQolUtilsModule : EverestModule {
     public static QolSettings Settings => (QolSettings)Instance._Settings;
 
     public override Type SettingsType => typeof(QolSettings);
+    public override Type SaveDataType => typeof(QolSaveData);
 
     public MicroblocksQolUtilsModule() {
         Instance = this;
@@ -53,6 +54,7 @@ public sealed class MicroblocksQolUtilsModule : EverestModule {
     }
 
     private static void OnLoadLevel(Level level, Player.IntroTypes intro, bool fromLoader) {
+        RecentChapterHistory.Record(level.Session.Area.SID);
         if (level.Tracker.GetEntity<QolHud>() is null) level.Add(new QolHud());
     }
 

@@ -8,6 +8,8 @@ modoptions_microblocksqolutils_minimapadaptivecolors=Minimap adaptive colors
 
 microblocks_qol_chapter_title=Select Chapter
 microblocks_qol_chapter_all_maps=All Maps
+microblocks_qol_chapter_recent=Recently Played
+microblocks_qol_chapter_recent_empty=No recently played chapters yet
 microblocks_qol_chapter_official=OFFICIAL
 microblocks_qol_chapter_level_sets=LEVEL SETS
 microblocks_qol_chapter_empty=No selectable chapters in this level set

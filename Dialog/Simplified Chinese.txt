@@ -8,6 +8,8 @@ modoptions_microblocksqolutils_minimapadaptivecolors=小地图颜色自动适配
 
 microblocks_qol_chapter_title=选择章节
 microblocks_qol_chapter_all_maps=全部地图
+microblocks_qol_chapter_recent=最近游玩
+microblocks_qol_chapter_recent_empty=还没有最近游玩的章节
 microblocks_qol_chapter_official=官方
 microblocks_qol_chapter_level_sets=地图集
 microblocks_qol_chapter_empty=这个地图集中没有可选章节

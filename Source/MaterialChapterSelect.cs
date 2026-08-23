@@ -14,6 +14,7 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
     private const float CardHeight = 164f;
     private const float CardHorizontalGap = 18f;
     private const float CardVerticalGap = 18f;
+    private const string RecentGroupId = "__microblocks_recently_played";
 
     private static Hook? gotoRoutineHook;
     private static bool hookFailed;
@@ -228,6 +229,8 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
     private void RebuildEntries() {
         allEntries.Clear();
         levelSets.Clear();
+        levelSets.Add(new LevelSetEntry(RecentGroupId,
+            UiText("microblocks_qol_chapter_recent", "最近游玩")));
         levelSets.Add(new LevelSetEntry("", UiText("microblocks_qol_chapter_all_maps", "全部地图")));
         bool showCollabMaps = MicroblocksQolUtilsModule.Settings.ChapterSelectShowCollabMaps;
         SaveData? save = SaveData.Instance;
@@ -276,9 +279,20 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
             : SaveData.Instance?.LastArea_Safe.SID;
         entries.Clear();
         string group = levelSets.Count == 0 ? "" : levelSets[selectedLevelSet].Id;
-        IEnumerable<ChapterEntry> filtered = group.Length == 0
-            ? allEntries
-            : allEntries.Where(entry => entry.GroupId == group);
+        IEnumerable<ChapterEntry> filtered;
+        if (group == RecentGroupId) {
+            Dictionary<string, int> recentOrder = RecentChapterHistory.Entries
+                .Select((sid, index) => (sid, index))
+                .GroupBy(item => item.sid, StringComparer.Ordinal)
+                .ToDictionary(items => items.Key, items => items.First().index, StringComparer.Ordinal);
+            filtered = allEntries
+                .Where(entry => recentOrder.ContainsKey(entry.Sid))
+                .OrderBy(entry => recentOrder[entry.Sid]);
+        } else {
+            filtered = group.Length == 0
+                ? allEntries
+                : allEntries.Where(entry => entry.GroupId == group);
+        }
         if (!string.IsNullOrWhiteSpace(searchText)) {
             string search = searchText.Trim();
             filtered = filtered.Where(entry =>
@@ -392,7 +406,10 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
                 RenderCard(entries[index], card, selected, palette, alpha);
             }
             if (entries.Count == 0) {
-                SystemTtfFont.Draw(UiText("microblocks_qol_chapter_empty", "这个地图集中没有可选章节"),
+                string emptyText = levelSets.Count > 0 && levelSets[selectedLevelSet].Id == RecentGroupId
+                    ? UiText("microblocks_qol_chapter_recent_empty", "还没有最近游玩的章节")
+                    : UiText("microblocks_qol_chapter_empty", "这个地图集中没有可选章节");
+                SystemTtfFont.Draw(emptyText,
                     layout.Cards.Center, new Vector2(0.5f), 0.56f, palette.OnSurfaceVariant * alpha);
             }
         });
