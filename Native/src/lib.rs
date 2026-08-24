@@ -15,6 +15,8 @@ use std::time::{Duration, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+#[cfg(windows)]
+mod dwrite_raster;
 mod raster;
 
 #[cfg(all(windows, feature = "ffmpeg"))]

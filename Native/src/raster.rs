@@ -9,7 +9,7 @@ use swash::scale::{Render, ScaleContext, Source};
 use swash::shape::{Direction, ShapeContext};
 use swash::zeno::{Format, Vector};
 use swash::{FontRef, GlyphId};
-use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, PremultipliedColorU8, Transform};
+use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Transform};
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct TextRasterRequest {
@@ -164,6 +164,10 @@ struct PositionedGlyph {
 pub fn rasterize_text(request: &TextRasterRequest) -> Result<RasterImage, String> {
     if request.pixel_size == 0 || request.line_height == 0 {
         return Err("pixel_size and line_height must be positive".to_owned());
+    }
+    #[cfg(windows)]
+    if request.font_file.trim().is_empty() {
+        return crate::dwrite_raster::rasterize_text(request);
     }
     let mut state = raster_state()
         .lock()
@@ -333,6 +337,9 @@ pub fn rasterize_svg(
     green: u8,
     blue: u8,
 ) -> Result<RasterImage, String> {
+    const OVERSAMPLE: u32 = 48;
+    const OFFSET_X: f32 = 0.00;
+    const OFFSET_Y: f32 = 0.00;
     if pixel_size == 0 {
         return Err("pixel_size must be positive".to_owned());
     }
@@ -343,10 +350,15 @@ pub fn rasterize_svg(
     if view_box.2 <= 0.0 || view_box.3 <= 0.0 {
         return Err("SVG viewBox has non-positive dimensions".to_owned());
     }
-    let scale = (pixel_size as f32 / view_box.2).min(pixel_size as f32 / view_box.3);
-    let translate_x = (pixel_size as f32 - view_box.2 * scale) * 0.5 - view_box.0 * scale;
-    let translate_y = (pixel_size as f32 - view_box.3 * scale) * 0.5 - view_box.1 * scale;
-    let mut pixmap = Pixmap::new(pixel_size, pixel_size)
+    let raster_size = pixel_size
+        .checked_mul(OVERSAMPLE)
+        .ok_or_else(|| "SVG raster size overflow".to_owned())?;
+    let scale = (raster_size as f32 / view_box.2).min(raster_size as f32 / view_box.3);
+    let translate_x =
+        (raster_size as f32 - view_box.2 * scale) * 0.5 - view_box.0 * scale + OFFSET_X;
+    let translate_y =
+        (raster_size as f32 - view_box.3 * scale) * 0.5 - view_box.1 * scale + OFFSET_Y;
+    let mut pixmap = Pixmap::new(raster_size, raster_size)
         .ok_or_else(|| "cannot allocate SVG pixmap".to_owned())?;
     let mut paint = Paint::default();
     paint.set_color_rgba8(red, green, blue, 255);
@@ -365,8 +377,31 @@ pub fn rasterize_svg(
         );
     }
     let mut pixels = vec![0u8; pixel_size as usize * pixel_size as usize * 4];
-    for (index, color) in pixmap.pixels().iter().enumerate() {
-        write_bgra(&mut pixels[index * 4..index * 4 + 4], *color);
+    let samples = (OVERSAMPLE * OVERSAMPLE) as u32;
+    for y in 0..pixel_size {
+        for x in 0..pixel_size {
+            let mut blue_sum = 0u32;
+            let mut green_sum = 0u32;
+            let mut red_sum = 0u32;
+            let mut alpha = 0u32;
+            for sample_y in 0..OVERSAMPLE {
+                for sample_x in 0..OVERSAMPLE {
+                    let source_x = x * OVERSAMPLE + sample_x;
+                    let source_y = y * OVERSAMPLE + sample_y;
+                    let color = pixmap.pixels()[(source_y * raster_size + source_x) as usize];
+                    blue_sum += color.blue() as u32;
+                    green_sum += color.green() as u32;
+                    red_sum += color.red() as u32;
+                    alpha += color.alpha() as u32;
+                }
+            }
+            let destination = (y as usize * pixel_size as usize + x as usize) * 4;
+            let coverage = ((alpha + samples / 2) / samples) as u8;
+            pixels[destination] = ((blue_sum + samples / 2) / samples) as u8;
+            pixels[destination + 1] = ((green_sum + samples / 2) / samples) as u8;
+            pixels[destination + 2] = ((red_sum + samples / 2) / samples) as u8;
+            pixels[destination + 3] = coverage;
+        }
     }
     Ok(RasterImage {
         pixels,
@@ -381,13 +416,6 @@ pub fn rasterize_svg(
         visual_width: pixel_size as f32,
         visual_height: pixel_size as f32,
     })
-}
-
-fn write_bgra(target: &mut [u8], color: PremultipliedColorU8) {
-    target[0] = color.blue();
-    target[1] = color.green();
-    target[2] = color.red();
-    target[3] = color.alpha();
 }
 
 fn parse_view_box(value: &str) -> Result<(f32, f32, f32, f32), String> {
