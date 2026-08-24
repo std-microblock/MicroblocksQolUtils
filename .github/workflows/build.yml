@@ -45,9 +45,32 @@ jobs:
       - name: Run native tests
         run: cargo test --workspace --locked
 
+  prepare-release:
+    name: Prepare tagged release
+    needs: test
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Create draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --draft \
+              --generate-notes \
+              --verify-tag
+          fi
+
   build:
     name: ${{ matrix.name }}
-    needs: test
+    needs: [test, prepare-release]
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
@@ -142,15 +165,25 @@ jobs:
           --archive ${{ matrix.artifact }}.zip
           --skip-parity
 
-      - name: Upload package
-        uses: actions/upload-artifact@v7
-        with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}.zip
-          if-no-files-found: error
-          retention-days: 14
+      - name: Verify Linux musl library
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          file Build/Code/libmicroblocks_qol_native.so
+          readelf --dyn-syms Build/Code/libmicroblocks_qol_native.so | grep -q mqol_raster_text
 
-  release:
+      - name: Upload tagged package
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release upload "$GITHUB_REF_NAME"
+          "${{ matrix.artifact }}.zip"
+          --repo "$GITHUB_REPOSITORY"
+          --clobber
+
+  publish-release:
     name: Publish tagged release
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
@@ -158,18 +191,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download packages
-        uses: actions/download-artifact@v8
-        with:
-          path: artifacts
-
-      - name: Create GitHub release
+      - name: Publish release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          mapfile -d '' packages < <(find artifacts -name '*.zip' -print0)
-          gh release create "$GITHUB_REF_NAME" "${packages[@]}" \
-            --repo "$GITHUB_REPOSITORY" \
-            --generate-notes \
-            --verify-tag
+        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
