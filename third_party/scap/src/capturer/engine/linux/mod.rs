@@ -3,9 +3,10 @@ use std::{
     sync::{
         atomic::{AtomicBool, AtomicU8},
         mpsc::{self, sync_channel, SyncSender},
+        Arc,
     },
     thread::JoinHandle,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use pipewire as pw;
@@ -39,13 +40,11 @@ use self::{error::LinCapError, portal::ScreenCastPortal};
 mod error;
 mod portal;
 
-static CAPTURER_STATE: AtomicU8 = AtomicU8::new(0);
-static STREAM_STATE_CHANGED_TO_ERROR: AtomicBool = AtomicBool::new(false);
-
 #[derive(Clone)]
 struct ListenerUserData {
     pub tx: mpsc::Sender<Frame>,
     pub format: spa::param::video::VideoInfoRaw,
+    pub error_flag: Arc<AtomicBool>,
 }
 
 fn param_changed_callback(
@@ -78,14 +77,16 @@ fn param_changed_callback(
 
 fn state_changed_callback(
     _stream: &StreamRef,
-    _user_data: &mut ListenerUserData,
+    user_data: &mut ListenerUserData,
     _old: StreamState,
     new: StreamState,
 ) {
     match new {
         StreamState::Error(e) => {
             eprintln!("pipewire: State changed to error({e})");
-            STREAM_STATE_CHANGED_TO_ERROR.store(true, std::sync::atomic::Ordering::Relaxed);
+            user_data
+                .error_flag
+                .store(true, std::sync::atomic::Ordering::Relaxed);
         }
         _ => {}
     }
@@ -122,38 +123,77 @@ fn process_callback(stream: &StreamRef, user_data: &mut ListenerUserData) {
 
             let n_datas = unsafe { (*buffer).n_datas };
             if n_datas < 1 {
-                return;
+                break 'outside;
             }
             let frame_size = user_data.format.size();
-            let frame_data: Vec<u8> = unsafe {
-                std::slice::from_raw_parts(
-                    (*(*buffer).datas).data as *mut u8,
-                    (*(*buffer).datas).maxsize as usize,
-                )
-                .to_vec()
+            let format = user_data.format.format();
+            let bytes_per_pixel = if format == VideoFormat::RGB { 3 } else { 4 };
+            let row_bytes = frame_size.width as usize * bytes_per_pixel;
+            let data = unsafe { &*(*buffer).datas };
+            if data.data.is_null() || data.chunk.is_null() {
+                break 'outside;
+            }
+            let chunk = unsafe { &*data.chunk };
+            let negative_stride = chunk.stride < 0;
+            let stride = chunk.stride.unsigned_abs() as usize;
+            let stride = if stride == 0 { row_bytes } else { stride };
+            let required = stride
+                .saturating_mul(frame_size.height.saturating_sub(1) as usize)
+                .saturating_add(row_bytes);
+            let Some(data_end) = (chunk.offset as usize).checked_add(required) else {
+                break 'outside;
+            };
+            if required > chunk.size as usize
+                || data_end > data.maxsize as usize
+                || row_bytes > stride
+            {
+                break 'outside;
+            }
+            let source = unsafe { (data.data as *const u8).add(chunk.offset as usize) };
+            let mut frame_data = Vec::with_capacity(row_bytes * frame_size.height as usize);
+            for row in 0..frame_size.height as usize {
+                let source_row = if negative_stride {
+                    frame_size.height as usize - row - 1
+                } else {
+                    row
+                };
+                let bytes = unsafe {
+                    std::slice::from_raw_parts(source.add(source_row * stride), row_bytes)
+                };
+                frame_data.extend_from_slice(bytes);
+            }
+            let timestamp = if timestamp >= 0 {
+                timestamp as u64
+            } else {
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+                    .try_into()
+                    .unwrap_or(u64::MAX)
             };
 
-            if let Err(e) = match user_data.format.format() {
+            if let Err(e) = match format {
                 VideoFormat::RGBx => user_data.tx.send(Frame::RGBx(RGBxFrame {
-                    display_time: timestamp as u64,
+                    display_time: timestamp,
                     width: frame_size.width as i32,
                     height: frame_size.height as i32,
                     data: frame_data,
                 })),
                 VideoFormat::RGB => user_data.tx.send(Frame::RGB(RGBFrame {
-                    display_time: timestamp as u64,
+                    display_time: timestamp,
                     width: frame_size.width as i32,
                     height: frame_size.height as i32,
                     data: frame_data,
                 })),
                 VideoFormat::xBGR => user_data.tx.send(Frame::XBGR(XBGRFrame {
-                    display_time: timestamp as u64,
+                    display_time: timestamp,
                     width: frame_size.width as i32,
                     height: frame_size.height as i32,
                     data: frame_data,
                 })),
                 VideoFormat::BGRx => user_data.tx.send(Frame::BGRx(BGRxFrame {
-                    display_time: timestamp as u64,
+                    display_time: timestamp,
                     width: frame_size.width as i32,
                     height: frame_size.height as i32,
                     data: frame_data,
@@ -176,6 +216,8 @@ fn pipewire_capturer(
     tx: mpsc::Sender<Frame>,
     ready_sender: &SyncSender<bool>,
     stream_id: u32,
+    state: Arc<AtomicU8>,
+    error_flag: Arc<AtomicBool>,
 ) -> Result<(), LinCapError> {
     pw::init();
 
@@ -186,6 +228,7 @@ fn pipewire_capturer(
     let user_data = ListenerUserData {
         tx,
         format: Default::default(),
+        error_flag: error_flag.clone(),
     };
 
     let stream = pw::stream::Stream::new(
@@ -216,8 +259,8 @@ fn pipewire_capturer(
             Enum,
             Id,
             pw::spa::param::video::VideoFormat::RGB,
-            pw::spa::param::video::VideoFormat::RGBA,
             pw::spa::param::video::VideoFormat::RGBx,
+            pw::spa::param::video::VideoFormat::xBGR,
             pw::spa::param::video::VideoFormat::BGRx,
         ),
         pw::spa::pod::property!(
@@ -291,16 +334,16 @@ fn pipewire_capturer(
 
     ready_sender.send(true)?;
 
-    while CAPTURER_STATE.load(std::sync::atomic::Ordering::Relaxed) == 0 {
+    while state.load(std::sync::atomic::Ordering::Relaxed) == 0 {
         std::thread::sleep(Duration::from_millis(10));
     }
 
     let pw_loop = mainloop.loop_();
 
     // User has called Capturer::start() and we start the main loop
-    while CAPTURER_STATE.load(std::sync::atomic::Ordering::Relaxed) == 1
+    while state.load(std::sync::atomic::Ordering::Relaxed) == 1
         && /* If the stream state got changed to `Error`, we exit. TODO: tell user that we exited */
-          !STREAM_STATE_CHANGED_TO_ERROR.load(std::sync::atomic::Ordering::Relaxed)
+          !error_flag.load(std::sync::atomic::Ordering::Relaxed)
     {
         pw_loop.iterate(Duration::from_millis(100));
     }
@@ -313,6 +356,8 @@ pub struct LinuxCapturer {
     // The pipewire stream is deleted when the connection is dropped.
     // That's why we keep it alive
     _connection: dbus::blocking::Connection,
+    state: Arc<AtomicU8>,
+    error_flag: Arc<AtomicBool>,
 }
 
 impl LinuxCapturer {
@@ -330,8 +375,19 @@ impl LinuxCapturer {
         // TODO: Fix this hack
         let options = options.clone();
         let (ready_sender, ready_recv) = sync_channel(1);
+        let state = Arc::new(AtomicU8::new(0));
+        let error_flag = Arc::new(AtomicBool::new(false));
+        let thread_state = state.clone();
+        let thread_error_flag = error_flag.clone();
         let capturer_join_handle = std::thread::spawn(move || {
-            let res = pipewire_capturer(options, tx, &ready_sender, stream_id);
+            let res = pipewire_capturer(
+                options,
+                tx,
+                &ready_sender,
+                stream_id,
+                thread_state,
+                thread_error_flag,
+            );
             if res.is_err() {
                 ready_sender.send(false)?;
             }
@@ -345,22 +401,25 @@ impl LinuxCapturer {
         Self {
             capturer_join_handle: Some(capturer_join_handle),
             _connection: connection,
+            state,
+            error_flag,
         }
     }
 
     pub fn start_capture(&self) {
-        CAPTURER_STATE.store(1, std::sync::atomic::Ordering::Relaxed);
+        self.state.store(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn stop_capture(&mut self) {
-        CAPTURER_STATE.store(2, std::sync::atomic::Ordering::Relaxed);
+        self.state.store(2, std::sync::atomic::Ordering::Relaxed);
         if let Some(handle) = self.capturer_join_handle.take() {
             if let Err(e) = handle.join().expect("Failed to join capturer thread") {
                 eprintln!("Error occured capturing: {e}");
             }
         }
-        CAPTURER_STATE.store(0, std::sync::atomic::Ordering::Relaxed);
-        STREAM_STATE_CHANGED_TO_ERROR.store(false, std::sync::atomic::Ordering::Relaxed);
+        self.state.store(0, std::sync::atomic::Ordering::Relaxed);
+        self.error_flag
+            .store(false, std::sync::atomic::Ordering::Relaxed);
     }
 }
 

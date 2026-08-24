@@ -10,7 +10,7 @@ use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -19,11 +19,11 @@ use thiserror::Error;
 mod dwrite_raster;
 mod raster;
 
-#[cfg(all(windows, feature = "ffmpeg"))]
+#[cfg(feature = "ffmpeg")]
 mod encoder;
-#[cfg(all(windows, feature = "ffmpeg"))]
+#[cfg(feature = "ffmpeg")]
 mod finalizer;
-#[cfg(all(windows, feature = "ffmpeg"))]
+#[cfg(feature = "ffmpeg")]
 mod finalizer_audio;
 
 const ABI_VERSION: u32 = 4;
@@ -114,7 +114,8 @@ enum CaptureError {
     WindowNotFound(String),
     #[error("scap capture is unavailable: {0}")]
     Scap(String),
-    #[error("screen capture is only available on Windows in this build")]
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+    #[error("screen capture is unavailable on this platform")]
     UnsupportedPlatform,
 }
 
@@ -439,7 +440,7 @@ impl CaptureSession {
 
         let capture_session = Arc::clone(self);
         let capture = thread::Builder::new()
-            .name("microblocks-qol-wgc".to_owned())
+            .name("microblocks-qol-capture".to_owned())
             .spawn(move || {
                 match catch_unwind(AssertUnwindSafe(|| run_capture(&capture_session))) {
                     Ok(Ok(())) => {}
@@ -527,8 +528,9 @@ impl CaptureSession {
         }
         self.stop_requested.store(true, Ordering::Release);
 
-        // A WGC window can stop producing frames while minimized. Do not block the game thread
-        // indefinitely: join only after the capture callback has observed the stop request.
+        // A platform capture source can stop producing frames while minimized or while its
+        // portal is closing. Do not block the game thread indefinitely: join only after the
+        // capture callback has observed the stop request.
         let deadline = std::time::Instant::now() + Duration::from_secs(2);
         while !self.capture_finished.load(Ordering::Acquire) && std::time::Instant::now() < deadline
         {
@@ -589,14 +591,16 @@ impl CaptureSession {
 }
 
 fn run_consumer(session: &Arc<CaptureSession>) -> Result<(), String> {
-    #[cfg(all(windows, not(feature = "ffmpeg")))]
+    #[cfg(not(feature = "ffmpeg"))]
     if session.config.output_path.is_some() {
         return Err("this native library was built without FFmpeg encoding support".to_owned());
     }
-    #[cfg(all(windows, feature = "ffmpeg"))]
+    #[cfg(feature = "ffmpeg")]
     let mut encoder = None;
     while let Some(frame) = session.queue.pop() {
-        #[cfg(all(windows, feature = "ffmpeg"))]
+        #[cfg(not(feature = "ffmpeg"))]
+        let _ = &frame;
+        #[cfg(feature = "ffmpeg")]
         if session.config.output_path.is_some() {
             if encoder.is_none() {
                 encoder = Some(
@@ -615,7 +619,7 @@ fn run_consumer(session: &Arc<CaptureSession>) -> Result<(), String> {
             .frames_consumed
             .fetch_add(1, Ordering::Relaxed);
     }
-    #[cfg(all(windows, feature = "ffmpeg"))]
+    #[cfg(feature = "ffmpeg")]
     if let Some(mut encoder) = encoder {
         encoder.finish().map_err(|error| error.to_string())?;
     }
@@ -690,19 +694,28 @@ impl Drop for CaptureSession {
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 fn run_capture(session: &Arc<CaptureSession>) -> Result<(), CaptureError> {
     use scap::capturer::{Capturer, Options, Resolution};
-    use scap::frame::{Frame, FrameType, VideoFrame};
+    use scap::frame::{Frame, FrameType};
 
-    let target = find_capture_window(&session.config)
-        .ok_or_else(|| CaptureError::WindowNotFound(session.config.window_title.clone()))?;
+    if !scap::is_supported() {
+        return Err(CaptureError::Scap(
+            "screen capture is not supported by this operating system".to_owned(),
+        ));
+    }
+    if !scap::has_permission() && !scap::request_permission() {
+        return Err(CaptureError::Scap(
+            "screen recording permission was not granted".to_owned(),
+        ));
+    }
+    let target = find_capture_target(&session.config)?;
 
     let mut capturer = Capturer::build(Options {
         fps: session.config.fps,
         show_cursor: session.config.show_cursor,
         show_highlight: false,
-        target: Some(scap::Target::Window(target)),
+        target,
         crop_area: None,
         output_type: FrameType::BGRAFrame,
         output_resolution: Resolution::Captured,
@@ -721,24 +734,15 @@ fn run_capture(session: &Arc<CaptureSession>) -> Result<(), CaptureError> {
         else {
             continue;
         };
-        let Frame::Video(VideoFrame::BGRA(frame)) = frame else {
+        let Frame::Video(frame) = frame else {
             continue;
         };
-        let captured_at_unix_nanos = frame
-            .display_time
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-            .try_into()
-            .unwrap_or(u64::MAX);
+        let Some(captured) = captured_frame(frame) else {
+            continue;
+        };
+        let captured_at_unix_nanos = captured.captured_at_unix_nanos;
         let origin = *origin_unix_nanos.get_or_insert(captured_at_unix_nanos);
         let media_time_nanos = captured_at_unix_nanos.saturating_sub(origin);
-        let captured = CapturedFrame {
-            width: frame.width.max(0) as u32,
-            height: frame.height.max(0) as u32,
-            captured_at_unix_nanos,
-            bgra: frame.data,
-        };
         session.stats.width.store(captured.width, Ordering::Relaxed);
         session
             .stats
@@ -768,6 +772,73 @@ fn run_capture(session: &Arc<CaptureSession>) -> Result<(), CaptureError> {
     Ok(())
 }
 
+#[cfg(any(windows, target_os = "macos"))]
+fn captured_frame(frame: scap::frame::VideoFrame) -> Option<CapturedFrame> {
+    let scap::frame::VideoFrame::BGRA(frame) = frame else {
+        return None;
+    };
+    Some(CapturedFrame {
+        width: frame.width.max(0) as u32,
+        height: frame.height.max(0) as u32,
+        captured_at_unix_nanos: frame
+            .display_time
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+            .try_into()
+            .unwrap_or(u64::MAX),
+        bgra: frame.data,
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn captured_frame(frame: scap::frame::VideoFrame) -> Option<CapturedFrame> {
+    use scap::frame::VideoFrame;
+
+    let (display_time, width, height, data, layout) = match frame {
+        VideoFrame::RGB(frame) => (frame.display_time, frame.width, frame.height, frame.data, 3),
+        VideoFrame::RGBx(frame) => (frame.display_time, frame.width, frame.height, frame.data, 4),
+        VideoFrame::XBGR(frame) => (frame.display_time, frame.width, frame.height, frame.data, 5),
+        VideoFrame::BGRx(frame) => (frame.display_time, frame.width, frame.height, frame.data, 6),
+        _ => return None,
+    };
+    let pixel_count = (width.max(0) as usize).checked_mul(height.max(0) as usize)?;
+    let bytes_per_pixel = if layout == 3 { 3 } else { 4 };
+    if data.len() < pixel_count.checked_mul(bytes_per_pixel)? {
+        return None;
+    }
+    let mut bgra = Vec::with_capacity(pixel_count * 4);
+    for pixel in data.chunks_exact(bytes_per_pixel).take(pixel_count) {
+        let (red, green, blue) = match layout {
+            3 | 4 => (pixel[0], pixel[1], pixel[2]),
+            5 => (pixel[3], pixel[2], pixel[1]),
+            6 => (pixel[2], pixel[1], pixel[0]),
+            _ => unreachable!(),
+        };
+        bgra.extend_from_slice(&[blue, green, red, u8::MAX]);
+    }
+    Some(CapturedFrame {
+        width: width.max(0) as u32,
+        height: height.max(0) as u32,
+        captured_at_unix_nanos: display_time,
+        bgra,
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn find_capture_target(_config: &CaptureConfig) -> Result<Option<scap::Target>, CaptureError> {
+    // The xdg-desktop-portal picker owns source selection on Linux. Passing no target is
+    // intentional and works on both Wayland and PipeWire-enabled X11 desktops.
+    Ok(None)
+}
+
+#[cfg(any(windows, target_os = "macos"))]
+fn find_capture_target(config: &CaptureConfig) -> Result<Option<scap::Target>, CaptureError> {
+    find_capture_window(config)
+        .map(|window| Some(scap::Target::Window(window)))
+        .ok_or_else(|| CaptureError::WindowNotFound(config.window_title.clone()))
+}
+
 #[cfg(windows)]
 fn find_capture_window(config: &CaptureConfig) -> Option<scap::Window> {
     use std::ffi::c_void;
@@ -795,6 +866,19 @@ fn find_capture_window(config: &CaptureConfig) -> Option<scap::Window> {
                 window.title == config.window_title || window.title.contains(&config.window_title)
             })
     })
+}
+
+#[cfg(target_os = "macos")]
+fn find_capture_window(config: &CaptureConfig) -> Option<scap::Window> {
+    scap::get_all_targets()
+        .into_iter()
+        .filter_map(|target| match target {
+            scap::Target::Window(window) => Some(window),
+            scap::Target::Display(_) => None,
+        })
+        .find(|window| {
+            window.title == config.window_title || window.title.contains(&config.window_title)
+        })
 }
 
 #[cfg(windows)]
@@ -861,7 +945,7 @@ fn find_current_process_window(title: &str) -> Option<scap::Window> {
         })
 }
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
 fn run_capture(_session: &Arc<CaptureSession>) -> Result<(), CaptureError> {
     Err(CaptureError::UnsupportedPlatform)
 }
@@ -1110,7 +1194,7 @@ pub unsafe extern "C" fn mqol_recording_finalize_with_progress(
     progress_context: *mut c_void,
 ) -> i32 {
     ffi_status(|| {
-        #[cfg(all(windows, feature = "ffmpeg"))]
+        #[cfg(feature = "ffmpeg")]
         {
             // SAFETY: The exported ABI requires a readable UTF-8 buffer for this call.
             let json = unsafe { utf8_from_raw(plan_json, plan_length)? };
@@ -1130,7 +1214,7 @@ pub unsafe extern "C" fn mqol_recording_finalize_with_progress(
             })?;
             Ok(OK)
         }
-        #[cfg(not(all(windows, feature = "ffmpeg")))]
+        #[cfg(not(feature = "ffmpeg"))]
         {
             let _ = (plan_json, plan_length, progress, progress_context);
             set_last_error("native FFmpeg finalization is unavailable in this build");

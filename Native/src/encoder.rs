@@ -19,7 +19,7 @@ pub enum EncoderError {
         path: PathBuf,
         source: std::io::Error,
     },
-    #[error("no usable H.264 encoder was found; tried {0}")]
+    #[error("no usable video encoder was found; tried {0}")]
     NoEncoder(String),
     #[error("cannot create FFmpeg output {path}: {source}")]
     CreateOutput {
@@ -322,6 +322,7 @@ pub(crate) fn even_dimension(value: u32) -> u32 {
 }
 
 pub(crate) fn encoder_candidates(preferred: &str) -> Vec<&str> {
+    #[cfg(windows)]
     const AUTOMATIC: [&str; 5] = [
         "h264_nvenc",
         "h264_qsv",
@@ -329,6 +330,12 @@ pub(crate) fn encoder_candidates(preferred: &str) -> Vec<&str> {
         "h264_mf",
         "libopenh264",
     ];
+    #[cfg(target_os = "macos")]
+    const AUTOMATIC: [&str; 2] = ["h264_videotoolbox", "mpeg4"];
+    #[cfg(target_os = "linux")]
+    const AUTOMATIC: [&str; 2] = ["h264_v4l2m2m", "mpeg4"];
+    #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
+    const AUTOMATIC: [&str; 1] = ["mpeg4"];
     let mut result = Vec::with_capacity(AUTOMATIC.len() + 1);
     let mut seen = HashSet::new();
     let preferred = preferred.trim();
@@ -345,7 +352,7 @@ pub(crate) fn encoder_candidates(preferred: &str) -> Vec<&str> {
 }
 
 pub(crate) fn pixel_format_for_encoder(name: &str) -> ffmpeg::format::Pixel {
-    if name.eq_ignore_ascii_case("libopenh264") {
+    if name.eq_ignore_ascii_case("libopenh264") || name.eq_ignore_ascii_case("mpeg4") {
         ffmpeg::format::Pixel::YUV420P
     } else {
         ffmpeg::format::Pixel::NV12
@@ -382,7 +389,12 @@ mod tests {
 
     #[test]
     fn automatic_encoder_order_honors_preference_without_duplicates() {
+        #[cfg(windows)]
         assert_eq!(encoder_candidates("auto")[0], "h264_nvenc");
+        #[cfg(target_os = "macos")]
+        assert_eq!(encoder_candidates("auto")[0], "h264_videotoolbox");
+        #[cfg(target_os = "linux")]
+        assert_eq!(encoder_candidates("auto")[0], "h264_v4l2m2m");
         let candidates = encoder_candidates("h264_mf");
         assert_eq!(candidates[0], "h264_mf");
         assert_eq!(
