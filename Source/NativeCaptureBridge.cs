@@ -1,6 +1,8 @@
 using System.Reflection;
 using System.Diagnostics;
+using System.IO.Compression;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Monocle;
@@ -16,6 +18,17 @@ public static class NativeCaptureBridge {
     private static string? loadError;
 
     public static bool Available => nativeHandle != IntPtr.Zero;
+
+    public static void InitializeFromMod(EverestModuleMetadata metadata) {
+        ArgumentNullException.ThrowIfNull(metadata);
+        try {
+            Initialize(ResolveModNativeDirectory(metadata));
+        } catch (Exception exception) {
+            loadError = $"cannot prepare the native runtime from the mod archive: {exception}";
+            Logger.Log(LogLevel.Error, "MicroblocksQolUtils/Recorder", loadError);
+            Initialize(null);
+        }
+    }
 
     public static void Initialize(string? nativeDirectory) {
         if (resolverInstalled) return;
@@ -205,6 +218,69 @@ public static class NativeCaptureBridge {
                 : "libmicroblocks_qol_native.so";
         string path = Path.Combine(directory, fileName);
         return File.Exists(path) ? Path.GetFullPath(path) : null;
+    }
+
+    private static string? ResolveModNativeDirectory(EverestModuleMetadata metadata) {
+        if (!string.IsNullOrWhiteSpace(metadata.PathDirectory)) {
+            if (Path.IsPathRooted(metadata.DLL)) return Path.GetDirectoryName(metadata.DLL);
+            string relativeDirectory = Path.GetDirectoryName(metadata.DLL) ?? "";
+            return Path.GetFullPath(Path.Combine(metadata.PathDirectory, relativeDirectory));
+        }
+        if (string.IsNullOrWhiteSpace(metadata.PathArchive)) return null;
+        return ExtractNativeRuntime(metadata.PathArchive, metadata.DLL);
+    }
+
+    private static string ExtractNativeRuntime(string archivePath, string managedDllPath) {
+        archivePath = Path.GetFullPath(archivePath);
+        string hash;
+        using (FileStream stream = File.OpenRead(archivePath)) {
+            hash = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+        }
+
+        string output = Path.Combine(Everest.Loader.PathCache, "MicroblocksQolUtils", "native", hash);
+        string nativeFileName = OperatingSystem.IsWindows()
+            ? "microblocks_qol_native.dll"
+            : OperatingSystem.IsMacOS()
+                ? "libmicroblocks_qol_native.dylib"
+                : "libmicroblocks_qol_native.so";
+        string nativeOutput = Path.Combine(output, nativeFileName);
+        string completeMarker = Path.Combine(output, ".complete");
+        if (File.Exists(nativeOutput) && File.Exists(completeMarker)) return output;
+
+        string entryDirectory = (Path.GetDirectoryName(managedDllPath) ?? "")
+            .Replace('\\', '/')
+            .Trim('/');
+        string entryPrefix = entryDirectory.Length == 0 ? "" : entryDirectory + "/";
+        string nativeEntryPath = entryPrefix + nativeFileName;
+        string staging = output + ".tmp-" + Guid.NewGuid().ToString("N");
+        Directory.CreateDirectory(staging);
+        try {
+            bool foundNativeLibrary = false;
+            using (ZipArchive archive = ZipFile.OpenRead(archivePath)) {
+                foreach (ZipArchiveEntry entry in archive.Entries) {
+                    string entryPath = entry.FullName.Replace('\\', '/').TrimStart('/');
+                    if (!entryPath.StartsWith(entryPrefix, StringComparison.Ordinal)
+                        || entryPath[entryPrefix.Length..].Contains('/')) continue;
+                    string fileName = Path.GetFileName(entryPath);
+                    if (fileName.Length == 0) continue;
+                    using Stream source = entry.Open();
+                    using FileStream destination = File.Create(Path.Combine(staging, fileName));
+                    source.CopyTo(destination);
+                    foundNativeLibrary |= string.Equals(entryPath, nativeEntryPath, StringComparison.Ordinal);
+                }
+            }
+            if (!foundNativeLibrary)
+                throw new FileNotFoundException($"{nativeEntryPath} was not found in {archivePath}");
+            File.WriteAllText(Path.Combine(staging, ".complete"), hash, Encoding.UTF8);
+
+            if (Directory.Exists(output)) Directory.Delete(output, recursive: true);
+            Directory.Move(staging, output);
+            Logger.Log(LogLevel.Info, "MicroblocksQolUtils/Recorder",
+                $"Extracted native runtime from {archivePath} to {output}");
+            return output;
+        } finally {
+            if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true);
+        }
     }
 
     internal static CaptureStatistics GetStats(ulong handle) {

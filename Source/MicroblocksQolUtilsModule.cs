@@ -29,7 +29,7 @@ public sealed class MicroblocksQolUtilsModule : EverestModule {
         QolPauseMenu.Load();
         MaterialAcrylicRenderer.Load();
         MaterialUiSmoke.Load();
-        NativeCaptureBridge.Initialize(Path.GetDirectoryName(Metadata.DLL));
+        NativeCaptureBridge.InitializeFromMod(Metadata);
         NativeCaptureSmoke.Load();
         FrameProfiler.Load();
         CollisionBoxRenderer.Load();
