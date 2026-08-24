@@ -118,8 +118,7 @@ public static class AutoRecorder {
 
     public static void Update(Level level) {
         QolSettings settings = MicroblocksQolUtilsModule.Settings;
-        if ((!settings.AutoRecorderEnabled && !settings.DeathReplayEnabled && !manualMode)
-            || !OperatingSystem.IsWindows()) {
+        if (!settings.AutoRecorderEnabled && !settings.DeathReplayEnabled && !manualMode) {
             if (current is not null || deathReplayCurrent is not null || runKey.Length > 0)
                 StopAndReset(deleteSource: true);
             return;
@@ -211,7 +210,6 @@ public static class AutoRecorder {
     }
 
     public static void StartManual() {
-        if (!OperatingSystem.IsWindows()) return;
         manualMode = true;
     }
 

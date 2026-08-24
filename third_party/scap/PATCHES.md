@@ -24,3 +24,9 @@ therefore cannot find the game window through `get_all_targets()`.
 The capturer exposes a timeout-based frame read. Upstream's blocking
 `get_next_frame()` cannot observe a recorder stop request while a window is
 static or minimized, so the mod polls at 100 ms and shuts down deterministically.
+
+The Linux backend keeps capture/error state per `LinuxCapturer` instead of in
+process-wide statics, allowing the full-recording and death-replay sessions to run
+independently. PipeWire rows are copied using the negotiated stride and converted
+from their negotiated RGB layout by the native recorder instead of treating a
+padded `spa_buffer` as tightly packed pixels.

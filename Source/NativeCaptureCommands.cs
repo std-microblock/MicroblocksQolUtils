@@ -5,7 +5,7 @@ namespace Celeste.Mod.MicroblocksQolUtils;
 public static class NativeCaptureCommands {
     private static NativeCaptureSession? probe;
 
-    [Command("qol_capture_probe_start", "Start the native scap/WGC capture probe")]
+    [Command("qol_capture_probe_start", "Start the native platform capture probe")]
     public static void Start() {
         probe?.Dispose();
         probe = NativeCaptureBridge.Start(
@@ -14,7 +14,7 @@ public static class NativeCaptureCommands {
         Engine.Commands.Log("Native scap capture probe started.");
     }
 
-    [Command("qol_capture_probe_stats", "Show native scap/WGC capture statistics")]
+    [Command("qol_capture_probe_stats", "Show native platform capture statistics")]
     public static void Stats() {
         if (probe is null) {
             Engine.Commands.Log("Native capture probe is not running.");
@@ -29,7 +29,7 @@ public static class NativeCaptureCommands {
         );
     }
 
-    [Command("qol_capture_probe_stop", "Stop the native scap/WGC capture probe")]
+    [Command("qol_capture_probe_stop", "Stop the native platform capture probe")]
     public static void Stop() {
         probe?.Dispose();
         probe = null;

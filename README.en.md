@@ -74,9 +74,14 @@ while Celeste is not the foreground application.
 
 ### Recording and death replays
 
-Recording requires the Windows native backend. It captures the game window through
-WGC/scap, does not launch ffmpeg.exe, and does not use a managed frame buffer or
-subprocess.
+Recording is available in the Windows, Linux, and macOS native backends. Windows
+uses WGC, macOS uses ScreenCaptureKit, and Linux uses
+xdg-desktop-portal/PipeWire. Runtime capture does not launch an ffmpeg executable,
+use a managed frame buffer, or create a subprocess.
+
+macOS asks for Screen & System Audio Recording permission on first use. Linux
+shows the desktop portal source picker; select the Celeste window or its display.
+The portal path works on Wayland and PipeWire-enabled X11 desktops.
 
 - Automatic recording can cover every room or only runs carrying a golden berry.
 - Manual recording can be started, saved, and discarded from the settings page or
@@ -94,8 +99,10 @@ subprocess.
   %USERPROFILE%\Videos\Celeste\microblocks-qol-recordings. It can be changed in
   settings. Completed files are stored under full/<area> and deaths/<area>;
   each MP4 also has a .timeline.json sidecar.
-- Video uses H.264 and audio uses AAC. Frame rate, bitrate, encoder preference,
-  UI SFX capture, and retention limits are configurable.
+- Video prefers the platform H.264 encoder (Media Foundation on Windows and
+  VideoToolbox on macOS). Linux falls back to MPEG-4 Part 2 in the MP4 container
+  when no directly usable H.264 encoder is available. Audio uses AAC. Frame rate,
+  bitrate, encoder preference, UI SFX capture, and retention limits are configurable.
 - FMOD DSP taps capture gameplay_sfx, music, and optional ui_sfx. Chunks are
   streamed to an .sfxchunks sidecar and mixed during finalization against the
   same video timeline instead of buffering an entire run in memory.
@@ -142,7 +149,7 @@ qol_record_discard
 qol_record_status
 ~~~
 
-The capture probe is for development diagnostics: it reports WGC/scap capture,
+The capture probe is for development diagnostics: it reports platform scap capture,
 queue depth, dropped frames, and media time without enabling normal recording.
 
 ## Build and install
@@ -162,8 +169,13 @@ requires:
 - MSYS2 with GNU make, Perl, and NASM;
 - tar.
 
-The repository script builds the managed mod, native rasterizer, Windows
-capture/recording backend, and writes Build plus MicroblocksQolUtils.zip:
+A complete Linux build also needs Clang/libclang, GNU make, pkg-config, and the
+PipeWire and D-Bus development packages. A complete macOS build needs Xcode
+Command Line Tools. Every platform builds a verified FFmpeg 8.1 source archive
+into the minimal LGPL shared runtime packaged with the mod.
+
+The repository script builds the managed mod, native rasterizer, and the current
+platform's capture/recording backend, then writes Build plus MicroblocksQolUtils.zip:
 
 ~~~powershell
 node scripts/build-qol-mod.mjs
@@ -187,17 +199,15 @@ Targets used by CI can be selected explicitly:
 
 ~~~powershell
 node scripts/build-qol-mod.mjs --target x86_64-pc-windows-msvc
-node scripts/build-qol-mod.mjs --target x86_64-unknown-linux-musl
+node scripts/build-qol-mod.mjs --target x86_64-unknown-linux-gnu
 node scripts/build-qol-mod.mjs --target x86_64-apple-darwin
 ~~~
 
-Linux and macOS packages include the portable font/icon rasterizer, while
-Windows-only capture, recording, and Windows notifications report themselves as
-unavailable. The Windows build downloads and verifies the FFmpeg 8.1 source, then
-builds a minimal LGPL shared runtime containing only the codecs and formats used
-by this project; it never packages or invokes ffmpeg.exe.
+Windows, Linux, and macOS packages all include recording and their FFmpeg shared
+runtime. Only Windows system notifications remain platform-specific. Runtime code
+does not package or invoke an ffmpeg executable.
 
-GitHub Actions runs Rust formatting/tests and builds Windows x64, Linux x64 musl,
+GitHub Actions runs Rust formatting/tests and builds Windows x64, Linux x64,
 and macOS x64 packages. Every commit pushed to master updates the nightly
 pre-release and its three platform archives; tags matching v* publish the same
 archives as a versioned release.

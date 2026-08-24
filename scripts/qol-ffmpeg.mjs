@@ -19,12 +19,16 @@ import { pipeline } from "node:stream/promises";
 const ffmpegVersion = "8.1";
 const archiveName = `ffmpeg-${ffmpegVersion}.tar.xz`;
 const extractedName = `ffmpeg-${ffmpegVersion}`;
-const buildName = `ffmpeg-${ffmpegVersion}-qol-minimal`;
-const buildId = "ffmpeg-8.1-qol-minimal-v2";
+const buildName = process.platform === "win32"
+  ? `ffmpeg-${ffmpegVersion}-qol-minimal`
+  : `ffmpeg-${ffmpegVersion}-qol-minimal-${process.platform}-${process.arch}`;
+const buildId = process.platform === "win32"
+  ? "ffmpeg-8.1-qol-minimal-v2"
+  : `ffmpeg-8.1-qol-minimal-v3-${process.platform}-${process.arch}`;
 const sourceUrl = `https://ffmpeg.org/releases/${archiveName}`;
 const sourceDigest = "sha256:b072aed6871998cce9b36e7774033105ca29e33632be5b6347f3206898e0756a";
 const requiredLibraries = ["avcodec", "avformat", "avutil", "swresample", "swscale"];
-const requiredDlls = [
+const windowsRuntimeLibraries = [
   "avcodec-62.dll",
   "avformat-62.dll",
   "avutil-60.dll",
@@ -32,9 +36,7 @@ const requiredDlls = [
   "swscale-9.dll",
 ];
 
-const configureArguments = [
-  "--toolchain=msvc",
-  "--cc=clang-cl",
+const commonConfigureArguments = [
   "--enable-shared",
   "--disable-static",
   "--disable-everything",
@@ -51,19 +53,40 @@ const configureArguments = [
   "--enable-avutil",
   "--enable-swscale",
   "--enable-swresample",
-  "--enable-mediafoundation",
-  "--enable-d3d11va",
   "--enable-protocol=file",
   "--enable-demuxer=mov,matroska,ogg,flac,mp3,wav,aac",
   "--enable-muxer=mov,mp4,ipod,matroska",
-  "--enable-decoder=h264,aac,alac,flac,vorbis,opus,mp3,mp3float,pcm_u8,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_f64le",
-  "--enable-encoder=aac,h264_mf",
-  "--enable-parser=h264,aac,flac,mpegaudio,vorbis,opus",
-  "--x86asmexe=nasm",
+  "--enable-decoder=h264,mpeg4,aac,alac,flac,vorbis,opus,mp3,mp3float,pcm_u8,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_f64le",
+  "--enable-parser=h264,mpeg4video,aac,flac,mpegaudio,vorbis,opus",
 ];
 
+const configureArguments = process.platform === "win32"
+  ? [
+      "--toolchain=msvc",
+      "--cc=clang-cl",
+      ...commonConfigureArguments,
+      "--enable-mediafoundation",
+      "--enable-d3d11va",
+      "--enable-encoder=aac,h264_mf",
+      "--x86asmexe=nasm",
+    ]
+  : process.platform === "darwin"
+    ? [
+        ...commonConfigureArguments,
+        "--disable-x86asm",
+        "--enable-videotoolbox",
+        "--enable-audiotoolbox",
+        "--enable-encoder=aac,h264_videotoolbox,mpeg4",
+        "--install-name-dir=@rpath",
+      ]
+    : [
+        ...commonConfigureArguments,
+        "--disable-x86asm",
+        "--enable-encoder=aac,mpeg4",
+      ];
+
 export async function ensureQolFfmpeg(root) {
-  if (process.platform !== "win32") return null;
+  if (!["win32", "darwin", "linux"].includes(process.platform)) return null;
   const cache = resolve(root, ".cache", "ffmpeg");
   const archive = resolve(cache, archiveName);
   const source = resolve(cache, extractedName);
@@ -91,9 +114,11 @@ export async function ensureQolFfmpeg(root) {
   removeWithin(cache, output);
   mkdirSync(output, { recursive: true });
   buildMinimalFfmpeg(root, cache, source, output);
-  mkdirSync(resolve(output, "lib"), { recursive: true });
-  for (const library of requiredLibraries) {
-    copyFileSync(resolve(output, "bin", `${library}.lib`), resolve(output, "lib", `${library}.lib`));
+  if (process.platform === "win32") {
+    mkdirSync(resolve(output, "lib"), { recursive: true });
+    for (const library of requiredLibraries) {
+      copyFileSync(resolve(output, "bin", `${library}.lib`), resolve(output, "lib", `${library}.lib`));
+    }
   }
   copyFileSync(resolve(source, "COPYING.LGPLv2.1"), resolve(output, "LICENSE.txt"));
   writeFileSync(
@@ -107,6 +132,29 @@ export async function ensureQolFfmpeg(root) {
 
 export function findLibclangDirectory() {
   if (process.env.LIBCLANG_PATH) return process.env.LIBCLANG_PATH;
+  if (process.platform !== "win32") {
+    const llvmConfig = spawnSync("llvm-config", ["--libdir"], { encoding: "utf8" });
+    const directory = llvmConfig.status === 0 ? llvmConfig.stdout.trim() : "";
+    if (directory) return directory;
+    const xcrun = process.platform === "darwin"
+      ? spawnSync("xcrun", ["--find", "clang"], { encoding: "utf8" })
+      : null;
+    const xcodeClang = xcrun?.status === 0 ? xcrun.stdout.trim() : "";
+    const llvmDirectories = existsSync("/usr/lib")
+      ? readdirSync("/usr/lib")
+        .filter((name) => /^llvm-\d+$/u.test(name))
+        .map((name) => resolve("/usr/lib", name, "lib"))
+      : [];
+    for (const candidate of [
+      ...llvmDirectories,
+      xcodeClang ? resolve(dirname(xcodeClang), "..", "lib") : "",
+      "/opt/homebrew/opt/llvm/lib",
+      "/usr/local/opt/llvm/lib",
+    ]) {
+      if (existsSync(candidate)) return candidate;
+    }
+    return "";
+  }
   for (const executable of ["libclang.dll", "clang.exe"]) {
     const found = findOnPath(executable);
     if (found) return dirname(found);
@@ -135,6 +183,10 @@ async function ensureSourceArchive(archive) {
 }
 
 function buildMinimalFfmpeg(root, cache, source, output) {
+  if (process.platform !== "win32") {
+    buildMinimalFfmpegUnix(source, output);
+    return;
+  }
   const visualStudio = findVisualStudio();
   const vcvars = resolve(visualStudio, "VC", "Auxiliary", "Build", "vcvars64.bat");
   const msvcBin = findMsvcBin(visualStudio);
@@ -203,9 +255,30 @@ function buildMinimalFfmpeg(root, cache, source, output) {
   if (build.status !== 0) throw new Error(`Cannot build minimal FFmpeg runtime (exit ${build.status})`);
 }
 
+function buildMinimalFfmpegUnix(source, output) {
+  const jobs = Math.max(1, Math.min(8, cpus().length));
+  spawnSync("make", ["distclean"], { cwd: source, stdio: "ignore" });
+  const configure = spawnSync(resolve(source, "configure"), [
+    `--prefix=${output}`,
+    ...configureArguments,
+  ], { cwd: source, stdio: "inherit" });
+  if (configure.status !== 0) throw new Error(`Cannot configure minimal FFmpeg (exit ${configure.status})`);
+  const build = spawnSync("make", [`-j${jobs}`], { cwd: source, stdio: "inherit" });
+  if (build.status !== 0) throw new Error(`Cannot build minimal FFmpeg (exit ${build.status})`);
+  const install = spawnSync("make", ["install"], { cwd: source, stdio: "inherit" });
+  if (install.status !== 0) throw new Error(`Cannot install minimal FFmpeg (exit ${install.status})`);
+}
+
 function complete(root) {
-  return requiredDlls.every((name) => existsSync(resolve(root, "bin", name)))
-    && requiredLibraries.every((name) => existsSync(resolve(root, "lib", `${name}.lib`)))
+  const libraries = runtimeLibraries(root).map((path) => path.split(/[\\/]/u).at(-1));
+  return requiredLibraries.every((library) => libraries.some((name) =>
+    process.platform === "win32"
+      ? name?.startsWith(`${library}-`) && name.endsWith(".dll")
+      : process.platform === "darwin"
+        ? name === `lib${library}.dylib` || name?.startsWith(`lib${library}.`) && name.endsWith(".dylib")
+        : name === `lib${library}.so` || name?.startsWith(`lib${library}.so.`)))
+    && (process.platform !== "win32"
+      || requiredLibraries.every((name) => existsSync(resolve(root, "lib", `${name}.lib`))))
     && existsSync(resolve(root, "include", "libavcodec", "avcodec.h"))
     && existsSync(resolve(root, "LICENSE.txt"));
 }
@@ -215,9 +288,27 @@ function ffmpegLayout(root) {
     root,
     bin: resolve(root, "bin"),
     license: resolve(root, "LICENSE.txt"),
-    dlls: requiredDlls.map((name) => resolve(root, "bin", name)),
+    runtimeLibraries: runtimeLibraries(root),
     digest: sourceDigest,
   };
+}
+
+function runtimeLibraries(root) {
+  if (process.platform === "win32") {
+    return windowsRuntimeLibraries
+      .map((name) => resolve(root, "bin", name))
+      .filter(existsSync);
+  }
+  const directory = resolve(root, "lib");
+  if (!existsSync(directory)) return [];
+  return readdirSync(directory)
+    .filter((name) => requiredLibraries.some((library) => {
+      if (process.platform === "darwin") {
+        return new RegExp(`^lib${library}\\.\\d+\\.dylib$`, "u").test(name);
+      }
+      return new RegExp(`^lib${library}\\.so\\.\\d+$`, "u").test(name);
+    }))
+    .map((name) => resolve(directory, name));
 }
 
 function findVisualStudio() {
@@ -278,7 +369,8 @@ function findLlvmBin() {
 
 function findOnPath(name) {
   if (!name) return null;
-  const where = spawnSync("where.exe", [name], { encoding: "utf8", windowsHide: true });
+  const command = process.platform === "win32" ? "where.exe" : "which";
+  const where = spawnSync(command, [name], { encoding: "utf8", windowsHide: true });
   if (where.status !== 0) return null;
   return where.stdout.split(/\r?\n/u).find(Boolean)?.trim() ?? null;
 }

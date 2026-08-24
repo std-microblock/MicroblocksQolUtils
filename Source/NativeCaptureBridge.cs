@@ -65,11 +65,12 @@ public static class NativeCaptureBridge {
         int bitrateKbps
     ) {
         EnsureAvailable();
-        ulong windowHandle = ResolveGameWindowHandle();
-        if (windowHandle == 0)
+        ulong windowHandle = OperatingSystem.IsWindows() ? ResolveGameWindowHandle() : 0;
+        if (OperatingSystem.IsWindows() && windowHandle == 0)
             throw new InvalidOperationException("Celeste HWND is not available yet");
+        string windowTitle = OperatingSystem.IsWindows() ? "" : "Celeste";
         byte[] json = JsonSerializer.SerializeToUtf8Bytes(new {
-            window_title = "",
+            window_title = windowTitle,
             fps,
             queue_capacity = queueCapacity,
             show_cursor = false,

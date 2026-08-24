@@ -13,7 +13,7 @@ permissions:
 
 concurrency:
   group: build-${{ github.ref }}
-  # Nightly Windows builds populate the FFmpeg cache. Cancelling an older run
+  # Nightly builds populate the per-platform FFmpeg caches. Cancelling an older run
   # before its post-job cache save makes every following commit rebuild FFmpeg.
   cancel-in-progress: false
 
@@ -35,6 +35,11 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
           rustup component add rustfmt
+
+      - name: Install Linux capture dependencies
+        run: >-
+          sudo apt-get update && sudo apt-get install -y
+          clang libclang-dev libdbus-1-dev libpipewire-0.3-dev pkg-config
 
       - name: Cache Cargo
         uses: actions/cache@v6
@@ -134,10 +139,10 @@ jobs:
             runner: windows-2022
             target: x86_64-pc-windows-msvc
             artifact: MicroblocksQolUtils-windows-x64
-          - name: Linux x64 (musl)
-            runner: ubuntu-24.04
-            target: x86_64-unknown-linux-musl
-            artifact: MicroblocksQolUtils-linux-x64-musl
+          - name: Linux x64
+            runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact: MicroblocksQolUtils-linux-x64
           - name: macOS x64
             runner: macos-15-intel
             target: x86_64-apple-darwin
@@ -173,15 +178,17 @@ jobs:
           key: cargo-${{ matrix.target }}-${{ hashFiles('Cargo.lock') }}
 
       - name: Cache minimal FFmpeg build
-        if: runner.os == 'Windows' && needs.prepare-release.outputs.publish == 'true'
+        if: needs.prepare-release.outputs.publish == 'true'
         uses: actions/cache@v6
         with:
           path: .cache/ffmpeg
-          key: ffmpeg-windows-x64-${{ hashFiles('scripts/qol-ffmpeg.mjs') }}
+          key: ffmpeg-${{ matrix.target }}-${{ hashFiles('scripts/qol-ffmpeg.mjs') }}
 
       - name: Install Linux build tools
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y musl-tools unzip zip
+        run: >-
+          sudo apt-get update && sudo apt-get install -y
+          clang libclang-dev libdbus-1-dev libpipewire-0.3-dev make pkg-config xz-utils unzip zip
 
       - name: Install Windows build tools
         if: runner.os == 'Windows' && needs.prepare-release.outputs.publish == 'true'
@@ -218,9 +225,9 @@ jobs:
           node scripts/build-qol-mod.mjs
           --target ${{ matrix.target }}
           --archive ${{ matrix.artifact }}.zip
-          ${{ runner.os == 'Windows' && needs.prepare-release.outputs.publish != 'true' && '--no-ffmpeg' || '' }}
+          ${{ needs.prepare-release.outputs.publish != 'true' && '--no-ffmpeg' || '' }}
 
-      - name: Verify Linux musl library
+      - name: Verify Linux library
         if: runner.os == 'Linux'
         shell: bash
         run: |

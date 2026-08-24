@@ -8,7 +8,7 @@ internal static class NativeCaptureSmoke {
 
     public static void Load() {
         string? configured = Environment.GetEnvironmentVariable(OutputVariable);
-        if (string.IsNullOrWhiteSpace(configured) || !OperatingSystem.IsWindows()) return;
+        if (string.IsNullOrWhiteSpace(configured)) return;
         string output = Path.GetFullPath(configured);
         cancellation = new CancellationTokenSource();
         _ = RunAsync(output, cancellation.Token);

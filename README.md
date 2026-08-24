@@ -64,8 +64,13 @@ Windows 下，关注的玩家换房间且 Celeste 不在前台时，会发送系
 
 ### 录制与死亡回放
 
-录制功能只在 Windows native backend 可用。它使用窗口句柄进行 WGC/scap 捕获，
-不会启动 ffmpeg.exe，也不会使用托管帧缓冲或子进程。
+录制功能支持 Windows、Linux 和 macOS native backend。Windows 使用 WGC，macOS
+使用 ScreenCaptureKit，Linux 使用 xdg-desktop-portal/PipeWire；不会启动 ffmpeg
+可执行文件，也不会使用托管帧缓冲或子进程。
+
+macOS 首次使用时需要授予 Celeste“屏幕与系统录音”权限。Linux 会显示桌面门户的
+共享选择器，请选择 Celeste 窗口或其所在屏幕；Wayland 和支持 PipeWire 的 X11
+桌面都走同一套门户接口。
 
 - 自动录制策略：每个房间都录制，或只录制携带金草莓的 run。
 - 控制台和设置页都支持手动录制、保存和丢弃。
@@ -78,7 +83,9 @@ Windows 下，关注的玩家换房间且 Celeste 不在前台时，会发送系
 - 输出默认位于 %USERPROFILE%\Videos\Celeste\microblocks-qol-recordings，
   也可以在设置中指定目录。录像分别放在 full/<区域> 和 deaths/<区域>；
   每个完成的 MP4 旁边会有 .timeline.json 时间线文件。
-- 视频默认使用 H.264，音频使用 AAC。可以选择录制 UI 音效、帧率、码率和编码器，
+- 视频优先使用平台 H.264 编码器（Windows Media Foundation、macOS
+  VideoToolbox）；Linux 在没有可直接使用的 H.264 编码器时回退到 MP4 中的
+  MPEG-4 Part 2。音频使用 AAC。可以选择录制 UI 音效、帧率、码率和编码器，
   并设置完整录像/死亡回放的保留数量或立即清理旧录像。
 - 音频通过 FMOD DSP tap 采集 gameplay_sfx、music 和可选的 ui_sfx。
   音频块写入 .sfxchunks sidecar，最终化时按视频剪辑时间线混音，不把整段音频
@@ -124,7 +131,7 @@ qol_record_discard
 qol_record_status
 ~~~
 
-前三个命令用于开发时检查 WGC/scap 捕获、队列深度、丢帧和媒体时长，
+前三个命令用于开发时检查平台 scap 捕获、队列深度、丢帧和媒体时长，
 不会自动开启正常录制。
 
 ## 构建与安装
@@ -143,8 +150,12 @@ Windows 下如果要构建完整录制后端，还需要：
 - MSYS2、GNU make、Perl 和 NASM；
 - tar。
 
-仓库的入口脚本会构建 managed mod、native rasterizer、Windows capture/recording
-backend，并生成 Build 和 MicroblocksQolUtils.zip：
+Linux 完整构建还需要 Clang/libclang、GNU make、pkg-config、PipeWire 和 D-Bus
+开发包；macOS 完整构建需要 Xcode Command Line Tools。各平台都会从已校验的
+FFmpeg 8.1 源码构建并随包附带最小 LGPL shared runtime。
+
+仓库的入口脚本会构建 managed mod、native rasterizer、当前平台的
+capture/recording backend，并生成 Build 和 MicroblocksQolUtils.zip：
 
 ~~~powershell
 node scripts/build-qol-mod.mjs
@@ -168,21 +179,16 @@ node scripts/build-qol-mod.mjs --install
 
 ~~~powershell
 node scripts/build-qol-mod.mjs --target x86_64-pc-windows-msvc
-node scripts/build-qol-mod.mjs --target x86_64-unknown-linux-musl
+node scripts/build-qol-mod.mjs --target x86_64-unknown-linux-gnu
 node scripts/build-qol-mod.mjs --target x86_64-apple-darwin
 ~~~
 
-Linux 和 macOS 包含可移植的字体/图标 rasterizer，但 Windows 专用的窗口捕获、
-录制和 Windows 通知等功能会报告不可用。Windows 构建脚本会下载并校验 FFmpeg
-8.1 源码，然后构建只包含本项目需要的 LGPL shared runtime；不会打包或调用
-ffmpeg.exe。
+Windows、Linux 和 macOS 包都包含录制后端及其 FFmpeg shared runtime；只有
+Windows 系统通知仍是平台专用功能。运行时不会打包或调用 ffmpeg 可执行文件。
 
-GitHub Actions ??? Rust ??????????? Windows x64?Linux x64 musl
-? macOS x64 ????? master ????????? nightly ?????????
-????v* ???????????????????
-
-GitHub Actions 会运行 Rust 格式检查和测试，并构建 Windows x64、Linux x64 musl
-和 macOS x64 包。v* 标签会发布这些构建产物。
+GitHub Actions 会运行 Rust 格式检查和测试，并构建 Windows x64、Linux x64
+和 macOS x64 包。master 的每个提交会更新 nightly 预发布，v* 标签会发布相同的
+三个平台构建产物。
 
 ## 依赖说明
 

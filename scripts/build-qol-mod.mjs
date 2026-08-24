@@ -1,5 +1,5 @@
-import { cpSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
+import { copyFileSync, cpSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
+import { basename, delimiter, dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { ensureQolFfmpeg, findLibclangDirectory } from "./qol-ffmpeg.mjs";
 
@@ -44,17 +44,26 @@ const run = (command, args, env = process.env) => {
   if (result.status !== 0) process.exit(result.status ?? 1);
 };
 
-const wantsFfmpeg = targetPlatform === "win32" && !disableFfmpeg;
-if (wantsFfmpeg && process.platform !== "win32") {
-  throw new Error("The FFmpeg-enabled Windows native library must be built on Windows");
+const wantsFfmpeg = !disableFfmpeg;
+if (wantsFfmpeg && targetPlatform !== process.platform) {
+  throw new Error("The FFmpeg-enabled native library must be built on its target operating system");
 }
 const ffmpeg = wantsFfmpeg ? await ensureQolFfmpeg(root) : null;
+const libclangDirectory = ffmpeg ? findLibclangDirectory() : "";
 const nativeEnv = ffmpeg
   ? {
       ...process.env,
       FFMPEG_DIR: ffmpeg.root,
-      LIBCLANG_PATH: findLibclangDirectory(),
-      PATH: `${ffmpeg.bin};${process.env.PATH ?? ""}`,
+      ...(libclangDirectory ? { LIBCLANG_PATH: libclangDirectory } : {}),
+      PATH: `${ffmpeg.bin}${delimiter}${process.env.PATH ?? ""}`,
+      RUSTFLAGS: [
+        process.env.RUSTFLAGS ?? "",
+        targetPlatform === "darwin"
+          ? "-C link-arg=-Wl,-rpath,@loader_path"
+          : targetPlatform === "linux"
+            ? "-C link-arg=-Wl,-rpath,$ORIGIN"
+            : "",
+      ].filter(Boolean).join(" "),
     }
   : process.env;
 const cargoArguments = ["build", "-q", "-p", "microblocks-qol-native", "--release", "--locked"];
@@ -110,8 +119,8 @@ for (const dependency of [
 }
 cpSync(nativeOutput, resolve(output, "Code", nativeName));
 if (ffmpeg) {
-  for (const dependency of ffmpeg.dlls) {
-    cpSync(dependency, resolve(output, "Code", dependency.split(/[\\/]/u).at(-1)));
+  for (const dependency of ffmpeg.runtimeLibraries) {
+    copyFileSync(dependency, resolve(output, "Code", dependency.split(/[\\/]/u).at(-1)));
   }
   cpSync(ffmpeg.license, resolve(output, "Code", "FFmpeg-LICENSE.txt"));
 }
