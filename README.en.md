@@ -187,8 +187,8 @@ Targets used by CI can be selected explicitly:
 
 ~~~powershell
 node scripts/build-qol-mod.mjs --target x86_64-pc-windows-msvc
-node scripts/build-qol-mod.mjs --target x86_64-unknown-linux-musl --skip-parity
-node scripts/build-qol-mod.mjs --target x86_64-apple-darwin --skip-parity
+node scripts/build-qol-mod.mjs --target x86_64-unknown-linux-musl
+node scripts/build-qol-mod.mjs --target x86_64-apple-darwin
 ~~~
 
 Linux and macOS packages include the portable font/icon rasterizer, while
@@ -196,16 +196,6 @@ Windows-only capture, recording, and Windows notifications report themselves as
 unavailable. The Windows build downloads and verifies the FFmpeg 8.1 source, then
 builds a minimal LGPL shared runtime containing only the codecs and formats used
 by this project; it never packages or invokes ffmpeg.exe.
-
-## Development checks
-
-SkiaSharp is used only by the development parity harness. It is not referenced by
-the managed mod and is not copied into the final package:
-
-~~~powershell
-node scripts/verify-skia-parity.mjs
-node scripts/verify-skia-gpu-parity.mjs
-~~~
 
 GitHub Actions runs Rust formatting/tests and builds Windows x64, Linux x64 musl,
 and macOS x64 packages. Every commit pushed to master updates the nightly
@@ -217,4 +207,3 @@ archives as a versioned release.
 - MiaoNet, CollabUtils2, and SpeedrunTool are optional runtime bridges.
 - Material Symbols are embedded in the repository.
 - third_party/scap is pinned and locally patched.
-- SkiaSharp is a development-only dependency and is not part of the mod runtime.

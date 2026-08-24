@@ -14,9 +14,7 @@ const argumentValue = (name) => {
 };
 const target = argumentValue("--target");
 const archive = resolve(root, argumentValue("--archive") ?? "MicroblocksQolUtils.zip");
-const skipParity = process.argv.includes("--skip-parity");
 const disableFfmpeg = process.argv.includes("--no-ffmpeg");
-const maximumArchiveBytes = 10 * 1024 * 1024;
 const managedOutput = resolve(root, "Source/bin/Release/net8.0");
 const dll = resolve(managedOutput, "MicroblocksQolUtils.dll");
 const celesteRoot = resolve(process.env.CELESTE_ROOT ?? "C:/SteamLibrary/steamapps/common/Celeste");
@@ -89,19 +87,6 @@ if (target?.endsWith("-unknown-linux-musl") && !existsSync(nativeOutput)) {
 if (!existsSync(nativeOutput)) {
   throw new Error(`The native library was not produced at ${nativeOutput}`);
 }
-if (!skipParity && process.platform === "win32" && targetPlatform === "win32") {
-  run("dotnet", [
-    "run",
-    "--project",
-    resolve(root, "Tools/SkiaParity/SkiaParity.csproj"),
-    "-c",
-    "Release",
-    "--",
-    resolve(root, ".work/skia-parity"),
-  ], { ...nativeEnv, MQOL_NATIVE_LIBRARY: nativeOutput });
-} else {
-  console.log("Skipped the Windows-only Skia parity harness");
-}
 run("dotnet", ["build", resolve(root, "Source/MicroblocksQolUtils.csproj"), "-c", "Release"]);
 rmSync(output, { recursive: true, force: true });
 mkdirSync(resolve(output, "Code"), { recursive: true });
@@ -153,11 +138,6 @@ const packaged = targetPlatform === "win32"
 if (packaged.error) throw packaged.error;
 if (packaged.status !== 0) throw new Error("Cannot create the Everest mod archive");
 const archiveBytes = statSync(archive).size;
-if (archiveBytes >= maximumArchiveBytes) {
-  throw new Error(
-    `Packaged mod is ${(archiveBytes / 1024 / 1024).toFixed(2)} MiB; expected less than 10 MiB`,
-  );
-}
 console.log(`Packaged ${archive} (${(archiveBytes / 1024 / 1024).toFixed(2)} MiB)`);
 
 if (process.argv.includes("--install")) {

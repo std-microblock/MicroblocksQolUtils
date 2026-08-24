@@ -168,8 +168,8 @@ node scripts/build-qol-mod.mjs --install
 
 ~~~powershell
 node scripts/build-qol-mod.mjs --target x86_64-pc-windows-msvc
-node scripts/build-qol-mod.mjs --target x86_64-unknown-linux-musl --skip-parity
-node scripts/build-qol-mod.mjs --target x86_64-apple-darwin --skip-parity
+node scripts/build-qol-mod.mjs --target x86_64-unknown-linux-musl
+node scripts/build-qol-mod.mjs --target x86_64-apple-darwin
 ~~~
 
 Linux 和 macOS 包含可移植的字体/图标 rasterizer，但 Windows 专用的窗口捕获、
@@ -181,16 +181,6 @@ GitHub Actions ??? Rust ??????????? Windows x64?Linux x64 musl
 ? macOS x64 ????? master ????????? nightly ?????????
 ????v* ???????????????????
 
-## ????
-
-SkiaSharp 只用于开发期 parity harness，不会被 managed mod 引用，也不会被复制
-进最终包：
-
-~~~powershell
-node scripts/verify-skia-parity.mjs
-node scripts/verify-skia-gpu-parity.mjs
-~~~
-
 GitHub Actions 会运行 Rust 格式检查和测试，并构建 Windows x64、Linux x64 musl
 和 macOS x64 包。v* 标签会发布这些构建产物。
 
@@ -199,4 +189,3 @@ GitHub Actions 会运行 Rust 格式检查和测试，并构建 Windows x64、Li
 - MiaoNet、CollabUtils2、SpeedrunTool：运行时可选，使用反射或桥接接口。
 - Material Symbols：仓库内嵌图标资源。
 - third_party/scap：固定版本并带本地补丁的捕获依赖。
-- SkiaSharp：仅用于开发检查，不属于 mod 运行时依赖。

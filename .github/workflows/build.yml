@@ -218,7 +218,6 @@ jobs:
           node scripts/build-qol-mod.mjs
           --target ${{ matrix.target }}
           --archive ${{ matrix.artifact }}.zip
-          --skip-parity
           ${{ runner.os == 'Windows' && needs.prepare-release.outputs.publish != 'true' && '--no-ffmpeg' || '' }}
 
       - name: Verify Linux musl library
