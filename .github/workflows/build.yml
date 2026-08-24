@@ -118,7 +118,7 @@ jobs:
           key: cargo-${{ matrix.target }}-${{ hashFiles('Cargo.lock') }}
 
       - name: Cache minimal FFmpeg build
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && startsWith(github.ref, 'refs/tags/v')
         uses: actions/cache@v6
         with:
           path: .cache/ffmpeg
@@ -129,7 +129,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y musl-tools unzip zip
 
       - name: Install Windows build tools
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
         run: |
           & C:\msys64\usr\bin\pacman.exe -S --needed --noconfirm make perl diffutils mingw-w64-x86_64-nasm
@@ -164,6 +164,7 @@ jobs:
           --target ${{ matrix.target }}
           --archive ${{ matrix.artifact }}.zip
           --skip-parity
+          ${{ runner.os == 'Windows' && !startsWith(github.ref, 'refs/tags/v') && '--no-ffmpeg' || '' }}
 
       - name: Verify Linux musl library
         if: runner.os == 'Linux'
