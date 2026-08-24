@@ -210,12 +210,6 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         ModOptionsLayout layout = ModOptionsLayout.Create(1f - alpha);
         MaterialPalette palette = MaterialPalette.FromSeed(new Color(126, 99, 184));
         Draw.Rect(0f, 0f, ScreenWidth, ScreenHeight, palette.Scrim * (0.90f * alpha));
-        MaterialUiKit.Surface(
-            layout.Frame,
-            40f,
-            palette with { SurfaceHigh = palette.Surface * (acrylicActive ? 0.78f : 0.96f) },
-            alpha
-        );
 
         MaterialUiKit.Icon("extension", new Vector2(layout.Header.X + 20f, layout.Header.Center.Y),
             34f, palette.Primary, alpha, filled: true);

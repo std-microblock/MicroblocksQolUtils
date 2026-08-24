@@ -148,8 +148,6 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
 
         float rise = (1f - eased) * 34f;
         ChapterLayout layout = ChapterLayout.Create(rise);
-        MaterialUiKit.Surface(layout.Frame, 42f,
-            palette with { SurfaceHigh = palette.Surface * (acrylicActive ? 0.78f : 0.94f) }, eased);
 
         MaterialUiKit.Text(UiText("microblocks_qol_chapter_title", "选择章节"),
             new Vector2(layout.Header.X, layout.Search.Center.Y), new Vector2(0f, 0.5f),

@@ -194,12 +194,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         OverlayLayout layout = OverlayLayout.Create(ease);
         MaterialPalette palette = MaterialPalette.FromSeed(new Color(126, 99, 184));
         Draw.Rect(0f, 0f, ScreenWidth, ScreenHeight, palette.Scrim * (0.92f * ease));
-        MaterialUiKit.Surface(
-            layout.Panel,
-            38f,
-            palette with { SurfaceHigh = palette.Surface * (acrylicActive ? 0.80f : 0.97f) },
-            ease
-        );
 
         MaterialUiKit.Text("Microblock 的 QOL 工具", new Vector2(layout.Header.X, layout.Header.Y),
             Vector2.Zero, MaterialTextRole.Display, palette.OnSurface, ease, scaleOverride: 0.76f);
