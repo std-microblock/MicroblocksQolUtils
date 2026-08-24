@@ -13,7 +13,9 @@ permissions:
 
 concurrency:
   group: build-${{ github.ref }}
-  cancel-in-progress: true
+  # Nightly Windows builds populate the FFmpeg cache. Cancelling an older run
+  # before its post-job cache save makes every following commit rebuild FFmpeg.
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
