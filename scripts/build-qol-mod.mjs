@@ -1,10 +1,12 @@
-import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { ensureQolFfmpeg, findLibclangDirectory } from "./qol-ffmpeg.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const output = resolve(root, "Build");
+const archive = resolve(root, "MicroblocksQolUtils.zip");
+const maximumArchiveBytes = 10 * 1024 * 1024;
 const managedOutput = resolve(root, "Source/bin/Release/net8.0");
 const dll = resolve(managedOutput, "MicroblocksQolUtils.dll");
 const celesteRoot = resolve(process.env.CELESTE_ROOT ?? "C:/SteamLibrary/steamapps/common/Celeste");
@@ -83,6 +85,20 @@ for (const path of ["everest.yaml", "Dialog", "Graphics", "Native/README.md"]) {
   cpSync(source, target, { recursive: true });
 }
 console.log(`Built ${output}`);
+rmSync(archive, { force: true });
+const packaged = spawnSync("tar", ["-a", "-cf", archive, "-C", output, "."], {
+  cwd: root,
+  stdio: "inherit",
+  shell: false,
+});
+if (packaged.status !== 0) throw new Error("Cannot create the Everest mod archive");
+const archiveBytes = statSync(archive).size;
+if (archiveBytes >= maximumArchiveBytes) {
+  throw new Error(
+    `Packaged mod is ${(archiveBytes / 1024 / 1024).toFixed(2)} MiB; expected less than 10 MiB`,
+  );
+}
+console.log(`Packaged ${archive} (${(archiveBytes / 1024 / 1024).toFixed(2)} MiB)`);
 
 if (process.argv.includes("--install")) {
   if (!existsSync(resolve(celesteRoot, "Celeste.dll"))) {
