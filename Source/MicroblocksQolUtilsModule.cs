@@ -74,7 +74,7 @@ public sealed class MicroblocksQolUtilsModule : EverestModule {
     }
 
     private static void EngineUpdate(On.Monocle.Engine.orig_Update orig, Engine self, Microsoft.Xna.Framework.GameTime gameTime) {
-        EarlyDpiBootstrap.UpdateWindowScale();
+        HiDpiSupport.UpdateScale();
         MaterialTextInputFocus.BeginFrame();
         FrameProfiler.BeginUpdate();
         try {

@@ -139,7 +139,7 @@ internal static class MaterialIcon {
                 ? new Vector2(MathF.Abs(transform.M11), MathF.Abs(transform.M22))
                 : Vector2.One;
             int pixelSize = Math.Max(1,
-                (int)MathF.Round(size * pixelsPerUnit.Y * EarlyDpiBootstrap.UiScale));
+                (int)MathF.Round(size * pixelsPerUnit.Y * HiDpiSupport.UiScale));
             Vector2 textureScale = new(1f / pixelsPerUnit.X, 1f / pixelsPerUnit.Y);
             XnaMatrix inverse = screenAligned ? XnaMatrix.Invert(transform) : XnaMatrix.Identity;
             return new RasterContext(pixelSize, new Vector2(pixelSize) * textureScale,
