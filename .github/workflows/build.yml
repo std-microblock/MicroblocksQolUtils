@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
   DOTNET_CLI_TELEMETRY_OPTOUT: "1"
@@ -46,25 +50,74 @@ jobs:
         run: cargo test --workspace --locked
 
   prepare-release:
-    name: Prepare tagged release
+    name: Prepare release
     needs: test
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+    outputs:
+      publish: ${{ steps.release.outputs.publish }}
+      release_tag: ${{ steps.release.outputs.release_tag }}
     steps:
-      - name: Create draft release
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Prepare draft release
+        id: release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if ! gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "$GITHUB_REF_NAME" \
-              --repo "$GITHUB_REPOSITORY" \
-              --draft \
-              --generate-notes \
-              --verify-tag
+          if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/master" ]]; then
+            release_tag="nightly"
+            title="Nightly ${GITHUB_SHA:0:7}"
+            notes="Automated nightly build from commit \`$GITHUB_SHA\`."
+
+            if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$release_tag" >/dev/null 2>&1; then
+              gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$release_tag" \
+                -f sha="$GITHUB_SHA" \
+                -F force=true >/dev/null
+            else
+              gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+                -f ref="refs/tags/$release_tag" \
+                -f sha="$GITHUB_SHA" >/dev/null
+            fi
+
+            if gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release edit "$release_tag" \
+                --repo "$GITHUB_REPOSITORY" \
+                --draft \
+                --prerelease \
+                --latest=false \
+                --title "$title" \
+                --notes "$notes"
+              gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' |
+                while IFS= read -r asset; do
+                  [[ -z "$asset" ]] || gh release delete-asset "$release_tag" "$asset" \
+                    --repo "$GITHUB_REPOSITORY" --yes
+                done
+            else
+              gh release create "$release_tag" \
+                --repo "$GITHUB_REPOSITORY" \
+                --draft \
+                --prerelease \
+                --title "$title" \
+                --notes "$notes" \
+                --verify-tag
+            fi
+          elif [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            release_tag="$GITHUB_REF_NAME"
+            if ! gh release view "$release_tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              gh release create "$release_tag" \
+                --repo "$GITHUB_REPOSITORY" \
+                --draft \
+                --generate-notes \
+                --verify-tag
+            fi
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
 
   build:
     name: ${{ matrix.name }}
@@ -118,7 +171,7 @@ jobs:
           key: cargo-${{ matrix.target }}-${{ hashFiles('Cargo.lock') }}
 
       - name: Cache minimal FFmpeg build
-        if: runner.os == 'Windows' && startsWith(github.ref, 'refs/tags/v')
+        if: runner.os == 'Windows' && needs.prepare-release.outputs.publish == 'true'
         uses: actions/cache@v6
         with:
           path: .cache/ffmpeg
@@ -129,7 +182,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y musl-tools unzip zip
 
       - name: Install Windows build tools
-        if: runner.os == 'Windows' && startsWith(github.ref, 'refs/tags/v')
+        if: runner.os == 'Windows' && needs.prepare-release.outputs.publish == 'true'
         shell: pwsh
         run: |
           & C:\msys64\usr\bin\pacman.exe -S --needed --noconfirm make perl diffutils mingw-w64-x86_64-nasm
@@ -164,7 +217,7 @@ jobs:
           --target ${{ matrix.target }}
           --archive ${{ matrix.artifact }}.zip
           --skip-parity
-          ${{ runner.os == 'Windows' && !startsWith(github.ref, 'refs/tags/v') && '--no-ffmpeg' || '' }}
+          ${{ runner.os == 'Windows' && needs.prepare-release.outputs.publish != 'true' && '--no-ffmpeg' || '' }}
 
       - name: Verify Linux musl library
         if: runner.os == 'Linux'
@@ -173,21 +226,21 @@ jobs:
           file Build/Code/libmicroblocks_qol_native.so
           readelf --dyn-syms Build/Code/libmicroblocks_qol_native.so | grep -q mqol_raster_text
 
-      - name: Upload tagged package
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Upload release package
+        if: needs.prepare-release.outputs.publish == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
-          gh release upload "$GITHUB_REF_NAME"
+          gh release upload "${{ needs.prepare-release.outputs.release_tag }}"
           "${{ matrix.artifact }}.zip"
           --repo "$GITHUB_REPOSITORY"
           --clobber
 
   publish-release:
-    name: Publish tagged release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    name: Publish release
+    if: needs.prepare-release.outputs.publish == 'true'
+    needs: [prepare-release, build]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -196,4 +249,11 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft=false
+          RELEASE_TAG: ${{ needs.prepare-release.outputs.release_tag }}
+        run: |
+          if [[ "$RELEASE_TAG" == "nightly" ]]; then
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --draft=false --prerelease --latest=false
+          else
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+          fi
