@@ -54,6 +54,7 @@ internal static class MaterialAcrylicRenderer {
         // regular translucent rendering path; acrylic remains available for pages rendered
         // through the Overworld composition path.
         IMaterialAcrylicPage? page = MaterialChapterSelect.ActivePage;
+        page ??= MaterialModOptions.ActivePage;
         QolSettings settings = MicroblocksQolUtilsModule.Settings;
         if (rendering
             || failed

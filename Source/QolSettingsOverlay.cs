@@ -1573,6 +1573,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                 }),
                 Toggle("取代原版选关页", () => settings.ReplaceChapterSelect,
                     value => settings.ReplaceChapterSelect = value),
+                Toggle("取代 Everest 模组设置页", () => settings.ReplaceEverestModOptions,
+                    value => settings.ReplaceEverestModOptions = value),
                 Toggle("选关页显示 Collab 地图", () => settings.ChapterSelectShowCollabMaps,
                     value => settings.ChapterSelectShowCollabMaps = value),
                 Toggle("输入框中文、游戏内英文输入法", () => settings.AutoSwitchInputLanguage,

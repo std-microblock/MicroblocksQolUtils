@@ -52,6 +52,9 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue(false)]
     public bool ReplaceChapterSelect { get; set; }
 
+    [DefaultValue(true)]
+    public bool ReplaceEverestModOptions { get; set; } = true;
+
     [DefaultValue(false)]
     public bool ChapterSelectShowCollabMaps { get; set; }
 
