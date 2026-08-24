@@ -1,20 +1,29 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
+  copyFileSync,
   createWriteStream,
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { rename } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { cpus, homedir } from "node:os";
+import { dirname, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
-const assetName = "ffmpeg-n8.1-latest-win64-lgpl-shared-8.1.zip";
-const extractedName = assetName.slice(0, -4);
+const ffmpegVersion = "8.1";
+const archiveName = `ffmpeg-${ffmpegVersion}.tar.xz`;
+const extractedName = `ffmpeg-${ffmpegVersion}`;
+const buildName = `ffmpeg-${ffmpegVersion}-qol-minimal`;
+const buildId = "ffmpeg-8.1-qol-minimal-v2";
+const sourceUrl = `https://ffmpeg.org/releases/${archiveName}`;
+const sourceDigest = "sha256:b072aed6871998cce9b36e7774033105ca29e33632be5b6347f3206898e0756a";
+const requiredLibraries = ["avcodec", "avformat", "avutil", "swresample", "swscale"];
 const requiredDlls = [
   "avcodec-62.dll",
   "avformat-62.dll",
@@ -23,102 +32,289 @@ const requiredDlls = [
   "swscale-9.dll",
 ];
 
-const githubHeaders = {
-  Accept: "application/vnd.github+json",
-  "User-Agent": "microblocks-qol-build",
-  "X-GitHub-Api-Version": "2022-11-28",
-};
+const configureArguments = [
+  "--toolchain=msvc",
+  "--cc=clang-cl",
+  "--enable-shared",
+  "--disable-static",
+  "--disable-everything",
+  "--disable-autodetect",
+  "--disable-network",
+  "--disable-avdevice",
+  "--disable-avfilter",
+  "--disable-programs",
+  "--disable-doc",
+  "--disable-debug",
+  "--enable-small",
+  "--enable-avcodec",
+  "--enable-avformat",
+  "--enable-avutil",
+  "--enable-swscale",
+  "--enable-swresample",
+  "--enable-mediafoundation",
+  "--enable-d3d11va",
+  "--enable-protocol=file",
+  "--enable-demuxer=mov,matroska,ogg,flac,mp3,wav,aac",
+  "--enable-muxer=mov,mp4,ipod,matroska",
+  "--enable-decoder=h264,aac,alac,flac,vorbis,opus,mp3,mp3float,pcm_u8,pcm_s16le,pcm_s24le,pcm_s32le,pcm_f32le,pcm_f64le",
+  "--enable-encoder=aac,h264_mf",
+  "--enable-parser=h264,aac,flac,mpegaudio,vorbis,opus",
+  "--x86asmexe=nasm",
+];
 
 export async function ensureQolFfmpeg(root) {
   if (process.platform !== "win32") return null;
   const cache = resolve(root, ".cache", "ffmpeg");
-  const archive = resolve(cache, assetName);
-  const extracted = resolve(cache, extractedName);
-  const manifestPath = resolve(cache, "manifest.json");
+  const archive = resolve(cache, archiveName);
+  const source = resolve(cache, extractedName);
+  const output = resolve(cache, buildName);
+  const manifestPath = resolve(output, "manifest.json");
   mkdirSync(cache, { recursive: true });
 
-  let cached;
+  let manifest;
   try {
-    cached = JSON.parse(readFileSync(manifestPath, "utf8"));
+    manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
   } catch {
-    cached = null;
+    manifest = null;
   }
-  const complete = requiredDlls.every((name) => existsSync(resolve(extracted, "bin", name)))
-    && existsSync(resolve(extracted, "include", "libavcodec", "avcodec.h"))
-    && existsSync(resolve(extracted, "lib", "avcodec.lib"));
-  if (complete && cached?.assetId && cached?.digest?.startsWith("sha256:")) {
-    return ffmpegLayout(extracted, cached);
+  if (manifest?.buildId === buildId && manifest?.sourceDigest === sourceDigest && complete(output)) {
+    return ffmpegLayout(output);
   }
 
-  const release = await fetch("https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest", {
-    headers: githubHeaders,
-  });
-  if (!release.ok) throw new Error(`Cannot query BtbN FFmpeg release: HTTP ${release.status}`);
-  const metadata = await release.json();
-  const asset = metadata.assets?.find((candidate) => candidate.name === assetName);
-  if (!asset?.browser_download_url || !asset?.digest?.startsWith("sha256:")) {
-    throw new Error(`BtbN release does not contain ${assetName} with a SHA-256 digest`);
-  }
-  if (complete && cached?.assetId === asset.id && cached?.digest === asset.digest) {
-    return ffmpegLayout(extracted, asset);
-  }
-  if (complete && existsSync(archive) && sha256(archive) === asset.digest) {
-    writeManifest(manifestPath, metadata, asset);
-    return ffmpegLayout(extracted, asset);
+  await ensureSourceArchive(archive);
+  if (!existsSync(resolve(source, "configure"))) {
+    removeWithin(cache, source);
+    const unpack = spawnSync("tar", ["-xf", archive, "-C", cache], { stdio: "inherit" });
+    if (unpack.status !== 0) throw new Error(`Cannot extract ${archiveName}`);
   }
 
-  const response = await fetch(asset.browser_download_url, { redirect: "follow" });
-  if (!response.ok || !response.body) {
-    throw new Error(`Cannot download ${assetName}: HTTP ${response.status}`);
+  removeWithin(cache, output);
+  mkdirSync(output, { recursive: true });
+  buildMinimalFfmpeg(root, cache, source, output);
+  mkdirSync(resolve(output, "lib"), { recursive: true });
+  for (const library of requiredLibraries) {
+    copyFileSync(resolve(output, "bin", `${library}.lib`), resolve(output, "lib", `${library}.lib`));
   }
-  const temporary = `${archive}.download`;
-  rmSync(temporary, { force: true });
-  await pipeline(Readable.fromWeb(response.body), createWriteStream(temporary));
-  const digest = sha256(temporary);
-  if (digest !== asset.digest) {
-    rmSync(temporary, { force: true });
-    throw new Error(`FFmpeg archive digest mismatch: expected ${asset.digest}, got ${digest}`);
-  }
-  rmSync(archive, { force: true });
-  rmSync(extracted, { recursive: true, force: true });
-  await rename(temporary, archive);
-  const unpack = spawnSync("tar", ["-xf", archive, "-C", cache], { stdio: "inherit" });
-  if (unpack.status !== 0) throw new Error(`Cannot extract ${assetName}`);
-  writeManifest(manifestPath, metadata, asset);
-  return ffmpegLayout(extracted, asset);
+  copyFileSync(resolve(source, "COPYING.LGPLv2.1"), resolve(output, "LICENSE.txt"));
+  writeFileSync(
+    manifestPath,
+    `${JSON.stringify({ buildId, sourceDigest, configureArguments }, null, 2)}\n`,
+    "utf8",
+  );
+  if (!complete(output)) throw new Error("Minimal FFmpeg build completed without all required files");
+  return ffmpegLayout(output);
 }
 
 export function findLibclangDirectory() {
   if (process.env.LIBCLANG_PATH) return process.env.LIBCLANG_PATH;
   for (const executable of ["libclang.dll", "clang.exe"]) {
-    const where = spawnSync("where.exe", [executable], { encoding: "utf8" });
-    if (where.status !== 0) continue;
-    const first = where.stdout.split(/\r?\n/u).find(Boolean);
-    if (first) return dirname(first.trim());
+    const found = findOnPath(executable);
+    if (found) return dirname(found);
   }
   throw new Error(
     "libclang.dll is required to build the FFmpeg Rust bindings; install LLVM or set LIBCLANG_PATH",
   );
 }
 
-function ffmpegLayout(root, asset) {
+async function ensureSourceArchive(archive) {
+  if (existsSync(archive) && sha256(archive) === sourceDigest) return;
+  rmSync(archive, { force: true });
+  const response = await fetch(sourceUrl, { redirect: "follow" });
+  if (!response.ok || !response.body) {
+    throw new Error(`Cannot download ${archiveName}: HTTP ${response.status}`);
+  }
+  const temporary = `${archive}.download`;
+  rmSync(temporary, { force: true });
+  await pipeline(Readable.fromWeb(response.body), createWriteStream(temporary));
+  const digest = sha256(temporary);
+  if (digest !== sourceDigest) {
+    rmSync(temporary, { force: true });
+    throw new Error(`FFmpeg archive digest mismatch: expected ${sourceDigest}, got ${digest}`);
+  }
+  await rename(temporary, archive);
+}
+
+function buildMinimalFfmpeg(root, cache, source, output) {
+  const visualStudio = findVisualStudio();
+  const vcvars = resolve(visualStudio, "VC", "Auxiliary", "Build", "vcvars64.bat");
+  const msvcBin = findMsvcBin(visualStudio);
+  const msysRoot = findMsys2Root();
+  const bash = resolve(msysRoot, "usr", "bin", "bash.exe");
+  const make = resolve(msysRoot, "usr", "bin", "make.exe");
+  const nasm = firstExisting([
+    resolve(msysRoot, "mingw64", "bin", "nasm.exe"),
+    resolve(msysRoot, "usr", "bin", "nasm.exe"),
+    findOnPath("nasm.exe"),
+  ]);
+  const llvmBin = findLlvmBin();
+  if (!existsSync(vcvars)) throw new Error(`Visual Studio vcvars64.bat was not found at ${vcvars}`);
+  if (!existsSync(bash) || !existsSync(make)) {
+    throw new Error("MSYS2 with GNU make is required to build the minimal FFmpeg runtime");
+  }
+  if (!nasm) {
+    throw new Error(
+      `NASM is required; run ${resolve(msysRoot, "usr", "bin", "pacman.exe")} -S --needed mingw-w64-x86_64-nasm`,
+    );
+  }
+
+  const shellScript = resolve(cache, "build-minimal-ffmpeg.sh");
+  const batchScript = resolve(cache, "build-minimal-ffmpeg.cmd");
+  const jobs = Math.max(1, Math.min(8, cpus().length));
+  writeFileSync(
+    shellScript,
+    [
+      "#!/usr/bin/env bash",
+      "set -euo pipefail",
+      'export PATH="/usr/bin:/bin:$PATH"',
+      'export PATH="$(cygpath -u "$QOL_MSVC_BIN"):$(cygpath -u "$QOL_LLVM_BIN"):$(cygpath -u "$QOL_NASM_BIN"):$PATH"',
+      'cd "$(cygpath -u "$QOL_SOURCE")"',
+      "make distclean >/dev/null 2>&1 || true",
+      `./configure --prefix="$(cygpath -m "$QOL_PREFIX")" ${configureArguments.join(" ")}`,
+      'make -j"$QOL_JOBS"',
+      "make install",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  writeFileSync(
+    batchScript,
+    [
+      "@echo off",
+      "setlocal",
+      `call "${batchValue(vcvars)}" >nul`,
+      "if errorlevel 1 exit /b %errorlevel%",
+      `set "QOL_SOURCE=${batchValue(source)}"`,
+      `set "QOL_PREFIX=${batchValue(output)}"`,
+      `set "QOL_MSVC_BIN=${batchValue(msvcBin)}"`,
+      `set "QOL_LLVM_BIN=${batchValue(llvmBin)}"`,
+      `set "QOL_NASM_BIN=${batchValue(dirname(nasm))}"`,
+      `set "QOL_JOBS=${jobs}"`,
+      `"${batchValue(bash)}" "${batchValue(toMsysPath(shellScript))}"`,
+      "exit /b %errorlevel%",
+      "",
+    ].join("\r\n"),
+    "utf8",
+  );
+  const build = spawnSync("cmd.exe", ["/d", "/c", batchScript], {
+    cwd: root,
+    stdio: "inherit",
+    windowsHide: true,
+  });
+  if (build.status !== 0) throw new Error(`Cannot build minimal FFmpeg runtime (exit ${build.status})`);
+}
+
+function complete(root) {
+  return requiredDlls.every((name) => existsSync(resolve(root, "bin", name)))
+    && requiredLibraries.every((name) => existsSync(resolve(root, "lib", `${name}.lib`)))
+    && existsSync(resolve(root, "include", "libavcodec", "avcodec.h"))
+    && existsSync(resolve(root, "LICENSE.txt"));
+}
+
+function ffmpegLayout(root) {
   return {
     root,
     bin: resolve(root, "bin"),
     license: resolve(root, "LICENSE.txt"),
     dlls: requiredDlls.map((name) => resolve(root, "bin", name)),
-    digest: asset.digest,
+    digest: sourceDigest,
   };
+}
+
+function findVisualStudio() {
+  const vswhere = firstExisting([
+    process.env["ProgramFiles(x86)"]
+      ? resolve(process.env["ProgramFiles(x86)"], "Microsoft Visual Studio", "Installer", "vswhere.exe")
+      : null,
+    resolve(homedir(), "scoop", "apps", "vswhere", "current", "vswhere.exe"),
+    findOnPath("vswhere.exe"),
+  ]);
+  if (!vswhere) throw new Error("Visual Studio Build Tools and vswhere.exe are required");
+  const result = spawnSync(vswhere, [
+    "-latest",
+    "-products",
+    "*",
+    "-requires",
+    "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+    "-property",
+    "installationPath",
+  ], { encoding: "utf8", windowsHide: true });
+  const path = result.stdout?.split(/\r?\n/u).find(Boolean)?.trim();
+  if (result.status !== 0 || !path) throw new Error("A Visual Studio C++ x64 toolchain was not found");
+  return path;
+}
+
+function findMsvcBin(visualStudio) {
+  const tools = resolve(visualStudio, "VC", "Tools", "MSVC");
+  const versions = readdirSync(tools, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .filter((version) => existsSync(resolve(tools, version, "bin", "Hostx64", "x64", "link.exe")))
+    .sort(compareVersions)
+    .reverse();
+  if (versions.length === 0) throw new Error("Visual Studio x64 linker was not found");
+  return resolve(tools, versions[0], "bin", "Hostx64", "x64");
+}
+
+function findMsys2Root() {
+  const roots = [
+    process.env.MSYS2_ROOT,
+    resolve(homedir(), "scoop", "apps", "msys2", "current"),
+    "C:/msys64",
+  ];
+  const pathBash = findOnPath("bash.exe");
+  if (pathBash?.toLowerCase().includes("msys2")) roots.push(resolve(pathBash, "..", "..", ".."));
+  const root = roots.find((candidate) => candidate && existsSync(resolve(candidate, "usr", "bin", "bash.exe")));
+  if (!root) throw new Error("MSYS2 is required to build the minimal FFmpeg runtime");
+  return resolve(root);
+}
+
+function findLlvmBin() {
+  const libclang = findLibclangDirectory();
+  if (existsSync(resolve(libclang, "clang-cl.exe"))) return resolve(libclang);
+  const clangCl = findOnPath("clang-cl.exe");
+  if (clangCl) return dirname(clangCl);
+  throw new Error("clang-cl.exe is required; install LLVM and place it on PATH");
+}
+
+function findOnPath(name) {
+  if (!name) return null;
+  const where = spawnSync("where.exe", [name], { encoding: "utf8", windowsHide: true });
+  if (where.status !== 0) return null;
+  return where.stdout.split(/\r?\n/u).find(Boolean)?.trim() ?? null;
+}
+
+function firstExisting(candidates) {
+  return candidates.find((candidate) => candidate && existsSync(candidate)) ?? null;
+}
+
+function compareVersions(left, right) {
+  const a = left.split(".").map(Number);
+  const b = right.split(".").map(Number);
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const difference = (a[index] ?? 0) - (b[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return left.localeCompare(right);
+}
+
+function toMsysPath(path) {
+  const normalized = resolve(path).replaceAll("\\", "/");
+  const match = /^([A-Za-z]):\/(.*)$/u.exec(normalized);
+  if (!match) throw new Error(`MSYS2 build path must use a drive letter: ${path}`);
+  return `/${match[1].toLowerCase()}/${match[2]}`;
+}
+
+function batchValue(value) {
+  return String(value).replaceAll("%", "%%").replaceAll("^", "^^");
+}
+
+function removeWithin(root, target) {
+  const base = resolve(root);
+  const path = resolve(target);
+  if (!path.startsWith(`${base}${sep}`)) throw new Error(`Refusing to remove path outside ${base}: ${path}`);
+  rmSync(path, { recursive: true, force: true });
 }
 
 function sha256(path) {
   return `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
-}
-
-function writeManifest(path, release, asset) {
-  writeFileSync(
-    path,
-    `${JSON.stringify({ assetId: asset.id, digest: asset.digest, publishedAt: release.published_at }, null, 2)}\n`,
-    "utf8",
-  );
 }

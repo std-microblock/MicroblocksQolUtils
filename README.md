@@ -53,9 +53,9 @@ Implemented:
   frames use an intentional CPU copy, stay outside managed memory, and pass
   through a fixed-capacity latest-frame queue; a slow encoder cannot grow
   memory without bound.
-- Streaming H.264 encoding through FFmpeg shared libraries, with automatic
-  NVENC, QSV, AMF, Media Foundation, then OpenH264 fallback. No `ffmpeg.exe`,
-  `gdigrab`, managed frame buffer, or subprocess is used.
+- Streaming H.264 encoding through a size-optimized FFmpeg shared runtime and
+  Windows Media Foundation. No `ffmpeg.exe`, `gdigrab`, managed frame buffer,
+  or subprocess is used.
 - Full-run/manual recording and death replay use independent WGC/encoder
   sessions, so a background death-replay buffer never occupies the manual
   recording controls. Full-run recording stays alive for the complete area,
@@ -118,11 +118,13 @@ commands `qol_capture_probe_start`, `qol_capture_probe_stats`, and
 `qol_capture_probe_stop` exercise scap/WGC without enabling automatic
 recording.
 
-`scripts/build-qol-mod.mjs` downloads the current FFmpeg 8.1 LGPL shared build
-from BtbN, verifies GitHub's SHA-256 digest, links the Rust encoder against its
-import libraries, and packages only the required DLLs and license beside the
-mod's native DLL. The FFmpeg executable in the development archive is not
-packaged or invoked.
+`scripts/build-qol-mod.mjs` downloads the pinned official FFmpeg 8.1 source
+archive, verifies its SHA-256 digest, and builds a small LGPL shared runtime
+containing only the recording/finalization codecs, formats, resamplers, scaler,
+and Media Foundation H.264 encoder used by this mod. Only five runtime DLLs and
+the LGPL license are packaged beside the mod's native DLL; no FFmpeg executable
+is built, packaged, or invoked. The generated `MicroblocksQolUtils.zip` is also
+checked during every build and the build fails if it reaches 10 MiB.
 
 Normal recording does not require a BGM mapping file: the captured music bus is
 automatically cut and joined with the successful-run timeline. As an optional
@@ -146,13 +148,15 @@ The standalone repository now contains the complete native crate, its pinned
 and patched `scap` dependency, and the packaging scripts that previously lived
 in `celeste-next-gym`.
 
-Install Rust (MSVC toolchain), the .NET 8 SDK, Node.js, and LLVM/Clang, then run:
+Install Rust (MSVC toolchain), Visual Studio C++ Build Tools, the .NET 8 SDK,
+Node.js, LLVM/Clang, MSYS2, GNU make, NASM, and `tar`, then run:
 
 ```powershell
 node scripts/build-qol-mod.mjs
 ```
 
-The packaged Everest mod is written to `Build`. Managed references default to
+The unpacked Everest mod is written to `Build`, and the distribution archive is
+written to `MicroblocksQolUtils.zip`. Managed references default to
 `C:\SteamLibrary\steamapps\common\Celeste`; set `CELESTE_ROOT` if the game is
 elsewhere. Build and install in one step with:
 
