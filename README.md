@@ -180,8 +180,9 @@ text/icon rasterizer; Windows-only capture and recording APIs report themselves
 as unavailable there.
 
 GitHub Actions runs formatting/tests and builds Windows x64, Linux x64 musl,
-and macOS x64 archives. Tags named `v*` also publish those archives as a GitHub
-release.
+and macOS x64 archives. Every commit pushed to `master` replaces the `nightly`
+pre-release and its three platform archives. Tags named `v*` publish the same
+archives as a versioned GitHub release.
 
 The development-only parity harness uses SkiaSharp as an external reference and
 compares it with the mod's portable raster upload/composition path. SkiaSharp is
