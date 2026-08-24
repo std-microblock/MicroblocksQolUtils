@@ -11,7 +11,10 @@ namespace Celeste.Mod.MicroblocksQolUtils;
 /// creates its game window. Other platforms keep their native DPI behavior.
 /// </summary>
 internal static class EarlyDpiBootstrap {
+    private const string SettingsFileName = "modsettings-MicroblocksQolUtils.celeste";
+    private const string SettingsKey = "EarlyDpiInitialization";
     private static readonly nint PerMonitorAwareV2 = new(-4);
+    private static bool enabledAtStartup = true;
     private static bool windowScaleApplied;
 
     [ModuleInitializer]
@@ -21,6 +24,9 @@ internal static class EarlyDpiBootstrap {
         if (!OperatingSystem.IsWindows()) return;
 
         try {
+            enabledAtStartup = ReadEnabledSetting();
+            if (!enabledAtStartup) return;
+
             Environment.SetEnvironmentVariable("FNA_GRAPHICS_ENABLE_HIGHDPI", "1");
             Environment.SetEnvironmentVariable("SDL_VIDEO_HIGHDPI_DISABLED", "0");
             Environment.SetEnvironmentVariable("SDL_WINDOWS_DPI_AWARENESS", "permonitorv2");
@@ -31,7 +37,7 @@ internal static class EarlyDpiBootstrap {
     }
 
     internal static void ApplyWindowScale() {
-        if (!OperatingSystem.IsWindows() || windowScaleApplied) return;
+        if (!OperatingSystem.IsWindows() || !enabledAtStartup || windowScaleApplied) return;
 
         nint window = Process.GetCurrentProcess().MainWindowHandle;
         if (window == nint.Zero) return;
@@ -60,6 +66,31 @@ internal static class EarlyDpiBootstrap {
         Engine.SetWindowed(migrated * 320, migrated * 180);
         Logger.Log(LogLevel.Info, "MicroblocksQolUtils/DPI",
             $"Enabled physical-pixel rendering at {dpi} DPI and scaled the window {current} -> {migrated} without changing Celeste settings.");
+    }
+
+    private static bool ReadEnabledSetting() {
+        try {
+            string path = Path.Combine(Everest.PathSettings, SettingsFileName);
+            if (!File.Exists(path)) return true;
+
+            foreach (string line in File.ReadLines(path)) {
+                ReadOnlySpan<char> content = line.AsSpan().Trim();
+                int separator = content.IndexOf(':');
+                if (separator < 0
+                    || !content[..separator].Trim().Equals(SettingsKey, StringComparison.OrdinalIgnoreCase)) {
+                    continue;
+                }
+
+                ReadOnlySpan<char> value = content[(separator + 1)..].Trim();
+                int comment = value.IndexOf('#');
+                if (comment >= 0) value = value[..comment].Trim();
+                return !value.Equals("false", StringComparison.OrdinalIgnoreCase);
+            }
+        } catch {
+            // A missing or unreadable settings file keeps the default enabled behavior.
+        }
+
+        return true;
     }
 
     [DllImport("user32.dll", SetLastError = true)]

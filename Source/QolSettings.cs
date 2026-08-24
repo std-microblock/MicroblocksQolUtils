@@ -39,6 +39,10 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue(true)]
     public bool Enabled { get; set; } = true;
 
+    [SettingNeedsRelaunch]
+    [DefaultValue(true)]
+    public bool EarlyDpiInitialization { get; set; } = true;
+
     [DefaultValue(true)]
     public bool MaterialAcrylicBackground { get; set; } = true;
 
