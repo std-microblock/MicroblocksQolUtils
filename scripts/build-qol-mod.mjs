@@ -130,7 +130,7 @@ if (ffmpeg) {
   }
   cpSync(ffmpeg.license, resolve(output, "Code", "FFmpeg-LICENSE.txt"));
 }
-for (const path of ["everest.yaml", "Dialog", "Graphics", "Native/README.md"]) {
+for (const path of ["everest.yaml", "Dialog", "Graphics"]) {
   const source = resolve(root, path);
   if (!existsSync(source)) continue;
   const target = resolve(output, path);
