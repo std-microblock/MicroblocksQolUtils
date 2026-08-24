@@ -23,6 +23,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private const float DropdownItemHeight = 46f;
     private const int DropdownMaxVisibleItems = 8;
     private const int DropdownOptionLimit = 24;
+    private const int SearchTextLimit = 80;
 
     private static Hook? gotoRoutineHook;
     private static bool hookFailed;
@@ -51,6 +52,10 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private TextMenu.Item? dropdownItem;
     private int dropdownHighlight;
     private int dropdownFirstVisible;
+    private string tabSearchText = "";
+    private string settingSearchText = "";
+    private string imeText = "";
+    private SearchTarget searchTarget;
 
     public bool SuppressNormalRender { get; set; }
 
@@ -115,6 +120,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
     public override IEnumerator Leave(Oui next) {
         display = false;
+        SetSearchTarget(SearchTarget.None);
         menu?.Focused = false;
         SaveTabState();
         for (float timer = 0f; timer < 0.16f; timer += Engine.RawDeltaTime) yield return null;
@@ -136,6 +142,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     }
 
     public override void Removed(Scene scene) {
+        SetSearchTarget(SearchTarget.None);
         DetachMenu();
         if (pauseLevel is not null) pauseLevel.AllowHudHide = oldAllowHudHide;
         tabViewport.Dispose();
@@ -163,18 +170,26 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
         if (menu is null) return;
         bool acceptsInput = pauseLevel is not null || Selected && Focused;
+        if (acceptsInput && inputDelay <= 0f && UpdateSearchInput(layout)) {
+            menu.Focused = false;
+            menu.Update();
+            CaptureNaturalVisibility();
+            ApplyTabVisibility(invokeSelectionCallbacks: false);
+            return;
+        }
+        menu.Focused = searchTarget == SearchTarget.None;
         if (!menu.Focused) {
             menu.Update();
-            ForceDescriptionsVisible();
             CaptureNaturalVisibility();
+            ApplyTabVisibility(invokeSelectionCallbacks: false);
             return;
         }
         if (!acceptsInput || inputDelay > 0f) {
             menu.Focused = false;
             menu.Update();
             menu.Focused = true;
-            ForceDescriptionsVisible();
             CaptureNaturalVisibility();
+            ApplyTabVisibility(invokeSelectionCallbacks: false);
             return;
         }
 
@@ -202,7 +217,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
             || MInput.Keyboard.Pressed(Keys.PageUp)) {
             bool backwards = MInput.Keyboard.Pressed(Keys.PageUp)
                 || MInput.Keyboard.Check(Keys.LeftShift, Keys.RightShift);
-            SelectTab(selectedTab + (backwards ? -1 : 1));
+            MoveTab(backwards ? -1 : 1);
         }
 
         if ((Input.MenuConfirm.Pressed
@@ -223,8 +238,8 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         UpdateMouse(layout);
         int previousSelection = menu.Selection;
         menu.Update();
-        ForceDescriptionsVisible();
         CaptureNaturalVisibility();
+        ApplyTabVisibility(invokeSelectionCallbacks: false);
         if (menu.Selection != previousSelection) EnsureSelectionVisible(layout);
     }
 
@@ -245,7 +260,9 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         MaterialUiKit.Text(UiText("microblocks_qol_modoptions_title", "模组设置"),
             new Vector2(layout.Header.X + 52f, layout.Header.Center.Y), new Vector2(0f, 0.5f),
             MaterialTextRole.Display, palette.OnSurface, alpha, scaleOverride: 0.72f);
-        MaterialUiKit.Text($"{tabs.Count} {UiText("microblocks_qol_modoptions_tabs", "个分类")}",
+        int shownTabs = FilteredTabIndices().Count;
+        string tabCount = shownTabs == tabs.Count ? tabs.Count.ToString() : $"{shownTabs}/{tabs.Count}";
+        MaterialUiKit.Text($"{tabCount} {UiText("microblocks_qol_modoptions_tabs", "个分类")}",
             new Vector2(layout.Header.Right, layout.Header.Center.Y), new Vector2(1f, 0.5f),
             MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.29f);
 
@@ -270,7 +287,6 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         List<TextMenu.Item> leading = [];
         ModTab? current = null;
         foreach (TextMenu.Item item in menu.Items) {
-            ForceDescriptionVisible(item);
             naturalVisibility[item] = item.Visible;
             if (IsEverestHeaderImage(item)) {
                 naturalVisibility[item] = false;
@@ -295,7 +311,6 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         if (tabs.Count == 0) {
             tabs.Add(new ModTab("__empty", UiText("microblocks_qol_modoptions_empty", "没有可用设置"), "", []));
         }
-        ForceDescriptionsVisible();
     }
 
     private void AttachMenu() {
@@ -321,15 +336,25 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         EnsureTabVisible(ModOptionsLayout.Create(0f));
     }
 
-    private void SelectTab(int index) {
+    private void SelectTab(int index, bool playSound = true) {
         if (tabs.Count == 0) return;
         CloseDropdown(playSound: false);
         SaveTabState();
-        selectedTab = (index % tabs.Count + tabs.Count) % tabs.Count;
+        selectedTab = Math.Clamp(index, 0, tabs.Count - 1);
         rowScroll.Reset();
         ApplyTabVisibility();
         EnsureTabVisible(ModOptionsLayout.Create(0f));
-        Audio.Play(index < 0 ? "event:/ui/main/rollover_up" : "event:/ui/main/rollover_down");
+        if (playSound) Audio.Play("event:/ui/main/rollover_down");
+    }
+
+    private void MoveTab(int direction) {
+        List<int> visible = FilteredTabIndices();
+        if (visible.Count == 0) return;
+        int position = visible.IndexOf(selectedTab);
+        if (position < 0) position = 0;
+        int nextPosition = (position + Math.Sign(direction) + visible.Count) % visible.Count;
+        SelectTab(visible[nextPosition], playSound: false);
+        Audio.Play(direction < 0 ? "event:/ui/main/rollover_up" : "event:/ui/main/rollover_down");
     }
 
     private void SaveTabState() {
@@ -341,13 +366,17 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         savedItemOrdinal = menu.Current is { } current ? tab.Items.IndexOf(current) : -1;
     }
 
-    private void ApplyTabVisibility() {
+    private void ApplyTabVisibility(bool invokeSelectionCallbacks = true) {
         if (menu is null || tabs.Count == 0) return;
-        menu.Current?.OnLeave?.Invoke();
+        if (invokeSelectionCallbacks) menu.Current?.OnLeave?.Invoke();
         ModTab tab = tabs[selectedTab];
         HashSet<TextMenu.Item> active = tab.Items.ToHashSet();
+        bool tabVisible = FilteredTabIndices().Contains(selectedTab);
         foreach (TextMenu.Item item in menu.Items) {
-            item.Visible = active.Contains(item) && naturalVisibility.GetValueOrDefault(item);
+            bool visible = tabVisible && active.Contains(item) && naturalVisibility.GetValueOrDefault(item);
+            if (visible && item is not TextMenuExt.EaseInSubHeaderExt)
+                visible = MatchesSettingSearch(tab, item);
+            item.Visible = visible;
         }
         menu.MinWidth = Math.Max(600f, ModOptionsLayout.Create(0f).Rows.Width - 54f);
         menu.RecalculateSize();
@@ -356,14 +385,191 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
             selection = menu.Items.FindIndex(CanSelect);
         }
         menu.Selection = selection;
-        if (selection >= 0) menu.Items[selection].OnEnter?.Invoke();
-        ForceDescriptionsVisible();
+        if (invokeSelectionCallbacks && selection >= 0) menu.Items[selection].OnEnter?.Invoke();
     }
 
     private void CaptureNaturalVisibility() {
         if (menu is null || tabs.Count == 0) return;
-        foreach (TextMenu.Item item in tabs[selectedTab].Items) naturalVisibility[item] = item.Visible;
+        ModTab tab = tabs[selectedTab];
+        foreach (TextMenu.Item item in tab.Items) {
+            if (item is not TextMenuExt.EaseInSubHeaderExt && !MatchesSettingSearch(tab, item)) continue;
+            naturalVisibility[item] = item.Visible;
+        }
     }
+
+    private bool UpdateSearchInput(ModOptionsLayout layout) {
+        Vector2 mouse = MInput.Mouse.Position;
+        if (MInput.Mouse.PressedLeftButton) {
+            if (layout.TabSearch.Contains(mouse)) {
+                SetSearchTarget(SearchTarget.Tabs);
+                Audio.Play("event:/ui/main/button_select");
+                return true;
+            }
+            if (layout.SettingSearch.Contains(mouse)) {
+                SetSearchTarget(SearchTarget.Settings);
+                Audio.Play("event:/ui/main/button_select");
+                return true;
+            }
+        }
+        if (MInput.Keyboard.Check(Keys.LeftControl, Keys.RightControl)
+            && MInput.Keyboard.Pressed(Keys.F)) {
+            SetSearchTarget(MInput.Keyboard.Check(Keys.LeftShift, Keys.RightShift)
+                ? SearchTarget.Tabs
+                : SearchTarget.Settings);
+            return true;
+        }
+        if (searchTarget == SearchTarget.None) return false;
+        if (Input.MenuCancel.Pressed || MaterialTextInputFocus.Pressed(Keys.Escape)) {
+            SetSearchTarget(SearchTarget.None);
+            return true;
+        }
+        if (MaterialTextInputFocus.Pressed(Keys.Enter)) {
+            SetSearchTarget(SearchTarget.None);
+            return true;
+        }
+        if (MInput.Mouse.PressedLeftButton
+            && !layout.TabSearch.Contains(mouse)
+            && !layout.SettingSearch.Contains(mouse)) {
+            SetSearchTarget(SearchTarget.None);
+            return false;
+        }
+        return true;
+    }
+
+    private void SetSearchTarget(SearchTarget target) {
+        if (searchTarget == target) return;
+        bool wasFocused = searchTarget != SearchTarget.None;
+        bool isFocused = target != SearchTarget.None;
+        searchTarget = target;
+        imeText = "";
+        if (!wasFocused && isFocused) {
+            TextInput.OnInput += OnTextInput;
+            TextInputEXT.TextEditing += OnTextEditing;
+            MaterialTextInputFocus.Focus(this);
+        } else if (wasFocused && !isFocused) {
+            TextInput.OnInput -= OnTextInput;
+            TextInputEXT.TextEditing -= OnTextEditing;
+            MaterialTextInputFocus.Blur(this);
+        }
+    }
+
+    private void OnTextInput(char character) {
+        if (searchTarget == SearchTarget.None) return;
+        ref string value = ref searchTarget == SearchTarget.Tabs
+            ? ref tabSearchText
+            : ref settingSearchText;
+        if (character == '\b') {
+            if (value.Length == 0) return;
+            value = value[..^1];
+        } else if (!char.IsControl(character) && value.Length < SearchTextLimit) {
+            value += character;
+        } else {
+            return;
+        }
+        imeText = "";
+        SearchChanged();
+    }
+
+    private void OnTextEditing(string? text, int start, int length) {
+        _ = start;
+        _ = length;
+        if (searchTarget != SearchTarget.None) imeText = text ?? "";
+    }
+
+    private void SearchChanged() {
+        CloseDropdown(playSound: false);
+        if (searchTarget == SearchTarget.Tabs) {
+            tabScroll.Reset();
+            List<int> visible = FilteredTabIndices();
+            if (visible.Count > 0 && !visible.Contains(selectedTab)) selectedTab = visible[0];
+        } else {
+            rowScroll.Reset();
+        }
+        ApplyTabVisibility();
+        EnsureTabVisible(ModOptionsLayout.Create(0f));
+        EnsureSelectionVisible(ModOptionsLayout.Create(0f));
+    }
+
+    private List<int> FilteredTabIndices() {
+        List<int> result = [];
+        string search = tabSearchText.Trim();
+        for (int index = 0; index < tabs.Count; index++) {
+            ModTab tab = tabs[index];
+            if (search.Length == 0
+                || tab.Title.Contains(search, StringComparison.CurrentCultureIgnoreCase)
+                || tab.Version.Contains(search, StringComparison.CurrentCultureIgnoreCase)) {
+                result.Add(index);
+            }
+        }
+        return result;
+    }
+
+    private bool MatchesSettingSearch(ModTab tab, TextMenu.Item item) {
+        string search = settingSearchText.Trim();
+        if (search.Length == 0 || item is TextMenuExt.EaseInSubHeaderExt) return true;
+        if (TryGetSearchLabel(item, out string label)
+            && label.Contains(search, StringComparison.CurrentCultureIgnoreCase)) return true;
+        if (TryGetOption(item, out OptionSnapshot option) && option.Options.Count > 0
+            && option.Options[Math.Clamp(option.Index, 0, option.Options.Count - 1)]
+                .Contains(search, StringComparison.CurrentCultureIgnoreCase)) return true;
+        foreach (TextMenuExt.EaseInSubHeaderExt description in DescriptionCandidates(tab, item)) {
+            if (description.Title.Contains(search, StringComparison.CurrentCultureIgnoreCase)) return true;
+        }
+        return false;
+    }
+
+    private static bool TryGetSearchLabel(TextMenu.Item item, out string label) {
+        if (item is TextMenu.SubHeader header) {
+            label = header.Title;
+            return label.Length > 0;
+        }
+        return TryGetLabel(item, out label);
+    }
+
+    private List<RowEntry> VisibleRows() {
+        List<RowEntry> rows = [];
+        if (tabs.Count == 0 || !FilteredTabIndices().Contains(selectedTab)) return rows;
+        ModTab tab = tabs[selectedTab];
+        foreach (TextMenu.Item item in tab.Items) {
+            if (item is TextMenuExt.EaseInSubHeaderExt || !item.Visible) continue;
+            rows.Add(new RowEntry(item, SelectDescription(tab, item)));
+        }
+        return rows;
+    }
+
+    private static List<TextMenuExt.EaseInSubHeaderExt> DescriptionCandidates(ModTab tab,
+        TextMenu.Item owner) {
+        List<TextMenuExt.EaseInSubHeaderExt> result = [];
+        int index = tab.Items.IndexOf(owner);
+        for (int next = index + 1; next < tab.Items.Count; next++) {
+            if (tab.Items[next] is not TextMenuExt.EaseInSubHeaderExt description) break;
+            result.Add(description);
+        }
+        return result;
+    }
+
+    private static TextMenuExt.EaseInSubHeaderExt? SelectDescription(ModTab tab, TextMenu.Item owner) {
+        List<TextMenuExt.EaseInSubHeaderExt> candidates = DescriptionCandidates(tab, owner);
+        if (candidates.Count == 0) return null;
+        string relaunch = Dialog.Clean("MODOPTIONS_NEEDSRELAUNCH");
+        TextMenuExt.EaseInSubHeaderExt? warning = candidates.LastOrDefault(description =>
+            description.FadeVisible
+            && !string.Equals(description.Title, relaunch, StringComparison.CurrentCultureIgnoreCase)
+            && IsWarningColor(description.TextColor));
+        if (warning is not null) return warning;
+        TextMenuExt.EaseInSubHeaderExt? regular = candidates.FirstOrDefault(description =>
+            description.TextColor == Color.Gray);
+        if (regular is not null) return regular;
+        TextMenuExt.EaseInSubHeaderExt? active = candidates.FirstOrDefault(description =>
+            description.FadeVisible
+            && !string.Equals(description.Title, relaunch, StringComparison.CurrentCultureIgnoreCase));
+        if (active is not null) return active;
+        return candidates.FirstOrDefault(description =>
+            string.Equals(description.Title, relaunch, StringComparison.CurrentCultureIgnoreCase));
+    }
+
+    private static bool IsWarningColor(Color color) =>
+        color == Color.OrangeRed || color == Color.Goldenrod || color == Color.Red || color == Color.Yellow;
 
     private void UpdateMouse(ModOptionsLayout layout) {
         if (menu is null) return;
@@ -513,26 +719,35 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private void EnsureSelectionVisible(ModOptionsLayout layout) {
         if (menu is null || menu.Selection < 0) return;
         float top = 0f;
-        foreach (TextMenu.Item item in tabs[selectedTab].Items) {
-            if (!item.Visible) continue;
-            float height = RowHeight(item);
-            if (item == menu.Current) {
+        foreach (RowEntry row in VisibleRows()) {
+            if (row.Item == menu.Current) {
+                float height = RowHeight(row);
                 rowScroll.EnsureVisible(top, top + height, layout.Rows.Height, MaxRowScroll(layout));
                 return;
             }
-            top += height + RowGap;
+            top += RowHeight(row) + RowGap;
         }
     }
 
     private void EnsureTabVisible(ModOptionsLayout layout) {
-        float top = selectedTab * (TabHeight + TabGap);
+        List<int> visible = FilteredTabIndices();
+        int position = visible.IndexOf(selectedTab);
+        if (position < 0) return;
+        float top = position * (TabHeight + TabGap);
         tabScroll.EnsureVisible(top, top + TabHeight, layout.NavigationItems.Height, MaxTabScroll(layout));
     }
 
     private void UpdateInteractions(ModOptionsLayout layout) {
-        List<MaterialInteractionTarget> targets = [];
-        for (int index = 0; index < tabs.Count; index++) {
-            MaterialRect rect = layout.Tab(index, tabScroll.Offset);
+        List<MaterialInteractionTarget> targets = [
+            new MaterialInteractionTarget("mod-options.search.tabs", layout.TabSearch,
+                Focused: searchTarget == SearchTarget.Tabs),
+            new MaterialInteractionTarget("mod-options.search.settings", layout.SettingSearch,
+                Focused: searchTarget == SearchTarget.Settings)
+        ];
+        List<int> visibleTabs = FilteredTabIndices();
+        for (int position = 0; position < visibleTabs.Count; position++) {
+            int index = visibleTabs[position];
+            MaterialRect rect = layout.Tab(position, tabScroll.Offset);
             if (rect.Bottom < layout.NavigationItems.Y || rect.Y > layout.NavigationItems.Bottom) continue;
             targets.Add(new MaterialInteractionTarget($"mod-options.tab.{tabs[index].Id}", rect,
                 Focused: index == selectedTab));
@@ -553,11 +768,16 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         MaterialUiKit.Text(UiText("microblocks_qol_modoptions_mods", "模组与分类"),
             new Vector2(layout.NavigationItems.X, layout.Navigation.Y + 30f), new Vector2(0f, 0.5f),
             MaterialTextRole.Label, palette.OnSurfaceVariant, alpha, scaleOverride: 0.28f);
+        RenderSearchBox(layout.TabSearch, tabSearchText, searchTarget == SearchTarget.Tabs,
+            UiText("microblocks_qol_modoptions_search_tabs", "搜索模组…"), "mod-options.search.tabs",
+            palette, alpha);
 
         tabViewport.Render(layout.NavigationItems, () => {
-            for (int index = 0; index < tabs.Count; index++) {
+            List<int> visibleTabs = FilteredTabIndices();
+            for (int position = 0; position < visibleTabs.Count; position++) {
+                int index = visibleTabs[position];
                 ModTab tab = tabs[index];
-                MaterialRect rect = layout.Tab(index, tabScroll.Offset);
+                MaterialRect rect = layout.Tab(position, tabScroll.Offset);
                 if (rect.Bottom < layout.NavigationItems.Y || rect.Y > layout.NavigationItems.Bottom) continue;
                 bool selected = index == selectedTab;
                 if (selected) {
@@ -574,6 +794,11 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                     MaterialTextRole.Label, selected ? palette.OnPrimary : palette.OnSurfaceVariant,
                     alpha, scaleOverride: 0.29f);
             }
+            if (visibleTabs.Count == 0) {
+                MaterialUiKit.Text(UiText("microblocks_qol_modoptions_no_tabs", "没有匹配的模组"),
+                    layout.NavigationItems.Center, new Vector2(0.5f), MaterialTextRole.Caption,
+                    palette.OnSurfaceVariant, alpha, scaleOverride: 0.29f);
+            }
         });
     }
 
@@ -583,13 +808,18 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
             layout.Content.Height, 28f, palette.Surface * (0.46f * alpha));
         MaterialUiKit.Icon("tune", new Vector2(layout.ContentHeader.X + 15f, layout.ContentHeader.Center.Y),
             27f, palette.Primary, alpha, filled: true);
-        MaterialUiKit.Text(tab.Title,
+        float titleWidth = Math.Max(140f, layout.SettingSearch.X - layout.ContentHeader.X - 210f);
+        string shownTitle = MaterialTextUtil.Ellipsize(tab.Title, titleWidth, 0.47f, UiFontWeight.Bold);
+        MaterialUiKit.Text(shownTitle,
             new Vector2(layout.ContentHeader.X + 42f, layout.ContentHeader.Center.Y), new Vector2(0f, 0.5f),
             MaterialTextRole.Title, palette.OnSurface, alpha, scaleOverride: 0.47f);
         if (tab.Version.Length > 0) {
-            MaterialUiKit.Chip(tab.Version, new Vector2(layout.ContentHeader.Right, layout.ContentHeader.Y + 9f),
+            MaterialUiKit.Chip(tab.Version, new Vector2(layout.SettingSearch.X - 16f, layout.ContentHeader.Y + 13f),
                 palette, selected: false, alpha);
         }
+        RenderSearchBox(layout.SettingSearch, settingSearchText, searchTarget == SearchTarget.Settings,
+            UiText("microblocks_qol_modoptions_search_settings", "搜索当前设置…"),
+            "mod-options.search.settings", palette, alpha);
 
         menu!.Alpha = alpha;
         menu.HighlightColor = palette.Primary;
@@ -603,10 +833,6 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                 if (rect.Bottom < layout.Rows.Y || rect.Y > layout.Rows.Bottom) continue;
                 renderedAny = true;
                 bool selected = menu.Current == item && item.Hoverable;
-                if (item is TextMenuExt.EaseInSubHeaderExt description) {
-                    RenderDescription(description.Title, rect, palette, alpha);
-                    continue;
-                }
                 if (item is TextMenu.SubHeader header) {
                     string title = MaterialTextUtil.Ellipsize(header.Title, rect.Width - 16f,
                         0.34f, UiFontWeight.Bold);
@@ -622,12 +848,23 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                         palette.Primary * alpha);
                 }
                 motion.RenderStateLayer(ItemKey(item), rect, 22f, palette.Primary, alpha);
-                if (!RenderStandardItem(item, rect, palette, alpha, selected)) {
-                    item.Render(new Vector2(rect.X + 26f, rect.Center.Y), selected);
+                MaterialRect primary = new(rect.X, rect.Y, rect.Width, PrimaryRowHeight(item));
+                if (!RenderStandardItem(item, primary, palette, alpha, selected)) {
+                    item.Render(new Vector2(primary.X + 26f, primary.Center.Y), selected);
+                }
+                if (placement.Description is { } description) {
+                    RenderDescription(description.Title,
+                        new MaterialRect(rect.X, primary.Bottom, rect.Width, rect.Bottom - primary.Bottom),
+                        palette, alpha, embedded: true);
                 }
             }
-            if (!renderedAny && tabs[selectedTab].Items.All(item => !item.Visible)) {
-                MaterialUiKit.Text(UiText("microblocks_qol_modoptions_empty", "没有可用设置"),
+            if (!renderedAny) {
+                string empty = FilteredTabIndices().Count == 0
+                    ? UiText("microblocks_qol_modoptions_no_tabs", "没有匹配的模组")
+                    : string.IsNullOrWhiteSpace(settingSearchText)
+                    ? UiText("microblocks_qol_modoptions_empty", "没有可用设置")
+                    : UiText("microblocks_qol_modoptions_no_settings", "没有匹配的设置");
+                MaterialUiKit.Text(empty,
                     layout.Rows.Center, new Vector2(0.5f), MaterialTextRole.Body,
                     palette.OnSurfaceVariant, alpha, scaleOverride: 0.36f);
             }
@@ -797,18 +1034,52 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
             enabled ? palette.OnSurface : palette.OnSurfaceVariant * 0.5f, alpha);
     }
 
-    private static void RenderDescription(string text, MaterialRect rect, MaterialPalette palette, float alpha) {
-        MaterialUi.RoundedRect(rect.X + 12f, rect.Y, rect.Width - 24f, rect.Height, 18f,
+    private static void RenderDescription(string text, MaterialRect rect, MaterialPalette palette, float alpha,
+        bool embedded = false) {
+        float inset = embedded ? 24f : 12f;
+        if (!embedded) MaterialUi.RoundedRect(rect.X + inset, rect.Y, rect.Width - inset * 2f, rect.Height, 18f,
             palette.Primary * (0.13f * alpha));
-        MaterialUiKit.Icon("info", new Vector2(rect.X + 36f, rect.Y + 25f), 19f,
+        MaterialUiKit.Icon("info", new Vector2(rect.X + inset + 12f, rect.Y + 17f), 17f,
             palette.Primary, alpha, filled: true);
-        List<string> lines = MaterialTextUtil.WrapLines(text, rect.Width - 92f, 0.27f, 5);
-        float y = rect.Y + 13f;
+        List<string> lines = MaterialTextUtil.WrapLines(text, rect.Width - inset * 2f - 38f, 0.25f, 4);
+        float y = rect.Y + 5f;
         foreach (string line in lines) {
-            MaterialUiKit.Text(line, new Vector2(rect.X + 58f, y), Vector2.Zero,
-                MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.27f);
-            y += 28f;
+            MaterialUiKit.Text(line, new Vector2(rect.X + inset + 30f, y), Vector2.Zero,
+                MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.25f);
+            y += 26f;
         }
+    }
+
+    private void RenderSearchBox(MaterialRect rect, string value, bool focused, string placeholder,
+        string interactionKey, MaterialPalette palette, float alpha) {
+        MaterialUi.RoundedRect(rect.X, rect.Y, rect.Width, rect.Height, rect.Height / 2f,
+            (focused ? palette.SurfaceHighest : palette.SurfaceHigh) * (0.82f * alpha));
+        motion.RenderStateLayer(interactionKey, rect, rect.Height / 2f, palette.Primary, alpha);
+        MaterialUi.RoundedOutline(rect.X, rect.Y, rect.Width, rect.Height, rect.Height / 2f,
+            focused ? 2f : 1f, (focused ? palette.Primary : palette.Outline) * (alpha * 0.78f));
+        MaterialUiKit.Icon("search", new Vector2(rect.X + 21f, rect.Center.Y), 18f,
+            focused ? palette.Primary : palette.OnSurfaceVariant, alpha);
+        string shown = value + (focused ? imeText : "");
+        string text = shown.Length == 0 ? placeholder : shown;
+        Color color = shown.Length == 0 ? palette.OnSurfaceVariant * 0.64f : palette.OnSurface;
+        Vector2 textPosition = new(rect.X + 42f, rect.Center.Y);
+        string visibleText = MaterialTextUtil.Ellipsize(text, rect.Width - 58f, 0.28f);
+        SystemTtfFont.DrawVisual(visibleText, textPosition, new Vector2(0f, 0.5f), 0.28f, color * alpha);
+        if (focused && Scene.BetweenInterval(0.5f)) {
+            string visibleInput = MaterialTextUtil.Ellipsize(shown, rect.Width - 58f, 0.28f);
+            float caretX = textPosition.X + SystemTtfFont.MeasureVisible(visibleInput, 0.28f).X + 2f;
+            MaterialUi.Line(new Vector2(caretX, rect.Y + 9f), new Vector2(caretX, rect.Bottom - 9f),
+                2f, palette.Primary * alpha);
+        }
+        if (!focused) return;
+        float xScale = Engine.ViewWidth / ScreenWidth;
+        float yScale = Engine.ViewHeight / ScreenHeight;
+        TextInputEXT.SetInputRectangle(new Rectangle(
+            (int)(rect.X * xScale),
+            (int)(rect.Y * yScale),
+            Math.Max(1, (int)(rect.Width * xScale)),
+            Math.Max(1, (int)(rect.Height * yScale))
+        ));
     }
 
     private void RenderDropdown(ModOptionsLayout layout, MaterialPalette palette, float alpha) {
@@ -858,7 +1129,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
     private void RenderFooter(ModOptionsLayout layout, MaterialPalette palette, float alpha) {
         string hint = UiText("microblocks_qol_modoptions_help",
-            "Tab / PgUp / PgDn 切换分类  ·  方向键调整  ·  Enter 确认  ·  鼠标滚轮滚动  ·  Esc 返回");
+            "Ctrl+F 搜索设置  ·  Ctrl+Shift+F 搜索模组  ·  Tab / PgUp / PgDn 切换分类  ·  Esc 返回");
         MaterialUiKit.Text(hint, new Vector2(layout.Footer.X, layout.Footer.Center.Y), new Vector2(0f, 0.5f),
             MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.27f);
     }
@@ -866,10 +1137,10 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private List<RowPlacement> RowPlacements(ModOptionsLayout layout) {
         List<RowPlacement> placements = [];
         float y = layout.Rows.Y - rowScroll.Offset;
-        foreach (TextMenu.Item item in tabs[selectedTab].Items) {
-            if (!item.Visible) continue;
-            float height = RowHeight(item);
-            placements.Add(new RowPlacement(item, new MaterialRect(layout.Rows.X, y, layout.Rows.Width, height)));
+        foreach (RowEntry row in VisibleRows()) {
+            float height = RowHeight(row);
+            placements.Add(new RowPlacement(row.Item, row.Description,
+                new MaterialRect(layout.Rows.X, y, layout.Rows.Width, height)));
             y += height + RowGap;
         }
         return placements;
@@ -879,22 +1150,24 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         if (tabs.Count == 0) return 0f;
         float height = 0f;
         int count = 0;
-        foreach (TextMenu.Item item in tabs[selectedTab].Items) {
-            if (!item.Visible) continue;
-            height += RowHeight(item);
+        foreach (RowEntry row in VisibleRows()) {
+            height += RowHeight(row);
             count++;
         }
         height += Math.Max(0, count - 1) * RowGap;
         return Math.Max(0f, height - layout.Rows.Height);
     }
 
-    private float MaxTabScroll(ModOptionsLayout layout) => Math.Max(0f,
-        tabs.Count * (TabHeight + TabGap) - TabGap - layout.NavigationItems.Height);
+    private float MaxTabScroll(ModOptionsLayout layout) {
+        int count = FilteredTabIndices().Count;
+        return Math.Max(0f, count * (TabHeight + TabGap) - TabGap - layout.NavigationItems.Height);
+    }
 
     private int TabIndexAt(Vector2 point, ModOptionsLayout layout) {
         if (!layout.NavigationItems.Contains(point)) return -1;
-        for (int index = 0; index < tabs.Count; index++) {
-            if (layout.Tab(index, tabScroll.Offset).Contains(point)) return index;
+        List<int> visible = FilteredTabIndices();
+        for (int position = 0; position < visible.Count; position++) {
+            if (layout.Tab(position, tabScroll.Offset).Contains(point)) return visible[position];
         }
         return -1;
     }
@@ -905,24 +1178,6 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
             if (placement.Rect.Contains(point)) return placement;
         }
         return null;
-    }
-
-    private void ForceDescriptionsVisible() {
-        if (tabs.Count == 0) return;
-        foreach (TextMenu.Item item in tabs[selectedTab].Items) {
-            ForceDescriptionVisible(item);
-            if (item is TextMenuExt.EaseInSubHeaderExt) naturalVisibility[item] = true;
-        }
-    }
-
-    private static void ForceDescriptionVisible(TextMenu.Item item) {
-        if (item is TextMenuExt.EaseInSubHeaderExt description) {
-            description.FadeVisible = true;
-            description.Visible = true;
-        }
-        if (item is TextMenuExt.SubMenu submenu) {
-            foreach (TextMenu.Item child in submenu.Items) ForceDescriptionVisible(child);
-        }
     }
 
     private static bool TryGetOption(TextMenu.Item item, out OptionSnapshot snapshot) {
@@ -1183,11 +1438,16 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
     private static bool CanSelect(TextMenu.Item item) => item.Visible && item.Selectable;
 
-    private static float RowHeight(TextMenu.Item item) {
-        if (item is TextMenuExt.EaseInSubHeaderExt description) {
-            int lines = Math.Max(1, MaterialTextUtil.WrapLines(description.Title, 1180f, 0.27f, 5).Count);
-            return 26f + lines * 28f;
+    private static float RowHeight(RowEntry row) {
+        float height = PrimaryRowHeight(row.Item);
+        if (row.Description is { } description) {
+            int lines = Math.Max(1, MaterialTextUtil.WrapLines(description.Title, 1160f, 0.25f, 4).Count);
+            height += 12f + lines * 26f;
         }
+        return height;
+    }
+
+    private static float PrimaryRowHeight(TextMenu.Item item) {
         if (item is TextMenu.SubHeader) return 54f;
         if (IsExpandedComposite(item))
             return Math.Max(78f, item.Height() + 18f);
@@ -1230,7 +1490,16 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         int Maximum
     );
 
-    private readonly record struct RowPlacement(TextMenu.Item Item, MaterialRect Rect);
+    private readonly record struct RowEntry(
+        TextMenu.Item Item,
+        TextMenuExt.EaseInSubHeaderExt? Description
+    );
+
+    private readonly record struct RowPlacement(
+        TextMenu.Item Item,
+        TextMenuExt.EaseInSubHeaderExt? Description,
+        MaterialRect Rect
+    );
 
     private enum CloseDestination {
         None,
@@ -1238,13 +1507,21 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         Game
     }
 
+    private enum SearchTarget {
+        None,
+        Tabs,
+        Settings
+    }
+
     private readonly record struct ModOptionsLayout(
         MaterialRect Frame,
         MaterialRect Header,
         MaterialRect Navigation,
+        MaterialRect TabSearch,
         MaterialRect NavigationItems,
         MaterialRect Content,
         MaterialRect ContentHeader,
+        MaterialRect SettingSearch,
         MaterialRect Rows,
         MaterialRect Footer
     ) {
@@ -1267,21 +1544,33 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                 MaterialTrack.Fixed(330f),
                 MaterialTrack.Flex()
             );
+            MaterialRect tabSearch = new(
+                body[0].X + 12f,
+                body[0].Y + 50f,
+                body[0].Width - 24f,
+                44f
+            );
             MaterialRect navigationItems = new(
                 body[0].X + 12f,
-                body[0].Y + 58f,
+                body[0].Y + 106f,
                 body[0].Width - 24f,
-                body[0].Height - 72f
+                body[0].Height - 120f
             );
             MaterialRect contentHeader = new(body[1].X + 24f, body[1].Y + 12f, body[1].Width - 48f, 58f);
+            MaterialRect settingSearch = new(
+                contentHeader.Right - 430f,
+                contentHeader.Center.Y - 23f,
+                430f,
+                46f
+            );
             MaterialRect rows = new(
                 body[1].X + 24f,
                 body[1].Y + 82f,
                 body[1].Width - 56f,
                 body[1].Height - 100f
             );
-            return new ModOptionsLayout(frame, vertical[0], body[0], navigationItems,
-                body[1], contentHeader, rows, vertical[2]);
+            return new ModOptionsLayout(frame, vertical[0], body[0], tabSearch, navigationItems,
+                body[1], contentHeader, settingSearch, rows, vertical[2]);
         }
 
         public MaterialRect Tab(int index, float scrollOffset) => new(
