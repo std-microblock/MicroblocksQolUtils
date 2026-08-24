@@ -33,6 +33,11 @@ const nativeEnv = ffmpeg
       PATH: `${ffmpeg.bin};${process.env.PATH ?? ""}`,
     }
   : process.env;
+run(
+  "cargo",
+  ["build", "-q", "-p", "microblocks-qol-native", "--release", "--features", "ffmpeg"],
+  nativeEnv,
+);
 run("dotnet", [
   "run",
   "--project",
@@ -41,12 +46,7 @@ run("dotnet", [
   "Release",
   "--",
   resolve(root, ".work/skia-parity"),
-]);
-run(
-  "cargo",
-  ["build", "-q", "-p", "microblocks-qol-native", "--release", "--features", "ffmpeg"],
-  nativeEnv,
-);
+], nativeEnv);
 run("dotnet", ["build", resolve(root, "Source/MicroblocksQolUtils.csproj"), "-c", "Release"]);
 rmSync(output, { recursive: true, force: true });
 mkdirSync(resolve(output, "Code"), { recursive: true });
@@ -58,7 +58,6 @@ for (const dependency of [
   "Microsoft.Diagnostics.Tracing.TraceEvent.dll",
   "Microsoft.Extensions.DependencyInjection.Abstractions.dll",
   "Microsoft.Extensions.Logging.Abstractions.dll",
-  "SkiaSharp.dll",
   "System.Collections.Immutable.dll",
   "System.IO.Pipelines.dll",
   "System.Reflection.Metadata.dll",
@@ -69,11 +68,6 @@ for (const dependency of [
   const source = resolve(managedOutput, dependency);
   if (existsSync(source)) cpSync(source, resolve(output, "Code", dependency));
 }
-const skiaNative = resolve(managedOutput, "runtimes/win-x64/native/libSkiaSharp.dll");
-if (!existsSync(skiaNative)) throw new Error(`Skia native runtime was not found at ${skiaNative}`);
-cpSync(skiaNative, resolve(output, "Code/libSkiaSharp.dll"));
-cpSync(resolve(root, "third_party/skiasharp/LICENSE.txt"),
-  resolve(output, "Code/SkiaSharp-LICENSE.txt"));
 cpSync(resolve(root, "target", "release", nativeName), resolve(output, "Code", nativeName));
 if (ffmpeg) {
   for (const dependency of ffmpeg.dlls) {

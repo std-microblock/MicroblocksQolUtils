@@ -2,7 +2,6 @@ using System.Reflection;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Graphics;
 using Monocle;
-using SkiaSharp;
 using XnaMatrix = Microsoft.Xna.Framework.Matrix;
 
 namespace Celeste.Mod.MicroblocksQolUtils;
@@ -13,9 +12,8 @@ public enum UiFontWeight {
 }
 
 /// <summary>
-/// Renders complete text runs with Skia, uploads the exact alpha mask, and
-/// draws every texel at one physical screen pixel. The CPU reference image and
-/// the runtime texture therefore share the same rasterization bytes.
+/// Renders complete text runs through the portable Rust shaping and hinting
+/// pipeline, then draws every texel at one physical screen pixel.
 /// </summary>
 public static class SystemTtfFont {
     private const float BasePixelSize = 42f;
@@ -27,9 +25,6 @@ public static class SystemTtfFont {
         "transformMatrix", "_transformMatrix");
     private static readonly Dictionary<TextRunKey, TextRunCacheEntry> Runs = [];
     private static readonly LinkedList<TextRunKey> RunLru = [];
-    private static SKTypeface? regularTypeface;
-    private static SKTypeface? boldTypeface;
-    private static bool synthesizeBold;
     private static string loadedIdentity = "";
 
     public static void Prepare() {
@@ -37,31 +32,19 @@ public static class SystemTtfFont {
         string identity = string.IsNullOrWhiteSpace(settings.FontFile)
             ? $"family:{settings.FontFamily.Trim()}"
             : $"file:{Path.GetFullPath(Environment.ExpandEnvironmentVariables(settings.FontFile.Trim()))}";
-        if (regularTypeface is not null && string.Equals(identity, loadedIdentity, StringComparison.OrdinalIgnoreCase))
+        if (loadedIdentity.Length > 0
+            && string.Equals(identity, loadedIdentity, StringComparison.OrdinalIgnoreCase))
             return;
 
         Dispose();
         if (identity.StartsWith("file:", StringComparison.Ordinal)) {
             string path = identity[5..];
             if (!File.Exists(path)) throw new FileNotFoundException("Configured UI font does not exist.", path);
-            regularTypeface = SKTypeface.FromFile(path)
-                ?? throw new InvalidDataException($"No font face found in {path}");
-            boldTypeface = SKTypeface.FromFile(path)
-                ?? throw new InvalidDataException($"No font face found in {path}");
-            synthesizeBold = boldTypeface.FontStyle.Weight < (int)SKFontStyleWeight.SemiBold;
-        } else {
-            string familyName = settings.FontFamily.Trim();
-            if (familyName.Length == 0) familyName = "Microsoft YaHei UI";
-            regularTypeface = SKTypeface.FromFamilyName(familyName, SKFontStyle.Normal)
-                ?? throw new InvalidOperationException($"Unable to load UI font family {familyName}");
-            boldTypeface = SKTypeface.FromFamilyName(familyName, SKFontStyle.Bold)
-                ?? throw new InvalidOperationException($"Unable to load bold UI font family {familyName}");
-            synthesizeBold = false;
         }
 
         loadedIdentity = identity;
         Logger.Log(LogLevel.Info, "MicroblocksQolUtils",
-            $"Using Skia UI font {regularTypeface.FamilyName} / {boldTypeface.FamilyName} ({identity})");
+            $"Using portable swash UI rasterizer ({identity})");
     }
 
     public static Vector2 Measure(string text, float scale = 1f, UiFontWeight weight = UiFontWeight.Regular) =>
@@ -112,11 +95,6 @@ public static class SystemTtfFont {
         foreach (TextRunCacheEntry entry in Runs.Values) entry.Run.Texture?.Dispose();
         Runs.Clear();
         RunLru.Clear();
-        regularTypeface?.Dispose();
-        regularTypeface = null;
-        boldTypeface?.Dispose();
-        boldTypeface = null;
-        synthesizeBold = false;
         loadedIdentity = "";
     }
 
@@ -186,13 +164,24 @@ public static class SystemTtfFont {
             return cached.Run;
         }
 
-        SKTypeface typeface = weight == UiFontWeight.Bold
-            ? boldTypeface ?? throw new InvalidOperationException("Bold UI font is not prepared.")
-            : regularTypeface ?? throw new InvalidOperationException("UI font is not prepared.");
-        bool embolden = weight == UiFontWeight.Bold && synthesizeBold;
-        SkiaTextRaster raster = SkiaRasterizer.RasterizeText(
-            text, typeface, context.PixelSize, context.LineHeightPixels, embolden,
-            new SKColor(baseColor.Red, baseColor.Green, baseColor.Blue));
+        QolSettings settings = MicroblocksQolUtilsModule.Settings;
+        string fontFamily = string.IsNullOrWhiteSpace(settings.FontFamily)
+            ? "Microsoft YaHei UI"
+            : settings.FontFamily.Trim();
+        string fontFile = string.IsNullOrWhiteSpace(settings.FontFile)
+            ? ""
+            : Path.GetFullPath(Environment.ExpandEnvironmentVariables(settings.FontFile.Trim()));
+        PortableTextRaster raster = PortableRasterizer.RasterizeText(
+            text,
+            fontFamily,
+            fontFile,
+            weight == UiFontWeight.Bold,
+            context.PixelSize,
+            context.LineHeightPixels,
+            baseColor.Red,
+            baseColor.Green,
+            baseColor.Blue
+        );
         Texture2D? texture = raster.Image is null ? null : CreateTexture(raster.Image);
         TextRun run = new(
             texture,
@@ -210,7 +199,7 @@ public static class SystemTtfFont {
         return run;
     }
 
-    private static Texture2D CreateTexture(SkiaRasterImage image) {
+    private static Texture2D CreateTexture(PortableRasterImage image) {
         Color[] colors = new Color[image.Width * image.Height];
         for (int index = 0; index < colors.Length; index++) {
             int source = index * 4;

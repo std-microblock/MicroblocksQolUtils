@@ -26,7 +26,7 @@ public static class NativeCaptureBridge {
         resolverInstalled = true;
         string? candidate = NativeLibraryPath(typeof(NativeCaptureBridge).Assembly);
         if (candidate is null) {
-            loadError = "microblocks_qol_native.dll was not found beside the managed mod DLL";
+            loadError = "the microblocks_qol_native library was not found beside the managed mod DLL";
             Logger.Log(LogLevel.Warn, "MicroblocksQolUtils/Recorder", loadError);
             return;
         }
@@ -196,8 +196,13 @@ public static class NativeCaptureBridge {
 
     private static string? NativeLibraryPath(Assembly assembly) {
         string? directory = configuredNativeDirectory ?? Path.GetDirectoryName(assembly.Location);
-        if (string.IsNullOrWhiteSpace(directory) || !OperatingSystem.IsWindows()) return null;
-        string path = Path.Combine(directory, "microblocks_qol_native.dll");
+        if (string.IsNullOrWhiteSpace(directory)) return null;
+        string fileName = OperatingSystem.IsWindows()
+            ? "microblocks_qol_native.dll"
+            : OperatingSystem.IsMacOS()
+                ? "libmicroblocks_qol_native.dylib"
+                : "libmicroblocks_qol_native.so";
+        string path = Path.Combine(directory, fileName);
         return File.Exists(path) ? Path.GetFullPath(path) : null;
     }
 

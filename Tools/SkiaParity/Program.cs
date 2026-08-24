@@ -4,18 +4,20 @@ using System.Xml.Linq;
 using Celeste.Mod.MicroblocksQolUtils;
 using SkiaSharp;
 
-const int Width = 1120;
-const int Height = 520;
+const int Width = 2048;
+const int Height = 1152;
 SKColor background = new(24, 22, 34, 255);
 string root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../"));
 string output = args.Length > 0 ? Path.GetFullPath(args[0]) : Path.Combine(root, ".work", "skia-parity");
 Directory.CreateDirectory(output);
+PortableRasterBridge.Initialize(root);
 
 using SKTypeface regular = SKTypeface.FromFamilyName("Microsoft YaHei UI", SKFontStyle.Normal)
     ?? throw new InvalidOperationException("Microsoft YaHei UI regular was not found.");
 using SKTypeface bold = SKTypeface.FromFamilyName("Microsoft YaHei UI", SKFontStyle.Bold)
     ?? throw new InvalidOperationException("Microsoft YaHei UI bold was not found.");
 using SKBitmap reference = NewCanvas();
+using SKBitmap referenceLayer = NewLayer();
 using SKBitmap simulated = NewCanvas();
 using SKBitmap simulatedLayer = NewLayer();
 
@@ -39,9 +41,14 @@ IconSpec[] icons = [
     new("keyboard", 270, 376, 18, new SKColor(169, 137, 226)),
 ];
 
-using (SKCanvas canvas = new(reference)) {
+using (SKCanvas canvas = new(referenceLayer)) {
     foreach (TextSpec spec in texts) DrawTextReference(canvas, spec);
     foreach (IconSpec spec in icons) DrawIconReference(canvas, spec);
+    canvas.Flush();
+}
+using (SKCanvas canvas = new(reference)) {
+    canvas.DrawBitmap(referenceLayer, 0f, 0f,
+        new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None));
     canvas.Flush();
 }
 
@@ -57,12 +64,15 @@ using (SKCanvas canvas = new(simulated)) {
 }
 
 string referencePath = Path.Combine(output, "skia-reference.png");
+string referenceLayerPath = Path.Combine(output, "skia-reference-layer.png");
 string simulatedPath = Path.Combine(output, "mod-simulated.png");
 string layerPath = Path.Combine(output, "mod-layer.png");
 SavePng(reference, referencePath);
+SavePng(referenceLayer, referenceLayerPath);
 SavePng(simulated, simulatedPath);
 SavePng(simulatedLayer, layerPath);
 File.WriteAllBytes(Path.Combine(output, "skia-reference.bgra"), TightBytes(reference));
+File.WriteAllBytes(Path.Combine(output, "skia-reference-layer.bgra"), TightBytes(referenceLayer));
 File.WriteAllBytes(Path.Combine(output, "mod-layer.bgra"), TightBytes(simulatedLayer));
 ParityReport report = Compare(reference, simulated, background);
 string reportPath = Path.Combine(output, "report.json");
@@ -73,7 +83,7 @@ Console.WriteLine($"Mod transparent layer: {layerPath}");
 Console.WriteLine($"Foreground similarity: {report.ForegroundSimilarity:P6}");
 Console.WriteLine($"Full image similarity: {report.FullImageSimilarity:P6}");
 Console.WriteLine($"Exact foreground pixels: {report.ExactForegroundPixelRatio:P6}");
-if (report.ForegroundSimilarity < 0.999) Environment.ExitCode = 1;
+if (report.FullImageSimilarity < 0.999) Environment.ExitCode = 1;
 
 SKBitmap NewCanvas() {
     SKBitmap bitmap = new(new SKImageInfo(Width, Height, SKColorType.Bgra8888, SKAlphaType.Premul));
@@ -98,8 +108,9 @@ void DrawTextReference(SKCanvas canvas, TextSpec spec) {
 }
 
 void DrawTextSimulated(SKCanvas canvas, TextSpec spec) {
-    SkiaTextRaster raster = SkiaRasterizer.RasterizeText(spec.Text,
-        spec.Bold ? bold : regular, spec.PixelSize, spec.LineHeight, color: spec.Color);
+    PortableReferenceText raster = PortableRasterBridge.RasterizeText(spec.Text,
+        "Microsoft YaHei UI", spec.Bold, spec.PixelSize, spec.LineHeight,
+        spec.Color.Red, spec.Color.Green, spec.Color.Blue);
     if (raster.Image is null) return;
     using SKBitmap mask = RasterBitmap(raster.Image);
     canvas.DrawBitmap(mask, spec.X + raster.TextureOffsetX, spec.Y + raster.TextureOffsetY,
@@ -131,14 +142,14 @@ void DrawIconReference(SKCanvas canvas, IconSpec spec) {
 
 void DrawIconSimulated(SKCanvas canvas, IconSpec spec) {
     string path = Path.Combine(root, "Source", "MaterialSymbols", "Rounded", spec.Name + ".svg");
-    using Stream stream = File.OpenRead(path);
-    SkiaRasterImage image = SkiaRasterizer.RasterizeSvg(stream, spec.PixelSize, spec.Color);
+    PortableReferenceImage image = PortableRasterBridge.RasterizeSvg(File.ReadAllBytes(path), spec.PixelSize,
+        spec.Color.Red, spec.Color.Green, spec.Color.Blue);
     using SKBitmap mask = RasterBitmap(image);
     canvas.DrawBitmap(mask, spec.X, spec.Y,
         new SKSamplingOptions(SKFilterMode.Nearest, SKMipmapMode.None));
 }
 
-SKBitmap RasterBitmap(SkiaRasterImage image) {
+SKBitmap RasterBitmap(PortableReferenceImage image) {
     SKBitmap bitmap = new(new SKImageInfo(image.Width, image.Height, SKColorType.Bgra8888, SKAlphaType.Premul));
     if (bitmap.RowBytes == image.Width * 4) {
         Marshal.Copy(image.BgraPremultiplied, 0, bitmap.GetPixels(), image.BgraPremultiplied.Length);

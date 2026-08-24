@@ -10,8 +10,8 @@ using ParityGame game = new(output);
 game.Run();
 
 internal sealed class ParityGame : Game {
-    private const int Width = 1120;
-    private const int Height = 520;
+    private const int Width = 2048;
+    private const int Height = 1152;
     private static readonly Color Background = new(24, 22, 34, 255);
     private readonly string output;
     private readonly GraphicsDeviceManager graphics;
@@ -77,7 +77,7 @@ internal sealed class ParityGame : Game {
         Console.WriteLine($"GPU foreground similarity: {report.ForegroundSimilarity:P6}");
         Console.WriteLine($"GPU full image similarity: {report.FullImageSimilarity:P6}");
         Console.WriteLine($"GPU exact foreground pixels: {report.ExactForegroundPixelRatio:P6}");
-        if (report.ForegroundSimilarity < 0.999) Environment.ExitCode = 1;
+        if (report.FullImageSimilarity < 0.999) Environment.ExitCode = 1;
         Exit();
         base.Draw(gameTime);
     }

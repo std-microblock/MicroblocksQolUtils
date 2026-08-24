@@ -6,9 +6,11 @@ runtime; MiaoNet+ and SpeedrunTool are not hard dependencies.
 Implemented:
 
 - HUD entity and settings model.
-- Skia-based TTF/OTF text-run rasterization with full hinting, physical-pixel
-  alignment, and a bounded lazy GPU cache. Material Symbols use the same Skia
-  color pipeline at their final output resolution.
+- Cross-platform native text shaping and hinted rasterization using the compact
+  Rust `swash` stack, with physical-pixel alignment and a bounded lazy GPU
+  cache. Material Symbols are parsed and rasterized by `svgtypes` + `tiny-skia`
+  at their final output resolution. The shipped mod contains no SkiaSharp
+  managed or native runtime.
 - Named Material Symbols support: rounded SVGs are embedded in the assembly and
   lazily rasterized through `MaterialIcon.Draw("icon_name", ...)`, so UI code can
   use canonical Material You icon names without hand-wiring texture atlases.
@@ -158,9 +160,11 @@ elsewhere. Build and install in one step with:
 node scripts/build-qol-mod.mjs --install
 ```
 
-The parity harness renders representative Chinese/Latin text and Material
-Symbols both directly with Skia and through the mod's raster upload/composition
-path. It fails below 99.9% foreground pixel similarity:
+The development-only parity harness uses SkiaSharp as an external reference and
+compares it with the mod's portable raster upload/composition path. SkiaSharp is
+not referenced by the mod project or copied into the package. The harness fails
+below 99.9% full-frame pixel similarity at the game's captured 2048×1152
+output size, while also reporting foreground-only diagnostics:
 
 ```powershell
 node scripts/verify-skia-parity.mjs
@@ -169,7 +173,7 @@ node scripts/verify-skia-parity.mjs
 For a GPU-level check, the FNA harness uploads the generated premultiplied
 layer, renders it through the same `SpriteBatch` `LinearClamp` / `AlphaBlend`
 path used by the mod, reads the render target back, and applies the same 99.9%
-foreground gate:
+full-frame gate:
 
 ```powershell
 node scripts/verify-skia-gpu-parity.mjs

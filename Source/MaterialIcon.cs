@@ -7,8 +7,8 @@ using XnaMatrix = Microsoft.Xna.Framework.Matrix;
 namespace Celeste.Mod.MicroblocksQolUtils;
 
 /// <summary>
-/// Rasterizes embedded Material Symbols with Skia at their final physical size,
-/// then uploads and draws the exact reference alpha mask 1:1.
+/// Rasterizes embedded Material Symbols with the portable Rust vector path
+/// rasterizer at their final physical size, then uploads and draws 1:1.
 /// </summary>
 internal static class MaterialIcon {
     private const string ResourcePrefix = "Celeste.Mod.MicroblocksQolUtils.MaterialSymbols.Rounded.";
@@ -59,8 +59,8 @@ internal static class MaterialIcon {
             Assembly assembly = typeof(MaterialIcon).Assembly;
             using Stream stream = assembly.GetManifestResourceStream(ResourceName(name))
                 ?? throw new FileNotFoundException($"Embedded Material Symbol '{name}' was not found.");
-            return Textures[key] = CreateTexture(SkiaRasterizer.RasterizeSvg(stream, pixelSize,
-                new SkiaSharp.SKColor(color.Red, color.Green, color.Blue)));
+            return Textures[key] = CreateTexture(PortableRasterizer.RasterizeSvg(
+                stream, pixelSize, color.Red, color.Green, color.Blue));
         } catch (Exception exception) {
             if (ReportedFailures.Add(name)) {
                 Logger.Log(LogLevel.Warn, "MicroblocksQolUtils/MaterialIcon",
@@ -70,7 +70,7 @@ internal static class MaterialIcon {
         }
     }
 
-    private static Texture2D CreateTexture(SkiaRasterImage image) {
+    private static Texture2D CreateTexture(PortableRasterImage image) {
         Color[] colors = new Color[image.Width * image.Height];
         for (int index = 0; index < colors.Length; index++) {
             int source = index * 4;

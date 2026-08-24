@@ -1,5 +1,3 @@
-using SkiaSharp;
-
 namespace Celeste.Mod.MicroblocksQolUtils;
 
 internal static class UiFontCatalog {
@@ -10,7 +8,7 @@ internal static class UiFontCatalog {
 
     private static IReadOnlyList<string> LoadInstalledFamilies() {
         try {
-            string[] names = SKFontManager.Default.FontFamilies
+            string[] names = PortableRasterizer.FontFamilies()
                 .Where(name => !string.IsNullOrWhiteSpace(name))
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .OrderBy(name => name, StringComparer.CurrentCultureIgnoreCase)

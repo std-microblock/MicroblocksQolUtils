@@ -9,7 +9,4 @@
     <PackageReference Include="SkiaSharp" Version="4.151.1" />
     <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="4.151.1" />
   </ItemGroup>
-  <ItemGroup>
-    <Compile Include="..\..\Source\SkiaRasterizer.cs" Link="SkiaRasterizer.cs" />
-  </ItemGroup>
 </Project>

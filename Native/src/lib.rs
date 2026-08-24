@@ -15,6 +15,8 @@ use std::time::{Duration, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+mod raster;
+
 #[cfg(all(windows, feature = "ffmpeg"))]
 mod encoder;
 #[cfg(all(windows, feature = "ffmpeg"))]
@@ -1138,6 +1140,137 @@ pub unsafe extern "C" fn mqol_recording_finalize_with_progress(
 #[unsafe(no_mangle)]
 pub extern "C" fn mqol_capture_reserved(_value: *mut c_void) -> i32 {
     ERR_PLATFORM
+}
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RasterResult {
+    pub pixels: *mut u8,
+    pub pixels_length: usize,
+    pub width: u32,
+    pub height: u32,
+    pub texture_offset_x: f32,
+    pub texture_offset_y: f32,
+    pub layout_width: f32,
+    pub layout_height: f32,
+    pub visual_x: f32,
+    pub visual_y: f32,
+    pub visual_width: f32,
+    pub visual_height: f32,
+}
+
+fn export_raster(image: raster::RasterImage, output: *mut RasterResult) -> Result<i32, i32> {
+    if output.is_null() {
+        set_last_error("raster output is null");
+        return Err(ERR_INVALID_ARGUMENT);
+    }
+    let mut pixels = image.pixels.into_boxed_slice();
+    let pixels_length = pixels.len();
+    let pixels_pointer = if pixels_length == 0 {
+        ptr::null_mut()
+    } else {
+        pixels.as_mut_ptr()
+    };
+    std::mem::forget(pixels);
+    let result = RasterResult {
+        pixels: pixels_pointer,
+        pixels_length,
+        width: image.width,
+        height: image.height,
+        texture_offset_x: image.texture_offset_x,
+        texture_offset_y: image.texture_offset_y,
+        layout_width: image.layout_width,
+        layout_height: image.layout_height,
+        visual_x: image.visual_x,
+        visual_y: image.visual_y,
+        visual_width: image.visual_width,
+        visual_height: image.visual_height,
+    };
+    // SAFETY: `output` was checked for null and points to caller-owned writable memory.
+    unsafe { ptr::write(output, result) };
+    Ok(OK)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mqol_raster_text(
+    request_json: *const u8,
+    request_length: usize,
+    output: *mut RasterResult,
+) -> i32 {
+    ffi_status(|| {
+        // SAFETY: Required by the exported ABI contract.
+        let json = unsafe { utf8_from_raw(request_json, request_length)? };
+        let request = serde_json::from_str::<raster::TextRasterRequest>(json).map_err(|error| {
+            set_last_error(format!("invalid text raster request: {error}"));
+            ERR_INVALID_ARGUMENT
+        })?;
+        let image = raster::rasterize_text(&request).map_err(|error| {
+            set_last_error(error);
+            ERR_CAPTURE
+        })?;
+        export_raster(image, output)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mqol_raster_svg(
+    svg_utf8: *const u8,
+    svg_length: usize,
+    pixel_size: u32,
+    red: u8,
+    green: u8,
+    blue: u8,
+    output: *mut RasterResult,
+) -> i32 {
+    ffi_status(|| {
+        // SAFETY: Required by the exported ABI contract.
+        let svg = unsafe { utf8_from_raw(svg_utf8, svg_length)? };
+        let image = raster::rasterize_svg(svg, pixel_size, red, green, blue).map_err(|error| {
+            set_last_error(error);
+            ERR_CAPTURE
+        })?;
+        export_raster(image, output)
+    })
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mqol_raster_font_families(output: *mut RasterResult) -> i32 {
+    ffi_status(|| {
+        let json = serde_json::to_vec(&raster::font_families()).map_err(|error| {
+            set_last_error(format!("cannot serialize font family list: {error}"));
+            ERR_CAPTURE
+        })?;
+        export_raster(
+            raster::RasterImage {
+                pixels: json,
+                width: 0,
+                height: 0,
+                texture_offset_x: 0.0,
+                texture_offset_y: 0.0,
+                layout_width: 0.0,
+                layout_height: 0.0,
+                visual_x: 0.0,
+                visual_y: 0.0,
+                visual_width: 0.0,
+                visual_height: 0.0,
+            },
+            output,
+        )
+    })
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn mqol_raster_free(pixels: *mut u8, pixels_length: usize) {
+    if pixels.is_null() || pixels_length == 0 {
+        return;
+    }
+    // SAFETY: The pointer and length must come from a successful raster export and are consumed once.
+    unsafe {
+        drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+            pixels,
+            pixels_length,
+        )))
+    };
 }
 
 #[cfg(test)]
