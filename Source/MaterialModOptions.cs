@@ -20,6 +20,9 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private const float TabHeight = 52f;
     private const float TabGap = 8f;
     private const float RowGap = 10f;
+    private const float DropdownItemHeight = 46f;
+    private const int DropdownMaxVisibleItems = 8;
+    private const int DropdownOptionLimit = 24;
 
     private static Hook? gotoRoutineHook;
     private static bool hookFailed;
@@ -45,6 +48,9 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private bool saveStarted;
     private string? savedTabId;
     private int savedItemOrdinal = -1;
+    private TextMenu.Item? dropdownItem;
+    private int dropdownHighlight;
+    private int dropdownFirstVisible;
 
     public bool SuppressNormalRender { get; set; }
 
@@ -159,6 +165,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         bool acceptsInput = pauseLevel is not null || Selected && Focused;
         if (!menu.Focused) {
             menu.Update();
+            ForceDescriptionsVisible();
             CaptureNaturalVisibility();
             return;
         }
@@ -166,7 +173,13 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
             menu.Focused = false;
             menu.Update();
             menu.Focused = true;
+            ForceDescriptionsVisible();
             CaptureNaturalVisibility();
+            return;
+        }
+
+        if (dropdownItem is not null) {
+            UpdateDropdown(layout);
             return;
         }
 
@@ -192,9 +205,25 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
             SelectTab(selectedTab + (backwards ? -1 : 1));
         }
 
+        if ((Input.MenuConfirm.Pressed
+                || MInput.Keyboard.Pressed(Keys.Enter)
+                || MInput.Keyboard.Pressed(Keys.Space))
+            && menu.Current is { } current
+            && TryGetOption(current, out OptionSnapshot option)) {
+            if (option.Options.Count == 2) {
+                SetOptionIndex(current, option.Index == 0 ? 1 : 0);
+                return;
+            }
+            if (CanUseDropdown(option)) {
+                OpenDropdown(current, option);
+                return;
+            }
+        }
+
         UpdateMouse(layout);
         int previousSelection = menu.Selection;
         menu.Update();
+        ForceDescriptionsVisible();
         CaptureNaturalVisibility();
         if (menu.Selection != previousSelection) EnsureSelectionVisible(layout);
     }
@@ -222,6 +251,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
         RenderTabs(layout, palette, alpha);
         RenderRows(layout, palette, alpha);
+        if (dropdownItem is not null) RenderDropdown(layout, palette, alpha);
         RenderFooter(layout, palette, alpha);
         MaterialUiKit.Cursor(MInput.Mouse.Position, palette, alpha);
     }
@@ -240,6 +270,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         List<TextMenu.Item> leading = [];
         ModTab? current = null;
         foreach (TextMenu.Item item in menu.Items) {
+            ForceDescriptionVisible(item);
             naturalVisibility[item] = item.Visible;
             if (IsEverestHeaderImage(item)) {
                 naturalVisibility[item] = false;
@@ -264,6 +295,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         if (tabs.Count == 0) {
             tabs.Add(new ModTab("__empty", UiText("microblocks_qol_modoptions_empty", "没有可用设置"), "", []));
         }
+        ForceDescriptionsVisible();
     }
 
     private void AttachMenu() {
@@ -291,6 +323,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
     private void SelectTab(int index) {
         if (tabs.Count == 0) return;
+        CloseDropdown(playSound: false);
         SaveTabState();
         selectedTab = (index % tabs.Count + tabs.Count) % tabs.Count;
         rowScroll.Reset();
@@ -324,6 +357,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         }
         menu.Selection = selection;
         if (selection >= 0) menu.Items[selection].OnEnter?.Invoke();
+        ForceDescriptionsVisible();
     }
 
     private void CaptureNaturalVisibility() {
@@ -360,10 +394,110 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
             return;
         }
         MaterialRect rect = placement.Value.Rect;
-        if (IsAdjustable(item) && mouse.X < rect.X + rect.Width * 0.58f) item.LeftPressed();
-        else if (IsAdjustable(item) && mouse.X > rect.X + rect.Width * 0.72f) item.RightPressed();
-        else item.ConfirmPressed();
+        if (TryGetOption(item, out OptionSnapshot option)) {
+            if (option.Options.Count == 2) {
+                SetOptionIndex(item, option.Index == 0 ? 1 : 0);
+            } else if (CanUseDropdown(option)) {
+                OpenDropdown(item, option);
+            } else {
+                SetOptionFromMouse(item, option, SliderControlRect(rect), mouse.X);
+            }
+        } else if (TryGetIntSlider(item, out IntSliderSnapshot slider)) {
+            SetIntSliderFromMouse(item, slider, SliderControlRect(rect), mouse.X);
+        } else {
+            item.ConfirmPressed();
+        }
         motion.Pulse(ItemKey(item), mouse);
+    }
+
+    private void UpdateDropdown(ModOptionsLayout layout) {
+        TextMenu.Item? item = dropdownItem;
+        if (item is null || !item.Visible || !TryGetOption(item, out OptionSnapshot option)
+            || !CanUseDropdown(option)) {
+            CloseDropdown(playSound: false);
+            return;
+        }
+        if (Input.Pause.Pressed && pauseLevel is not null) {
+            CloseDropdown(playSound: false);
+            BeginClose(CloseDestination.Game);
+            return;
+        }
+        if (Input.MenuCancel.Pressed || Input.ESC.Pressed || MInput.Keyboard.Pressed(Keys.Escape)) {
+            CloseDropdown();
+            return;
+        }
+        if (Input.MenuUp.Pressed) {
+            MoveDropdown(-1, option.Options.Count);
+            return;
+        }
+        if (Input.MenuDown.Pressed) {
+            MoveDropdown(1, option.Options.Count);
+            return;
+        }
+        if (Input.MenuConfirm.Pressed
+            || MInput.Keyboard.Pressed(Keys.Enter)
+            || MInput.Keyboard.Pressed(Keys.Space)) {
+            CommitDropdown(option);
+            return;
+        }
+
+        MaterialRect dropdown = DropdownRect(layout, item, option.Options.Count);
+        int visibleCount = DropdownVisibleCount(option.Options.Count);
+        if (MInput.Mouse.WheelDelta != 0 && dropdown.Contains(MInput.Mouse.Position)) {
+            dropdownFirstVisible = Math.Clamp(
+                dropdownFirstVisible - Math.Sign(MInput.Mouse.WheelDelta),
+                0,
+                Math.Max(0, option.Options.Count - visibleCount)
+            );
+            dropdownHighlight = Math.Clamp(dropdownHighlight, dropdownFirstVisible,
+                dropdownFirstVisible + visibleCount - 1);
+        }
+        if (MInput.Mouse.WasMoved || MInput.Mouse.PressedLeftButton) {
+            for (int visibleIndex = 0; visibleIndex < visibleCount; visibleIndex++) {
+                MaterialRect row = DropdownItemRect(dropdown, visibleIndex);
+                if (!row.Contains(MInput.Mouse.Position)) continue;
+                dropdownHighlight = dropdownFirstVisible + visibleIndex;
+                if (MInput.Mouse.PressedLeftButton) CommitDropdown(option);
+                return;
+            }
+        }
+        if (MInput.Mouse.PressedLeftButton) CloseDropdown();
+    }
+
+    private void OpenDropdown(TextMenu.Item item, OptionSnapshot option) {
+        dropdownItem = item;
+        dropdownHighlight = Math.Clamp(option.Index, 0, option.Options.Count - 1);
+        dropdownFirstVisible = 0;
+        EnsureDropdownHighlightVisible(option.Options.Count);
+        Audio.Play("event:/ui/main/button_select");
+    }
+
+    private void MoveDropdown(int direction, int optionCount) {
+        dropdownHighlight = (dropdownHighlight + Math.Sign(direction) + optionCount) % optionCount;
+        EnsureDropdownHighlightVisible(optionCount);
+        Audio.Play(direction < 0 ? "event:/ui/main/rollover_up" : "event:/ui/main/rollover_down");
+    }
+
+    private void EnsureDropdownHighlightVisible(int optionCount) {
+        int visibleCount = DropdownVisibleCount(optionCount);
+        if (dropdownHighlight < dropdownFirstVisible) dropdownFirstVisible = dropdownHighlight;
+        else if (dropdownHighlight >= dropdownFirstVisible + visibleCount)
+            dropdownFirstVisible = dropdownHighlight - visibleCount + 1;
+        dropdownFirstVisible = Math.Clamp(dropdownFirstVisible, 0,
+            Math.Max(0, optionCount - visibleCount));
+    }
+
+    private void CommitDropdown(OptionSnapshot option) {
+        TextMenu.Item? item = dropdownItem;
+        if (item is null) return;
+        SetOptionIndex(item, Math.Clamp(dropdownHighlight, 0, option.Options.Count - 1));
+        dropdownItem = null;
+    }
+
+    private void CloseDropdown(bool playSound = true) {
+        if (dropdownItem is null) return;
+        dropdownItem = null;
+        if (playSound) Audio.Play("event:/ui/main/button_back");
     }
 
     private void SelectItem(TextMenu.Item item) {
@@ -469,8 +603,14 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                 if (rect.Bottom < layout.Rows.Y || rect.Y > layout.Rows.Bottom) continue;
                 renderedAny = true;
                 bool selected = menu.Current == item && item.Hoverable;
+                if (item is TextMenuExt.EaseInSubHeaderExt description) {
+                    RenderDescription(description.Title, rect, palette, alpha);
+                    continue;
+                }
                 if (item is TextMenu.SubHeader header) {
-                    MaterialUiKit.Text(header.Title, new Vector2(rect.X + 8f, rect.Center.Y),
+                    string title = MaterialTextUtil.Ellipsize(header.Title, rect.Width - 16f,
+                        0.34f, UiFontWeight.Bold);
+                    MaterialUiKit.Text(title, new Vector2(rect.X + 8f, rect.Center.Y),
                         new Vector2(0f, 0.5f), MaterialTextRole.Section,
                         palette.Primary, alpha, scaleOverride: 0.34f);
                     continue;
@@ -482,7 +622,9 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                         palette.Primary * alpha);
                 }
                 motion.RenderStateLayer(ItemKey(item), rect, 22f, palette.Primary, alpha);
-                item.Render(new Vector2(rect.X + 26f, rect.Center.Y), selected);
+                if (!RenderStandardItem(item, rect, palette, alpha, selected)) {
+                    item.Render(new Vector2(rect.X + 26f, rect.Center.Y), selected);
+                }
             }
             if (!renderedAny && tabs[selectedTab].Items.All(item => !item.Visible)) {
                 MaterialUiKit.Text(UiText("microblocks_qol_modoptions_empty", "没有可用设置"),
@@ -501,6 +643,216 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                 palette.Outline * (0.20f * alpha));
             MaterialUi.RoundedRect(layout.Rows.Right + 8f, y, 5f, thumbHeight, 2.5f,
                 palette.Primary * (0.72f * alpha));
+        }
+    }
+
+    private bool RenderStandardItem(TextMenu.Item item, MaterialRect rect, MaterialPalette palette,
+        float alpha, bool selected) {
+        bool enabled = !item.Disabled;
+        Color labelColor = enabled ? palette.OnSurface : palette.OnSurfaceVariant * 0.5f;
+        if (TryGetOption(item, out OptionSnapshot option)) {
+            MaterialRect control = option.Options.Count == 2
+                ? SwitchControlArea(rect)
+                : CanUseDropdown(option)
+                    ? DropdownControlRect(rect)
+                    : SliderControlArea(rect);
+            RenderItemLabel(option.Label, rect, control.X - rect.X - 28f, labelColor, alpha);
+            if (option.Options.Count == 2) {
+                RenderSwitch(option, rect, palette, alpha, enabled);
+            } else if (CanUseDropdown(option)) {
+                RenderOptionControl(item, option, rect, palette, alpha, enabled);
+            } else {
+                RenderOptionSlider(option, rect, palette, alpha, enabled);
+            }
+            return true;
+        }
+        if (TryGetIntSlider(item, out IntSliderSnapshot slider)) {
+            MaterialRect control = SliderControlArea(rect);
+            RenderItemLabel(slider.Label, rect, control.X - rect.X - 28f, labelColor, alpha);
+            RenderIntSlider(slider, rect, palette, alpha, enabled);
+            return true;
+        }
+        if (item is TextMenu.Button button) {
+            MaterialRect action = ActionControlRect(rect);
+            RenderItemLabel(button.Label, rect, action.X - rect.X - 28f, labelColor, alpha);
+            RenderActionControl(action, UiText("microblocks_qol_modoptions_open", "打开"),
+                palette, alpha, enabled);
+            return true;
+        }
+        if (item is TextMenu.Setting setting) {
+            MaterialRect action = ActionControlRect(rect);
+            RenderItemLabel(setting.Label, rect, action.X - rect.X - 28f, labelColor, alpha);
+            string value = setting.Values.Count == 0
+                ? UiText("microblocks_qol_modoptions_unbound", "未绑定")
+                : string.Format(UiText("microblocks_qol_modoptions_bound", "已绑定 {0} 项"), setting.Values.Count);
+            RenderActionControl(action, value, palette, alpha, enabled);
+            return true;
+        }
+        if (IsExpandedComposite(item)) return false;
+        if (TryGetLabel(item, out string label)) {
+            MaterialRect action = ActionControlRect(rect);
+            RenderItemLabel(label, rect, action.X - rect.X - 28f, labelColor, alpha);
+            RenderActionControl(action, selected
+                    ? UiText("microblocks_qol_modoptions_active", "已展开")
+                    : UiText("microblocks_qol_modoptions_open", "打开"),
+                palette, alpha, enabled);
+            return true;
+        }
+        return false;
+    }
+
+    private static void RenderItemLabel(string label, MaterialRect rect, float maximumWidth,
+        Color color, float alpha) {
+        string shown = MaterialTextUtil.Ellipsize(label, Math.Max(80f, maximumWidth),
+            0.34f, UiFontWeight.Bold);
+        MaterialUiKit.Text(shown, new Vector2(rect.X + 24f, rect.Center.Y), new Vector2(0f, 0.5f),
+            MaterialTextRole.Label, color, alpha, scaleOverride: 0.34f);
+    }
+
+    private static void RenderSwitch(OptionSnapshot option, MaterialRect rect, MaterialPalette palette,
+        float alpha, bool enabled) {
+        bool on = option.Index > 0;
+        MaterialRect track = SwitchRect(rect);
+        Color trackColor = on ? palette.Primary : palette.Outline * 0.52f;
+        MaterialUi.RoundedRect(track.X, track.Y, track.Width, track.Height, track.Height / 2f,
+            trackColor * (alpha * (enabled ? 1f : 0.45f)));
+        float knobX = on ? track.Right - 15f : track.X + 15f;
+        MaterialUi.Circle(new Vector2(knobX, track.Center.Y), 11f,
+            (on ? palette.OnPrimary : palette.OnSurfaceVariant) * alpha);
+        string current = option.Options.Count == 0
+            ? ""
+            : option.Options[Math.Clamp(option.Index, 0, option.Options.Count - 1)];
+        MaterialUiKit.Text(MaterialTextUtil.Ellipsize(current, 250f, 0.29f, UiFontWeight.Bold),
+            new Vector2(track.X - 18f, track.Center.Y), new Vector2(1f, 0.5f),
+            MaterialTextRole.Label, enabled ? palette.OnSurfaceVariant : palette.OnSurfaceVariant * 0.5f,
+            alpha, scaleOverride: 0.29f);
+    }
+
+    private void RenderOptionControl(TextMenu.Item item, OptionSnapshot option, MaterialRect rect,
+        MaterialPalette palette, float alpha, bool enabled) {
+        MaterialRect control = DropdownControlRect(rect);
+        bool open = dropdownItem == item;
+        MaterialUi.RoundedRect(control.X, control.Y, control.Width, control.Height, 16f,
+            palette.Surface * (0.76f * alpha));
+        MaterialUi.RoundedOutline(control.X, control.Y, control.Width, control.Height, 16f,
+            open ? 2f : 1f, (open ? palette.Primary : palette.Outline) * (alpha * (open ? 1f : 0.52f)));
+        string current = option.Options.Count == 0
+            ? ""
+            : option.Options[Math.Clamp(option.Index, 0, option.Options.Count - 1)];
+        MaterialUiKit.Text(MaterialTextUtil.Ellipsize(current, control.Width - 52f, 0.28f, UiFontWeight.Bold),
+            new Vector2(control.X + 15f, control.Center.Y), new Vector2(0f, 0.5f),
+            MaterialTextRole.Label, enabled ? palette.OnSurface : palette.OnSurfaceVariant * 0.5f,
+            alpha, scaleOverride: 0.28f);
+        MaterialUiKit.Text(open ? "▲" : "▼", new Vector2(control.Right - 16f, control.Center.Y),
+            new Vector2(1f, 0.5f), MaterialTextRole.Label, palette.OnSurfaceVariant,
+            alpha, scaleOverride: 0.20f);
+    }
+
+    private static void RenderOptionSlider(OptionSnapshot option, MaterialRect rect,
+        MaterialPalette palette, float alpha, bool enabled) {
+        MaterialRect track = SliderControlRect(rect);
+        float amount = option.Options.Count <= 1 ? 0f : option.Index / (float)(option.Options.Count - 1);
+        RenderSliderTrack(track, amount, palette, alpha, enabled);
+        string value = option.Options.Count == 0
+            ? ""
+            : option.Options[Math.Clamp(option.Index, 0, option.Options.Count - 1)];
+        MaterialUiKit.Text(MaterialTextUtil.Ellipsize(value, 390f, 0.27f, UiFontWeight.Bold),
+            new Vector2(track.Center.X, track.Y - 12f), new Vector2(0.5f, 1f),
+            MaterialTextRole.Label, palette.OnSurfaceVariant, alpha, scaleOverride: 0.27f);
+    }
+
+    private static void RenderIntSlider(IntSliderSnapshot slider, MaterialRect rect,
+        MaterialPalette palette, float alpha, bool enabled) {
+        MaterialRect track = SliderControlRect(rect);
+        float amount = slider.Maximum == slider.Minimum
+            ? 0f
+            : (slider.Value - slider.Minimum) / (float)(slider.Maximum - slider.Minimum);
+        RenderSliderTrack(track, amount, palette, alpha, enabled);
+        MaterialUiKit.Text(slider.Value.ToString(), new Vector2(track.Center.X, track.Y - 12f),
+            new Vector2(0.5f, 1f), MaterialTextRole.Label, palette.OnSurfaceVariant,
+            alpha, scaleOverride: 0.27f);
+    }
+
+    private static void RenderSliderTrack(MaterialRect track, float amount, MaterialPalette palette,
+        float alpha, bool enabled) {
+        amount = Math.Clamp(amount, 0f, 1f);
+        MaterialUi.RoundedRect(track.X, track.Y, track.Width, track.Height, track.Height / 2f,
+            palette.Outline * (0.34f * alpha));
+        float fill = Math.Max(track.Height, track.Width * amount);
+        MaterialUi.RoundedRect(track.X, track.Y, fill, track.Height, track.Height / 2f,
+            palette.Primary * (alpha * (enabled ? 1f : 0.45f)));
+        MaterialUi.Circle(new Vector2(track.X + track.Width * amount, track.Center.Y), 10f,
+            palette.Primary * (alpha * (enabled ? 1f : 0.45f)));
+    }
+
+    private static void RenderActionControl(MaterialRect control, string value, MaterialPalette palette,
+        float alpha, bool enabled) {
+        MaterialUi.RoundedRect(control.X, control.Y, control.Width, control.Height, 16f,
+            palette.Primary * (0.26f * alpha));
+        MaterialUiKit.Text(MaterialTextUtil.Ellipsize(value, control.Width - 48f, 0.27f, UiFontWeight.Bold),
+            new Vector2(control.X + 14f, control.Center.Y), new Vector2(0f, 0.5f),
+            MaterialTextRole.Label, enabled ? palette.OnSurface : palette.OnSurfaceVariant * 0.5f,
+            alpha, scaleOverride: 0.27f);
+        MaterialUiKit.Icon("arrow_forward", new Vector2(control.Right - 18f, control.Center.Y), 18f,
+            enabled ? palette.OnSurface : palette.OnSurfaceVariant * 0.5f, alpha);
+    }
+
+    private static void RenderDescription(string text, MaterialRect rect, MaterialPalette palette, float alpha) {
+        MaterialUi.RoundedRect(rect.X + 12f, rect.Y, rect.Width - 24f, rect.Height, 18f,
+            palette.Primary * (0.13f * alpha));
+        MaterialUiKit.Icon("info", new Vector2(rect.X + 36f, rect.Y + 25f), 19f,
+            palette.Primary, alpha, filled: true);
+        List<string> lines = MaterialTextUtil.WrapLines(text, rect.Width - 92f, 0.27f, 5);
+        float y = rect.Y + 13f;
+        foreach (string line in lines) {
+            MaterialUiKit.Text(line, new Vector2(rect.X + 58f, y), Vector2.Zero,
+                MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.27f);
+            y += 28f;
+        }
+    }
+
+    private void RenderDropdown(ModOptionsLayout layout, MaterialPalette palette, float alpha) {
+        TextMenu.Item? item = dropdownItem;
+        if (item is null || !TryGetOption(item, out OptionSnapshot option)) return;
+        MaterialRect dropdown = DropdownRect(layout, item, option.Options.Count);
+        MaterialUi.RoundedRect(dropdown.X, dropdown.Y + 5f, dropdown.Width, dropdown.Height, 18f,
+            Color.Black * (0.24f * alpha));
+        MaterialUi.RoundedRect(dropdown.X, dropdown.Y, dropdown.Width, dropdown.Height, 18f,
+            palette.SurfaceHighest * alpha);
+        MaterialUi.RoundedOutline(dropdown.X, dropdown.Y, dropdown.Width, dropdown.Height, 18f,
+            1f, palette.Outline * (0.62f * alpha));
+
+        int visibleCount = DropdownVisibleCount(option.Options.Count);
+        for (int visibleIndex = 0; visibleIndex < visibleCount; visibleIndex++) {
+            int optionIndex = dropdownFirstVisible + visibleIndex;
+            MaterialRect row = DropdownItemRect(dropdown, visibleIndex);
+            bool highlighted = optionIndex == dropdownHighlight;
+            bool current = optionIndex == option.Index;
+            if (highlighted) {
+                MaterialUi.RoundedRect(row.X, row.Y, row.Width, row.Height, 13f,
+                    palette.Primary * (0.90f * alpha));
+            }
+            MaterialUiKit.Text(MaterialTextUtil.Ellipsize(option.Options[optionIndex], row.Width - 52f,
+                    0.28f, UiFontWeight.Bold),
+                new Vector2(row.X + 14f, row.Center.Y), new Vector2(0f, 0.5f),
+                MaterialTextRole.Label, highlighted ? palette.OnPrimary : palette.OnSurface,
+                alpha, scaleOverride: 0.28f);
+            if (current) {
+                MaterialUiKit.Icon("check", new Vector2(row.Right - 20f, row.Center.Y), 19f,
+                    highlighted ? palette.OnPrimary : palette.Primary, alpha, filled: true);
+            }
+        }
+
+        if (option.Options.Count > visibleCount) {
+            float trackHeight = dropdown.Height - 16f;
+            float thumbHeight = Math.Max(28f, trackHeight * visibleCount / option.Options.Count);
+            float maximum = option.Options.Count - visibleCount;
+            float thumbY = dropdown.Y + 8f
+                + (trackHeight - thumbHeight) * dropdownFirstVisible / maximum;
+            MaterialUi.RoundedRect(dropdown.Right - 5f, dropdown.Y + 8f, 3f, trackHeight, 1.5f,
+                palette.Outline * (0.28f * alpha));
+            MaterialUi.RoundedRect(dropdown.Right - 5f, thumbY, 3f, thumbHeight, 1.5f,
+                palette.Primary * (0.84f * alpha));
         }
     }
 
@@ -555,8 +907,212 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         return null;
     }
 
+    private void ForceDescriptionsVisible() {
+        if (tabs.Count == 0) return;
+        foreach (TextMenu.Item item in tabs[selectedTab].Items) {
+            ForceDescriptionVisible(item);
+            if (item is TextMenuExt.EaseInSubHeaderExt) naturalVisibility[item] = true;
+        }
+    }
+
+    private static void ForceDescriptionVisible(TextMenu.Item item) {
+        if (item is TextMenuExt.EaseInSubHeaderExt description) {
+            description.FadeVisible = true;
+            description.Visible = true;
+        }
+        if (item is TextMenuExt.SubMenu submenu) {
+            foreach (TextMenu.Item child in submenu.Items) ForceDescriptionVisible(child);
+        }
+    }
+
+    private static bool TryGetOption(TextMenu.Item item, out OptionSnapshot snapshot) {
+        Type? optionType = null;
+        for (Type? type = item.GetType(); type is not null; type = type.BaseType) {
+            if (!type.IsGenericType || type.GetGenericTypeDefinition() != typeof(TextMenu.Option<>)) continue;
+            optionType = type;
+            break;
+        }
+        if (optionType is null) {
+            snapshot = default!;
+            return false;
+        }
+        FieldInfo? labelField = optionType.GetField("Label", BindingFlags.Instance | BindingFlags.Public);
+        FieldInfo? indexField = optionType.GetField("Index", BindingFlags.Instance | BindingFlags.Public);
+        FieldInfo? previousIndexField = optionType.GetField("PreviousIndex", BindingFlags.Instance | BindingFlags.Public);
+        FieldInfo? valuesField = optionType.GetField("Values", BindingFlags.Instance | BindingFlags.Public);
+        FieldInfo? changeField = optionType.GetField("OnValueChange", BindingFlags.Instance | BindingFlags.Public);
+        if (labelField is null || indexField is null || valuesField is null
+            || valuesField.GetValue(item) is not IEnumerable values) {
+            snapshot = default!;
+            return false;
+        }
+        List<string> labels = [];
+        List<object> entries = [];
+        foreach (object? entry in values) {
+            if (entry is null) continue;
+            object? label = entry.GetType().GetProperty("Item1")?.GetValue(entry)
+                ?? entry.GetType().GetField("Item1")?.GetValue(entry);
+            labels.Add(label?.ToString() ?? "");
+            entries.Add(entry);
+        }
+        snapshot = new OptionSnapshot(
+            labelField.GetValue(item)?.ToString() ?? "",
+            Math.Clamp((int)(indexField.GetValue(item) ?? 0), 0, Math.Max(0, labels.Count - 1)),
+            labels,
+            entries,
+            indexField,
+            previousIndexField,
+            changeField
+        );
+        return true;
+    }
+
+    private static bool TryGetIntSlider(TextMenu.Item item, out IntSliderSnapshot snapshot) {
+        if (item is not TextMenuExt.IntSlider slider) {
+            snapshot = default;
+            return false;
+        }
+        Type type = typeof(TextMenuExt.IntSlider);
+        FieldInfo? minimumField = type.GetField("min", BindingFlags.Instance | BindingFlags.NonPublic);
+        FieldInfo? maximumField = type.GetField("max", BindingFlags.Instance | BindingFlags.NonPublic);
+        int minimum = (int)(minimumField?.GetValue(slider) ?? slider.Index);
+        int maximum = (int)(maximumField?.GetValue(slider) ?? slider.Index);
+        snapshot = new IntSliderSnapshot(slider.Label, slider.Index, minimum, maximum);
+        return true;
+    }
+
+    private static bool TryGetLabel(TextMenu.Item item, out string label) {
+        for (Type? type = item.GetType(); type is not null; type = type.BaseType) {
+            FieldInfo? field = type.GetField("Label",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            if (field?.GetValue(item) is string value && value.Length > 0) {
+                label = value;
+                return true;
+            }
+        }
+        label = item.SearchLabel() ?? "";
+        return label.Length > 0;
+    }
+
+    private static bool IsExpandedComposite(TextMenu.Item item) {
+        for (Type? type = item.GetType(); type is not null; type = type.BaseType) {
+            FieldInfo? field = type.GetField("Focused",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+            if (field?.FieldType == typeof(bool) && field.GetValue(item) is true) return true;
+        }
+        return false;
+    }
+
+    private static bool CanUseDropdown(OptionSnapshot option) =>
+        option.Options.Count is >= 3 and <= DropdownOptionLimit;
+
+    private static void SetOptionIndex(TextMenu.Item item, int targetIndex) {
+        if (!TryGetOption(item, out OptionSnapshot option) || option.Options.Count == 0) return;
+        targetIndex = Math.Clamp(targetIndex, 0, option.Options.Count - 1);
+        if (targetIndex == option.Index) return;
+        option.PreviousIndexField?.SetValue(item, option.Index);
+        option.IndexField.SetValue(item, targetIndex);
+        object entry = option.Entries[targetIndex];
+        object? value = entry.GetType().GetProperty("Item2")?.GetValue(entry)
+            ?? entry.GetType().GetField("Item2")?.GetValue(entry);
+        if (option.ChangeField?.GetValue(item) is Delegate changed) changed.DynamicInvoke(value);
+        item.ValueWiggler?.Start();
+        Audio.Play(targetIndex > option.Index
+            ? "event:/ui/main/button_toggle_on"
+            : "event:/ui/main/button_toggle_off");
+    }
+
+    private static void SetOptionFromMouse(TextMenu.Item item, OptionSnapshot option,
+        MaterialRect track, float mouseX) {
+        if (option.Options.Count == 0) return;
+        float amount = Math.Clamp((mouseX - track.X) / Math.Max(1f, track.Width), 0f, 1f);
+        SetOptionIndex(item, (int)MathF.Round(amount * (option.Options.Count - 1)));
+    }
+
+    private static void SetIntSliderFromMouse(TextMenu.Item item, IntSliderSnapshot slider,
+        MaterialRect track, float mouseX) {
+        if (item is not TextMenuExt.IntSlider intSlider) return;
+        float amount = Math.Clamp((mouseX - track.X) / Math.Max(1f, track.Width), 0f, 1f);
+        int value = (int)MathF.Round(MathHelper.Lerp(slider.Minimum, slider.Maximum, amount));
+        value = Math.Clamp(value, slider.Minimum, slider.Maximum);
+        if (value == intSlider.Index) return;
+        intSlider.PreviousIndex = intSlider.Index;
+        intSlider.Index = value;
+        intSlider.OnValueChange?.Invoke(value);
+        intSlider.ValueWiggler?.Start();
+        Audio.Play(value > slider.Value
+            ? "event:/ui/main/button_toggle_on"
+            : "event:/ui/main/button_toggle_off");
+    }
+
+    private MaterialRect DropdownRect(ModOptionsLayout layout, TextMenu.Item item, int optionCount) {
+        RowPlacement? placement = RowPlacements(layout).FirstOrDefault(row => row.Item == item);
+        MaterialRect control = placement is { Item: not null } row
+            ? DropdownControlRect(row.Rect)
+            : DropdownControlRect(new MaterialRect(layout.Rows.X, layout.Rows.Y, layout.Rows.Width, 78f));
+        float height = DropdownVisibleCount(optionCount) * DropdownItemHeight + 12f;
+        float y = control.Bottom + 6f;
+        if (y + height > layout.Content.Bottom - 12f) y = control.Y - height - 6f;
+        y = Math.Clamp(y, layout.Content.Y + 10f, Math.Max(layout.Content.Y + 10f,
+            layout.Content.Bottom - height - 10f));
+        return new MaterialRect(control.X, y, control.Width, height);
+    }
+
+    private static MaterialRect DropdownItemRect(MaterialRect dropdown, int visibleIndex) => new(
+        dropdown.X + 6f,
+        dropdown.Y + 6f + visibleIndex * DropdownItemHeight,
+        dropdown.Width - 12f,
+        DropdownItemHeight
+    );
+
+    private static int DropdownVisibleCount(int optionCount) =>
+        Math.Min(DropdownMaxVisibleItems, optionCount);
+
+    private static MaterialRect SwitchControlArea(MaterialRect rect) => new(
+        rect.Right - 360f,
+        rect.Y,
+        336f,
+        rect.Height
+    );
+
+    private static MaterialRect SwitchRect(MaterialRect rect) => new(
+        rect.Right - 86f,
+        rect.Center.Y - 16f,
+        62f,
+        32f
+    );
+
+    private static MaterialRect DropdownControlRect(MaterialRect rect) => new(
+        rect.Right - 424f,
+        rect.Center.Y - 24f,
+        400f,
+        48f
+    );
+
+    private static MaterialRect SliderControlArea(MaterialRect rect) => new(
+        rect.Right - 504f,
+        rect.Y,
+        480f,
+        rect.Height
+    );
+
+    private static MaterialRect SliderControlRect(MaterialRect rect) => new(
+        rect.Right - 474f,
+        rect.Center.Y + 9f,
+        430f,
+        8f
+    );
+
+    private static MaterialRect ActionControlRect(MaterialRect rect) => new(
+        rect.Right - 304f,
+        rect.Center.Y - 22f,
+        280f,
+        44f
+    );
+
     private void BeginClose(CloseDestination destination) {
         if (pauseLevel is null || closeDestination != CloseDestination.None) return;
+        CloseDropdown(playSound: false);
         closeDestination = destination;
         display = false;
         if (menu is not null) menu.Focused = false;
@@ -627,17 +1183,15 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
     private static bool CanSelect(TextMenu.Item item) => item.Visible && item.Selectable;
 
-    private static bool IsAdjustable(TextMenu.Item item) {
-        if (item is TextMenuExt.IntSlider) return true;
-        for (Type? type = item.GetType(); type is not null; type = type.BaseType) {
-            if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(TextMenu.Option<>)) return true;
-        }
-        return false;
-    }
-
     private static float RowHeight(TextMenu.Item item) {
+        if (item is TextMenuExt.EaseInSubHeaderExt description) {
+            int lines = Math.Max(1, MaterialTextUtil.WrapLines(description.Title, 1180f, 0.27f, 5).Count);
+            return 26f + lines * 28f;
+        }
         if (item is TextMenu.SubHeader) return 54f;
-        return Math.Max(74f, item.Height() + 18f);
+        if (IsExpandedComposite(item))
+            return Math.Max(78f, item.Height() + 18f);
+        return 78f;
     }
 
     private static string ItemKey(TextMenu.Item item) =>
@@ -658,6 +1212,23 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         public List<TextMenu.Item> Items { get; } = items;
         public int Selection { get; set; } = -1;
     }
+
+    private sealed record OptionSnapshot(
+        string Label,
+        int Index,
+        List<string> Options,
+        List<object> Entries,
+        FieldInfo IndexField,
+        FieldInfo? PreviousIndexField,
+        FieldInfo? ChangeField
+    );
+
+    private readonly record struct IntSliderSnapshot(
+        string Label,
+        int Value,
+        int Minimum,
+        int Maximum
+    );
 
     private readonly record struct RowPlacement(TextMenu.Item Item, MaterialRect Rect);
 
