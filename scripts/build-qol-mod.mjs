@@ -33,7 +33,8 @@ const nativeName = targetPlatform === "win32"
     ? "libmicroblocks_qol_native.dylib"
     : "libmicroblocks_qol_native.so";
 const cargoTargetRoot = resolve(root, process.env.CARGO_TARGET_DIR ?? "target");
-const nativeOutput = resolve(cargoTargetRoot, ...(target ? [target] : []), "release", nativeName);
+const nativeDirectory = resolve(cargoTargetRoot, ...(target ? [target] : []), "release");
+const nativeOutput = resolve(nativeDirectory, nativeName);
 
 const run = (command, args, env = process.env) => {
   const result = spawnSync(command, args, {
@@ -66,6 +67,28 @@ run(
   cargoArguments,
   nativeEnv,
 );
+if (target?.endsWith("-unknown-linux-musl") && !existsSync(nativeOutput)) {
+  const staticLibrary = resolve(nativeDirectory, "libmicroblocks_qol_native.a");
+  if (!existsSync(staticLibrary)) {
+    throw new Error(`The musl static library was not produced at ${staticLibrary}`);
+  }
+  run(process.env.MUSL_CC ?? "musl-gcc", [
+    "-shared",
+    "-Wl,--gc-sections",
+    "-Wl,-soname,libmicroblocks_qol_native.so",
+    "-o",
+    nativeOutput,
+    "-Wl,--whole-archive",
+    staticLibrary,
+    "-Wl,--no-whole-archive",
+    "-ldl",
+    "-lpthread",
+    "-lm",
+  ], nativeEnv);
+}
+if (!existsSync(nativeOutput)) {
+  throw new Error(`The native library was not produced at ${nativeOutput}`);
+}
 if (!skipParity && process.platform === "win32" && targetPlatform === "win32") {
   run("dotnet", [
     "run",
