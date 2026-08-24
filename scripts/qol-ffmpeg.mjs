@@ -25,6 +25,7 @@ const sourceUrl = `https://ffmpeg.org/releases/${archiveName}`;
 const sourceDigest = "sha256:b072aed6871998cce9b36e7774033105ca29e33632be5b6347f3206898e0756a";
 const downloadAttempts = 3;
 const downloadTimeoutMs = 2 * 60 * 1000;
+const extractTimeoutMs = 2 * 60 * 1000;
 const requiredLibraries = ["avcodec", "avformat", "avutil", "swresample", "swscale"];
 const requiredDlls = [
   "avcodec-62.dll",
@@ -88,8 +89,7 @@ export async function ensureQolFfmpeg(root) {
   if (!existsSync(resolve(source, "configure"))) {
     console.log(`Extracting ${archiveName}`);
     removeWithin(cache, source);
-    const unpack = spawnSync("tar", ["-xf", archive, "-C", cache], { stdio: "inherit" });
-    if (unpack.status !== 0) throw new Error(`Cannot extract ${archiveName}`);
+    extractSourceArchive(cache, archive, source);
   }
 
   console.log(`Building minimal FFmpeg ${ffmpegVersion} runtime`);
@@ -108,6 +108,47 @@ export async function ensureQolFfmpeg(root) {
   );
   if (!complete(output)) throw new Error("Minimal FFmpeg build completed without all required files");
   return ffmpegLayout(output);
+}
+
+function extractSourceArchive(cache, archive, source) {
+  const sevenZip = firstExisting([
+    process.env.ProgramFiles ? resolve(process.env.ProgramFiles, "7-Zip", "7z.exe") : null,
+    resolve(homedir(), "scoop", "shims", "7z.exe"),
+    findOnPath("7z.exe"),
+  ]);
+  if (sevenZip) {
+    // Windows' inbox bsdtar has hung indefinitely while reading this .tar.xz on
+    // GitHub-hosted runners. 7-Zip handles the two archive layers separately.
+    const tarArchive = resolve(cache, archiveName.slice(0, -3));
+    rmSync(tarArchive, { force: true });
+    runExtraction(sevenZip, ["x", archive, `-o${cache}`, "-y"]);
+    if (!existsSync(tarArchive)) throw new Error(`Extracting ${archiveName} did not create ${tarArchive}`);
+    try {
+      runExtraction(sevenZip, ["x", tarArchive, `-o${cache}`, "-y"]);
+    } finally {
+      rmSync(tarArchive, { force: true });
+    }
+  } else {
+    console.warn("7-Zip was not found; falling back to tar");
+    runExtraction("tar", ["-xf", archive, "-C", cache]);
+  }
+  if (!existsSync(resolve(source, "configure"))) {
+    throw new Error(`Cannot extract ${archiveName}: ${resolve(source, "configure")} is missing`);
+  }
+  console.log(`Extracted ${archiveName}`);
+}
+
+function runExtraction(command, args) {
+  console.log(`Running ${command} ${args.join(" ")} (timeout ${extractTimeoutMs / 1000}s)`);
+  const result = spawnSync(command, args, {
+    stdio: "inherit",
+    windowsHide: true,
+    timeout: extractTimeoutMs,
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    throw new Error(`Archive extraction failed with exit ${result.status ?? "unknown"}`);
+  }
 }
 
 export function findLibclangDirectory() {
