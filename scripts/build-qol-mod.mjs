@@ -5,16 +5,35 @@ import { ensureQolFfmpeg, findLibclangDirectory } from "./qol-ffmpeg.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const output = resolve(root, "Build");
-const archive = resolve(root, "MicroblocksQolUtils.zip");
+const argumentValue = (name) => {
+  const index = process.argv.indexOf(name);
+  if (index < 0) return null;
+  const value = process.argv[index + 1];
+  if (!value || value.startsWith("--")) throw new Error(`${name} requires a value`);
+  return value;
+};
+const target = argumentValue("--target");
+const archive = resolve(root, argumentValue("--archive") ?? "MicroblocksQolUtils.zip");
+const skipParity = process.argv.includes("--skip-parity");
+const disableFfmpeg = process.argv.includes("--no-ffmpeg");
 const maximumArchiveBytes = 10 * 1024 * 1024;
 const managedOutput = resolve(root, "Source/bin/Release/net8.0");
 const dll = resolve(managedOutput, "MicroblocksQolUtils.dll");
 const celesteRoot = resolve(process.env.CELESTE_ROOT ?? "C:/SteamLibrary/steamapps/common/Celeste");
-const nativeName = process.platform === "win32"
+const targetPlatform = target?.includes("windows")
+  ? "win32"
+  : target?.includes("apple-darwin")
+    ? "darwin"
+    : target?.includes("linux")
+      ? "linux"
+      : process.platform;
+const nativeName = targetPlatform === "win32"
   ? "microblocks_qol_native.dll"
-  : process.platform === "darwin"
+  : targetPlatform === "darwin"
     ? "libmicroblocks_qol_native.dylib"
     : "libmicroblocks_qol_native.so";
+const cargoTargetRoot = resolve(root, process.env.CARGO_TARGET_DIR ?? "target");
+const nativeOutput = resolve(cargoTargetRoot, ...(target ? [target] : []), "release", nativeName);
 
 const run = (command, args, env = process.env) => {
   const result = spawnSync(command, args, {
@@ -26,7 +45,11 @@ const run = (command, args, env = process.env) => {
   if (result.status !== 0) process.exit(result.status ?? 1);
 };
 
-const ffmpeg = await ensureQolFfmpeg(root);
+const wantsFfmpeg = targetPlatform === "win32" && !disableFfmpeg;
+if (wantsFfmpeg && process.platform !== "win32") {
+  throw new Error("The FFmpeg-enabled Windows native library must be built on Windows");
+}
+const ffmpeg = wantsFfmpeg ? await ensureQolFfmpeg(root) : null;
 const nativeEnv = ffmpeg
   ? {
       ...process.env,
@@ -35,20 +58,27 @@ const nativeEnv = ffmpeg
       PATH: `${ffmpeg.bin};${process.env.PATH ?? ""}`,
     }
   : process.env;
+const cargoArguments = ["build", "-q", "-p", "microblocks-qol-native", "--release", "--locked"];
+if (target) cargoArguments.push("--target", target);
+if (ffmpeg) cargoArguments.push("--features", "ffmpeg");
 run(
   "cargo",
-  ["build", "-q", "-p", "microblocks-qol-native", "--release", "--features", "ffmpeg"],
+  cargoArguments,
   nativeEnv,
 );
-run("dotnet", [
-  "run",
-  "--project",
-  resolve(root, "Tools/SkiaParity/SkiaParity.csproj"),
-  "-c",
-  "Release",
-  "--",
-  resolve(root, ".work/skia-parity"),
-], nativeEnv);
+if (!skipParity && process.platform === "win32" && targetPlatform === "win32") {
+  run("dotnet", [
+    "run",
+    "--project",
+    resolve(root, "Tools/SkiaParity/SkiaParity.csproj"),
+    "-c",
+    "Release",
+    "--",
+    resolve(root, ".work/skia-parity"),
+  ], { ...nativeEnv, MQOL_NATIVE_LIBRARY: nativeOutput });
+} else {
+  console.log("Skipped the Windows-only Skia parity harness");
+}
 run("dotnet", ["build", resolve(root, "Source/MicroblocksQolUtils.csproj"), "-c", "Release"]);
 rmSync(output, { recursive: true, force: true });
 mkdirSync(resolve(output, "Code"), { recursive: true });
@@ -70,7 +100,7 @@ for (const dependency of [
   const source = resolve(managedOutput, dependency);
   if (existsSync(source)) cpSync(source, resolve(output, "Code", dependency));
 }
-cpSync(resolve(root, "target", "release", nativeName), resolve(output, "Code", nativeName));
+cpSync(nativeOutput, resolve(output, "Code", nativeName));
 if (ffmpeg) {
   for (const dependency of ffmpeg.dlls) {
     cpSync(dependency, resolve(output, "Code", dependency.split(/[\\/]/u).at(-1)));
@@ -86,11 +116,18 @@ for (const path of ["everest.yaml", "Dialog", "Graphics", "Native/README.md"]) {
 }
 console.log(`Built ${output}`);
 rmSync(archive, { force: true });
-const packaged = spawnSync("tar", ["-a", "-cf", archive, "-C", output, "."], {
-  cwd: root,
-  stdio: "inherit",
-  shell: false,
-});
+const packaged = targetPlatform === "win32"
+  ? spawnSync("tar", ["-a", "-cf", archive, "-C", output, "."], {
+      cwd: root,
+      stdio: "inherit",
+      shell: false,
+    })
+  : spawnSync("zip", ["-q", "-r", archive, "."], {
+      cwd: output,
+      stdio: "inherit",
+      shell: false,
+    });
+if (packaged.error) throw packaged.error;
 if (packaged.status !== 0) throw new Error("Cannot create the Everest mod archive");
 const archiveBytes = statSync(archive).size;
 if (archiveBytes >= maximumArchiveBytes) {

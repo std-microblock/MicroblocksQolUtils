@@ -1,8 +1,13 @@
 # Native capture backend
 
-This crate builds `microblocks_qol_native.dll`, the Windows capture, FFmpeg
-encoding, audio-sidecar, and recording-finalization backend used by the managed
-Everest mod.
+This crate builds the native bridge used by the managed Everest mod. Windows
+builds provide capture, FFmpeg encoding, audio-sidecar, recording finalization,
+and portable rasterization. Linux and macOS builds provide the portable raster
+bridge while returning an unsupported result from Windows-only capture and
+recording entry points.
+
+CI targets `x86_64-pc-windows-msvc`, `x86_64-unknown-linux-musl`, and
+`x86_64-apple-darwin`.
 
 Use the repository build entry point rather than invoking Cargo directly:
 
