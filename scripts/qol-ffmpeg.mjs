@@ -23,6 +23,8 @@ const buildName = `ffmpeg-${ffmpegVersion}-qol-minimal`;
 const buildId = "ffmpeg-8.1-qol-minimal-v2";
 const sourceUrl = `https://ffmpeg.org/releases/${archiveName}`;
 const sourceDigest = "sha256:b072aed6871998cce9b36e7774033105ca29e33632be5b6347f3206898e0756a";
+const downloadAttempts = 3;
+const downloadTimeoutMs = 2 * 60 * 1000;
 const requiredLibraries = ["avcodec", "avformat", "avutil", "swresample", "swscale"];
 const requiredDlls = [
   "avcodec-62.dll",
@@ -78,16 +80,19 @@ export async function ensureQolFfmpeg(root) {
     manifest = null;
   }
   if (manifest?.buildId === buildId && manifest?.sourceDigest === sourceDigest && complete(output)) {
+    console.log(`Using cached minimal FFmpeg runtime from ${output}`);
     return ffmpegLayout(output);
   }
 
   await ensureSourceArchive(archive);
   if (!existsSync(resolve(source, "configure"))) {
+    console.log(`Extracting ${archiveName}`);
     removeWithin(cache, source);
     const unpack = spawnSync("tar", ["-xf", archive, "-C", cache], { stdio: "inherit" });
     if (unpack.status !== 0) throw new Error(`Cannot extract ${archiveName}`);
   }
 
+  console.log(`Building minimal FFmpeg ${ffmpegVersion} runtime`);
   removeWithin(cache, output);
   mkdirSync(output, { recursive: true });
   buildMinimalFfmpeg(root, cache, source, output);
@@ -117,21 +122,39 @@ export function findLibclangDirectory() {
 }
 
 async function ensureSourceArchive(archive) {
-  if (existsSync(archive) && sha256(archive) === sourceDigest) return;
+  if (existsSync(archive) && sha256(archive) === sourceDigest) {
+    console.log(`Using cached ${archiveName}`);
+    return;
+  }
   rmSync(archive, { force: true });
-  const response = await fetch(sourceUrl, { redirect: "follow" });
-  if (!response.ok || !response.body) {
-    throw new Error(`Cannot download ${archiveName}: HTTP ${response.status}`);
-  }
   const temporary = `${archive}.download`;
-  rmSync(temporary, { force: true });
-  await pipeline(Readable.fromWeb(response.body), createWriteStream(temporary));
-  const digest = sha256(temporary);
-  if (digest !== sourceDigest) {
+  let lastError;
+  for (let attempt = 1; attempt <= downloadAttempts; attempt += 1) {
     rmSync(temporary, { force: true });
-    throw new Error(`FFmpeg archive digest mismatch: expected ${sourceDigest}, got ${digest}`);
+    console.log(`Downloading ${archiveName} (attempt ${attempt}/${downloadAttempts}, timeout ${downloadTimeoutMs / 1000}s)`);
+    try {
+      const response = await fetch(sourceUrl, {
+        redirect: "follow",
+        signal: AbortSignal.timeout(downloadTimeoutMs),
+      });
+      if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
+      await pipeline(Readable.fromWeb(response.body), createWriteStream(temporary));
+      const digest = sha256(temporary);
+      if (digest !== sourceDigest) {
+        throw new Error(`digest mismatch: expected ${sourceDigest}, got ${digest}`);
+      }
+      await rename(temporary, archive);
+      console.log(`Downloaded ${archiveName}`);
+      return;
+    } catch (error) {
+      lastError = error;
+      rmSync(temporary, { force: true });
+      console.warn(`Cannot download ${archiveName}: ${error.message}`);
+    }
   }
-  await rename(temporary, archive);
+  throw new Error(`Cannot download ${archiveName} after ${downloadAttempts} attempts`, {
+    cause: lastError,
+  });
 }
 
 function buildMinimalFfmpeg(root, cache, source, output) {
@@ -168,10 +191,30 @@ function buildMinimalFfmpeg(root, cache, source, output) {
       'export PATH="/usr/bin:/bin:$PATH"',
       'export PATH="$(cygpath -u "$QOL_MSVC_BIN"):$(cygpath -u "$QOL_LLVM_BIN"):$(cygpath -u "$QOL_NASM_BIN"):$PATH"',
       'cd "$(cygpath -u "$QOL_SOURCE")"',
+      'echo "Cleaning previous FFmpeg build state"',
       "make distclean >/dev/null 2>&1 || true",
-      `./configure --prefix="$(cygpath -m "$QOL_PREFIX")" ${configureArguments.join(" ")}`,
-      'make -j"$QOL_JOBS"',
-      "make install",
+      'echo "Configuring minimal FFmpeg runtime (10 minute timeout)"',
+      `timeout 10m ./configure --prefix="$(cygpath -m "$QOL_PREFIX")" ${configureArguments.join(" ")} &`,
+      "configure_pid=$!",
+      'while kill -0 "$configure_pid" 2>/dev/null; do',
+      "  sleep 30",
+      '  if kill -0 "$configure_pid" 2>/dev/null; then',
+      '    echo "FFmpeg configure is still running; latest probe:"',
+      '    tail -n 1 ffbuild/config.log 2>/dev/null || true',
+      "  fi",
+      "done",
+      'if wait "$configure_pid"; then',
+      "  :",
+      "else",
+      "  status=$?",
+      '  echo "FFmpeg configure failed or timed out (exit $status)"',
+      "  tail -n 20 ffbuild/config.log 2>/dev/null || true",
+      '  exit "$status"',
+      "fi",
+      'echo "Compiling minimal FFmpeg runtime with $QOL_JOBS jobs"',
+      'timeout 15m make -j"$QOL_JOBS"',
+      'echo "Installing minimal FFmpeg runtime"',
+      "timeout 5m make install",
       "",
     ].join("\n"),
     "utf8",
@@ -200,6 +243,7 @@ function buildMinimalFfmpeg(root, cache, source, output) {
     stdio: "inherit",
     windowsHide: true,
   });
+  if (build.error) throw build.error;
   if (build.status !== 0) throw new Error(`Cannot build minimal FFmpeg runtime (exit ${build.status})`);
 }
 
