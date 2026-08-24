@@ -13,9 +13,8 @@ permissions:
 
 concurrency:
   group: build-${{ github.ref }}
-  # Nightly Windows builds populate the FFmpeg cache. Cancelling an older run
-  # before its post-job cache save makes every following commit rebuild FFmpeg.
-  cancel-in-progress: false
+  # Do not leave an obsolete FFmpeg build occupying a Windows runner for hours.
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -124,6 +123,7 @@ jobs:
   build:
     name: ${{ matrix.name }}
     needs: [test, prepare-release]
+    timeout-minutes: 30
     permissions:
       contents: write
     strategy:
