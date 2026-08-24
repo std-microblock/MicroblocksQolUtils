@@ -24,7 +24,10 @@ internal static class PortableRasterBridge {
             : OperatingSystem.IsMacOS()
                 ? "libmicroblocks_qol_native.dylib"
                 : "libmicroblocks_qol_native.so";
-        string path = Path.Combine(root, "target", "release", fileName);
+        string? configuredPath = Environment.GetEnvironmentVariable("MQOL_NATIVE_LIBRARY");
+        string path = string.IsNullOrWhiteSpace(configuredPath)
+            ? Path.Combine(root, "target", "release", fileName)
+            : Path.GetFullPath(configuredPath);
         handle = NativeLibrary.Load(path);
         NativeLibrary.SetDllImportResolver(typeof(PortableRasterBridge).Assembly,
             (name, _, _) => string.Equals(name, LibraryName, StringComparison.Ordinal) ? handle : IntPtr.Zero);

@@ -1,0 +1,175 @@
+name: Build
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+  EVEREST_VERSION: stable-1.6485.0
+
+jobs:
+  test:
+    name: Rust checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup component add rustfmt
+
+      - name: Cache Cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: rust-checks-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Check formatting
+        run: cargo fmt --manifest-path Native/Cargo.toml -- --check
+
+      - name: Run native tests
+        run: cargo test --workspace --locked
+
+  build:
+    name: ${{ matrix.name }}
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            runner: windows-2022
+            target: x86_64-pc-windows-msvc
+            artifact: MicroblocksQolUtils-windows-x64
+          - name: Linux x64 (musl)
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            artifact: MicroblocksQolUtils-linux-x64-musl
+          - name: macOS x64
+            runner: macos-15-intel
+            target: x86_64-apple-darwin
+            artifact: MicroblocksQolUtils-macos-x64
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install Rust target
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          rustup target add ${{ matrix.target }}
+
+      - name: Cache Cargo
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ matrix.target }}-${{ hashFiles('Cargo.lock') }}
+
+      - name: Cache minimal FFmpeg build
+        if: runner.os == 'Windows'
+        uses: actions/cache@v6
+        with:
+          path: .cache/ffmpeg
+          key: ffmpeg-windows-x64-${{ hashFiles('scripts/qol-ffmpeg.mjs') }}
+
+      - name: Install Linux build tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools unzip zip
+
+      - name: Install Windows build tools
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          & C:\msys64\usr\bin\pacman.exe -S --needed --noconfirm make perl diffutils mingw-w64-x86_64-nasm
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Download Everest reference assemblies
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p .work/everest
+          gh release download "$EVEREST_VERSION" \
+            --repo EverestAPI/Everest \
+            --pattern lib-stripped.zip \
+            --dir .work/everest \
+            --clobber
+
+      - name: Extract Everest reference assemblies
+        if: runner.os != 'Windows'
+        run: unzip -q .work/everest/lib-stripped.zip -d .work/everest
+
+      - name: Extract Everest reference assemblies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Expand-Archive -LiteralPath .work/everest/lib-stripped.zip -DestinationPath .work/everest -Force
+
+      - name: Build package
+        env:
+          CELESTE_ROOT: ${{ github.workspace }}/.work/everest/lib-stripped
+        run: >-
+          node scripts/build-qol-mod.mjs
+          --target ${{ matrix.target }}
+          --archive ${{ matrix.artifact }}.zip
+          --skip-parity
+
+      - name: Upload package
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish tagged release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: Create GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mapfile -d '' packages < <(find artifacts -name '*.zip' -print0)
+          gh release create "$GITHUB_REF_NAME" "${packages[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --generate-notes \
+            --verify-tag

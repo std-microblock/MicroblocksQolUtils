@@ -164,6 +164,25 @@ elsewhere. Build and install in one step with:
 node scripts/build-qol-mod.mjs --install
 ```
 
+Cross-platform packages can be selected explicitly. Linux CI uses the musl
+target, while macOS currently targets Intel/Rosetta-compatible x64:
+
+```bash
+node scripts/build-qol-mod.mjs --target x86_64-pc-windows-msvc
+node scripts/build-qol-mod.mjs --target x86_64-unknown-linux-musl --skip-parity
+node scripts/build-qol-mod.mjs --target x86_64-apple-darwin --skip-parity
+```
+
+Set `CELESTE_ROOT` to an Everest installation or to the extracted official
+`lib-stripped.zip` reference directory. Windows builds include the capture and
+minimal FFmpeg recording backend. Linux and macOS packages include the portable
+text/icon rasterizer; Windows-only capture and recording APIs report themselves
+as unavailable there.
+
+GitHub Actions runs formatting/tests and builds Windows x64, Linux x64 musl,
+and macOS x64 archives. Tags named `v*` also publish those archives as a GitHub
+release.
+
 The development-only parity harness uses SkiaSharp as an external reference and
 compares it with the mod's portable raster upload/composition path. SkiaSharp is
 not referenced by the mod project or copied into the package. The harness fails

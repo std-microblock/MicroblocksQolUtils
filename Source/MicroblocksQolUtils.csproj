@@ -10,7 +10,8 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <CelesteRoot Condition="'$(CelesteRoot)' == '' and '$(CELESTE_ROOT)' != ''">$(CELESTE_ROOT)</CelesteRoot>
-    <CelesteRoot Condition="'$(CelesteRoot)' == ''">C:\SteamLibrary\steamapps\common\Celeste</CelesteRoot>
+    <CelesteRoot Condition="'$(CelesteRoot)' == '' and '$(OS)' == 'Windows_NT'">C:\SteamLibrary\steamapps\common\Celeste</CelesteRoot>
+    <CelesteRoot Condition="'$(CelesteRoot)' == ''">$(MSBuildThisFileDirectory)../lib-stripped</CelesteRoot>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,13 +20,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Reference Include="Celeste"><HintPath>$(CelesteRoot)\Celeste.dll</HintPath><Private>false</Private></Reference>
-    <Reference Include="FNA"><HintPath>$(CelesteRoot)\FNA.dll</HintPath><Private>false</Private></Reference>
-    <Reference Include="MMHOOK_Celeste"><HintPath>$(CelesteRoot)\MMHOOK_Celeste.dll</HintPath><Private>false</Private></Reference>
-    <Reference Include="Mono.Cecil"><HintPath>$(CelesteRoot)\Mono.Cecil.dll</HintPath><Private>false</Private></Reference>
-    <Reference Include="MonoMod.RuntimeDetour"><HintPath>$(CelesteRoot)\MonoMod.RuntimeDetour.dll</HintPath><Private>false</Private></Reference>
-    <Reference Include="MonoMod.Utils"><HintPath>$(CelesteRoot)\MonoMod.Utils.dll</HintPath><Private>false</Private></Reference>
-    <Reference Include="System.Drawing.Common"><HintPath>$(CelesteRoot)\System.Drawing.Common.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Celeste"><HintPath>$(CelesteRoot)/Celeste.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="FNA"><HintPath>$(CelesteRoot)/FNA.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="MMHOOK_Celeste"><HintPath>$(CelesteRoot)/MMHOOK_Celeste.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="Mono.Cecil"><HintPath>$(CelesteRoot)/Mono.Cecil.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="MonoMod.RuntimeDetour"><HintPath>$(CelesteRoot)/MonoMod.RuntimeDetour.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="MonoMod.Utils"><HintPath>$(CelesteRoot)/MonoMod.Utils.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="System.Drawing.Common"><HintPath>$(CelesteRoot)/System.Drawing.Common.dll</HintPath><Private>false</Private></Reference>
   </ItemGroup>
 
   <ItemGroup>
