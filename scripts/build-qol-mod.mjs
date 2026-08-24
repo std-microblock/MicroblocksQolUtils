@@ -1,4 +1,4 @@
-import { copyFileSync, cpSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
 import { basename, delimiter, dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { ensureQolFfmpeg, findLibclangDirectory } from "./qol-ffmpeg.mjs";
@@ -133,13 +133,14 @@ for (const path of ["everest.yaml", "Dialog", "Graphics"]) {
 }
 console.log(`Built ${output}`);
 rmSync(archive, { force: true });
+const packageEntries = readdirSync(output).sort();
 const packaged = targetPlatform === "win32"
-  ? spawnSync("tar", ["-a", "-cf", archive, "-C", output, "."], {
+  ? spawnSync("tar", ["-a", "-cf", archive, "-C", output, ...packageEntries], {
       cwd: root,
       stdio: "inherit",
       shell: false,
     })
-  : spawnSync("zip", ["-q", "-r", archive, "."], {
+  : spawnSync("zip", ["-q", "-r", archive, ...packageEntries], {
       cwd: output,
       stdio: "inherit",
       shell: false,
@@ -164,12 +165,14 @@ if (process.argv.includes("--install")) {
     }
   }
   const modsRoot = resolve(celesteRoot, "Mods");
-  const installed = resolve(modsRoot, "MicroblocksQolUtils");
-  if (dirname(installed) !== modsRoot || basename(installed) !== "MicroblocksQolUtils") {
-    throw new Error(`Refusing to replace unexpected install target ${installed}`);
+  const installedDirectory = resolve(modsRoot, "MicroblocksQolUtils");
+  const installedArchive = resolve(modsRoot, "MicroblocksQolUtils.zip");
+  if (dirname(installedDirectory) !== modsRoot || basename(installedDirectory) !== "MicroblocksQolUtils"
+    || dirname(installedArchive) !== modsRoot || basename(installedArchive) !== "MicroblocksQolUtils.zip") {
+    throw new Error(`Refusing to replace unexpected install targets under ${modsRoot}`);
   }
   mkdirSync(modsRoot, { recursive: true });
-  rmSync(installed, { recursive: true, force: true });
-  cpSync(output, installed, { recursive: true });
-  console.log(`Installed ${installed}`);
+  rmSync(installedDirectory, { recursive: true, force: true });
+  copyFileSync(archive, installedArchive);
+  console.log(`Installed ${installedArchive}`);
 }
