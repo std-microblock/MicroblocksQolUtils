@@ -13,6 +13,14 @@ namespace Celeste.Mod.MicroblocksQolUtils;
 internal static class EarlyDpiBootstrap {
     private static readonly nint PerMonitorAwareV2 = new(-4);
     private static bool windowScaleApplied;
+    private static float uiScale = 1f;
+
+    /// <summary>
+    /// Converts the 1920x1080 UI's device-independent sizes to the physical
+    /// pixel density of the monitor containing the game window. Windows will
+    /// not perform this scaling for a per-monitor-aware process.
+    /// </summary>
+    internal static float UiScale => uiScale;
 
     [ModuleInitializer]
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "CA2255",
@@ -30,13 +38,19 @@ internal static class EarlyDpiBootstrap {
         }
     }
 
-    internal static void ApplyWindowScale() {
-        if (!OperatingSystem.IsWindows() || windowScaleApplied) return;
+    internal static void UpdateWindowScale() {
+        if (!OperatingSystem.IsWindows()) return;
 
         nint window = Process.GetCurrentProcess().MainWindowHandle;
         if (window == nint.Zero) return;
-        if (GetAwarenessFromDpiAwarenessContext(
-            GetWindowDpiAwarenessContext(window)) != DpiAwareness.PerMonitorAware) {
+
+        bool perMonitorAware = GetAwarenessFromDpiAwarenessContext(
+            GetWindowDpiAwarenessContext(window)) == DpiAwareness.PerMonitorAware;
+        uint dpi = perMonitorAware ? GetDpiForWindow(window) : 96;
+        uiScale = Math.Clamp(dpi / 96f, 1f, 3f);
+
+        if (windowScaleApplied) return;
+        if (!perMonitorAware) {
             windowScaleApplied = true;
             return;
         }
@@ -45,7 +59,6 @@ internal static class EarlyDpiBootstrap {
             return;
         }
 
-        uint dpi = GetDpiForWindow(window);
         if (dpi <= 96) {
             windowScaleApplied = true;
             return;
@@ -59,7 +72,7 @@ internal static class EarlyDpiBootstrap {
 
         Engine.SetWindowed(migrated * 320, migrated * 180);
         Logger.Log(LogLevel.Info, "MicroblocksQolUtils/DPI",
-            $"Enabled physical-pixel rendering at {dpi} DPI and scaled the window {current} -> {migrated} without changing Celeste settings.");
+            $"Using {uiScale:P0} UI scale at {dpi} DPI and scaled the window {current} -> {migrated} without changing Celeste settings.");
     }
 
     [DllImport("user32.dll", SetLastError = true)]

@@ -273,11 +273,12 @@ public static class SystemTtfFont {
             Vector2 pixelsPerUnit = screenAligned
                 ? new Vector2(MathF.Abs(transform.M11), MathF.Abs(transform.M22))
                 : Vector2.One;
+            float uiScale = EarlyDpiBootstrap.UiScale;
             Vector2 textureScale = new(1f / pixelsPerUnit.X, 1f / pixelsPerUnit.Y);
             int pixelSize = Math.Max(8,
-                (int)MathF.Round(BasePixelSize * Math.Max(0.01f, scale) * pixelsPerUnit.Y));
+                (int)MathF.Round(BasePixelSize * Math.Max(0.01f, scale) * pixelsPerUnit.Y * uiScale));
             int lineHeightPixels = Math.Max(1,
-                (int)MathF.Round(BaseLineHeight * Math.Max(0.01f, scale) * pixelsPerUnit.Y));
+                (int)MathF.Round(BaseLineHeight * Math.Max(0.01f, scale) * pixelsPerUnit.Y * uiScale));
             XnaMatrix inverse = screenAligned ? XnaMatrix.Invert(transform) : XnaMatrix.Identity;
             return new RasterContext(pixelSize, lineHeightPixels, textureScale,
                 transform, inverse, screenAligned);
