@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using Monocle;
 
@@ -19,17 +18,15 @@ public static class WindowsNotifier {
 
     public static bool IsGameForeground() {
         if (!OperatingSystem.IsWindows()) return true;
-        IntPtr foreground = GetForegroundWindow();
-        if (foreground == IntPtr.Zero) return true;
-        IntPtr game = Process.GetCurrentProcess().MainWindowHandle;
-        if (game == IntPtr.Zero && Engine.Instance?.Window is { } window) game = window.Handle;
-        return game == IntPtr.Zero || foreground == game;
+
+        // FNA already tracks the window activation state from SDL events. Reading it avoids
+        // asking Windows to enumerate the process' top-level windows every update frame.
+        return Engine.Instance?.IsActive ?? true;
     }
 
     public static void Show(string title, string message) {
         if (!OperatingSystem.IsWindows()) return;
-        IntPtr window = Process.GetCurrentProcess().MainWindowHandle;
-        if (window == IntPtr.Zero && Engine.Instance?.Window is { } gameWindow) window = gameWindow.Handle;
+        IntPtr window = WindowsGameWindow.NativeHandle;
 
         NotifyIconData data = new() {
             cbSize = (uint)Marshal.SizeOf<NotifyIconData>(),
@@ -72,9 +69,6 @@ public static class WindowsNotifier {
         public Guid guidItem;
         public IntPtr hBalloonIcon;
     }
-
-    [DllImport("user32.dll")]
-    private static extern IntPtr GetForegroundWindow();
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     [return: MarshalAs(UnmanagedType.Bool)]
