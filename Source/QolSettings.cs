@@ -59,6 +59,12 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue(true)]
     public bool ReplaceEverestModOptions { get; set; } = true;
 
+    [SettingIgnore]
+    public List<string> PinnedModOptionsTabs { get; set; } = [];
+
+    [SettingIgnore]
+    public List<string> FavoriteModOptionsItems { get; set; } = [];
+
     [DefaultValue(false)]
     public bool ChapterSelectShowCollabMaps { get; set; }
 
