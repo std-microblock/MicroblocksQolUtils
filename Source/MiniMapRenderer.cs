@@ -16,12 +16,12 @@ public static class MiniMapRenderer {
         solidPixel = null;
     }
 
-    public static void Render(Level level) {
+    public static float Render(Level level) {
         QolSettings settings = MicroblocksQolUtilsModule.Settings;
-        if (!settings.MiniMapEnabled) return;
+        if (!settings.MiniMapEnabled) return 0f;
         Player? player = level.Tracker.GetEntity<Player>();
         SolidTiles? solids = level.Tracker.GetEntity<SolidTiles>();
-        if (player is null || solids is null) return;
+        if (player is null || solids is null) return 0f;
 
         float size = settings.MiniMapSize;
         float radius = size / 2f;
@@ -79,10 +79,17 @@ public static class MiniMapRenderer {
         }
         if (settings.ShowMapPlayerCount) data.Add($"{MiaoNetBridge.PlayersInMap} 人");
         if (settings.ShowClock) data.Add(DateTime.Now.ToString("HH:mm:ss"));
+        float reservedBottom = Margin + size;
         if (data.Count > 0) {
             string text = string.Join("  ·  ", data);
             Vector2 textPosition = center + new Vector2(0f, radius + 10f);
-            Vector2 measured = SystemTtfFont.Measure(text, 0.42f);
+            const float preferredScale = 0.42f;
+            float availableWidth = Math.Max(1f, size - 24f);
+            Vector2 preferredSize = SystemTtfFont.Measure(text, preferredScale);
+            float scale = preferredSize.X <= availableWidth
+                ? preferredScale
+                : preferredScale * availableWidth / preferredSize.X;
+            Vector2 measured = SystemTtfFont.Measure(text, scale);
             if (settings.HudMaterialSurfaces) {
                 MaterialUi.AcrylicSurface(
                     textPosition.X - measured.X / 2f - 12f,
@@ -98,12 +105,14 @@ public static class MiniMapRenderer {
                 text,
                 textPosition,
                 new Vector2(0.5f, 0f),
-                0.42f,
+                scale,
                 palette.OnSurface,
                 settings.HudMaterialSurfaces ? 0f : 1f,
                 Color.Black
             );
+            reservedBottom = textPosition.Y + measured.Y + 5f;
         }
+        return reservedBottom;
     }
 
     private static float ResolveScale(Level level, float size, int zoom) {

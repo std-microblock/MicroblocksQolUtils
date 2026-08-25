@@ -13,7 +13,7 @@ use crate::encoder::{
 use crate::finalizer_audio;
 
 const CROSSFADE_SECONDS: f64 = 0.25;
-const CUT_GAP_SECONDS: f64 = 0.10;
+pub(crate) const CUT_GAP_SECONDS: f64 = 0.10;
 
 #[derive(Debug, Deserialize)]
 #[serde(default)]
@@ -279,6 +279,7 @@ pub fn finalize_with_progress(
         &plan.clips,
         &mixed_pcm,
         &audio_temporary,
+        plan.reconstruct_bgm,
         bgm_map,
     )?;
     report_progress(0.96);

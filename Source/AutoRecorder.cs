@@ -24,6 +24,8 @@ public static class AutoRecorder {
     private static MusicPosition deathReplayMusicStart;
     private static double branchStartSeconds;
     private static double deathReplayBranchStartSeconds;
+    private static double? pauseResumeAfterMediaSeconds;
+    private static double? deathReplayPauseResumeAfterMediaSeconds;
     private static string runKey = "";
     private static string areaSid = "";
     private static bool branchActive;
@@ -35,6 +37,7 @@ public static class AutoRecorder {
     private static bool deathReplayPauseSuspended;
     private static bool deathReplayFinalizeRequested;
     private static bool fullRecordingEnabled;
+    private static bool reconstructBgm;
     private static bool completing;
     private static bool manualMode;
     private static int finalizingCount;
@@ -163,14 +166,13 @@ public static class AutoRecorder {
         NativeRoomRecording? recording = current;
         if (recording is null) return;
 
-        if (pauseSuspended && PlayerIsRecordable(level, player)) {
-            pauseSuspended = false;
-            StartBranchAtCurrentTime();
+        if (pauseSuspended && PlayerIsRecordable(level, player) && PauseOverlayCleared(level)) {
+            ResumeFullRecordingAfterPause(recording);
         } else if (waitingForStablePlayer && PlayerIsRecordable(level, player)) {
             StartBranchAtCurrentTime();
         }
 
-        if (branchActive && settings.BgmMode == BgmRecordingMode.SfxOnlyWithPostMix)
+        if (branchActive && reconstructBgm)
             ObserveMusicTimeline(recording);
 
         if (transitioningRoom) {
@@ -202,14 +204,13 @@ public static class AutoRecorder {
         NativeRoomRecording? recording = deathReplayCurrent;
         if (recording is null) return;
 
-        if (deathReplayPauseSuspended && PlayerIsRecordable(level, player)) {
-            deathReplayPauseSuspended = false;
-            StartDeathReplayBranchAtCurrentTime();
+        if (deathReplayPauseSuspended && PlayerIsRecordable(level, player) && PauseOverlayCleared(level)) {
+            ResumeDeathReplayAfterPause(recording);
         } else if (deathReplayWaitingForStablePlayer && PlayerIsRecordable(level, player)) {
             StartDeathReplayBranchAtCurrentTime();
         }
 
-        if (deathReplayBranchActive && settings.BgmMode == BgmRecordingMode.SfxOnlyWithPostMix)
+        if (deathReplayBranchActive && reconstructBgm)
             ObserveDeathReplayMusicTimeline(recording);
     }
 
@@ -356,9 +357,11 @@ public static class AutoRecorder {
         branchActive = false;
         waitingForStablePlayer = false;
         pauseSuspended = false;
+        pauseResumeAfterMediaSeconds = null;
         transitioningRoom = false;
         ResetDeathReplayState(waitForStablePlayer: false);
         fullRecordingEnabled = false;
+        reconstructBgm = ShouldReconstructBgm(level);
     }
 
     private static void StartRunRecording(Level level) {
@@ -411,6 +414,7 @@ public static class AutoRecorder {
             branchActive = false;
         }
         pauseSuspended = true;
+        pauseResumeAfterMediaSeconds = null;
     }
 
     private static void SuspendDeathReplayForPause() {
@@ -422,6 +426,31 @@ public static class AutoRecorder {
             deathReplayBranchActive = false;
         }
         deathReplayPauseSuspended = true;
+        deathReplayPauseResumeAfterMediaSeconds = null;
+    }
+
+    private static void ResumeFullRecordingAfterPause(NativeRoomRecording recording) {
+        double now = recording.MediaTimeSeconds;
+        if (pauseResumeAfterMediaSeconds is not double clearedAt) {
+            pauseResumeAfterMediaSeconds = now;
+            return;
+        }
+        if (now - clearedAt < MinimumClipSeconds) return;
+        pauseSuspended = false;
+        pauseResumeAfterMediaSeconds = null;
+        StartBranchAtCurrentTime();
+    }
+
+    private static void ResumeDeathReplayAfterPause(NativeRoomRecording recording) {
+        double now = recording.MediaTimeSeconds;
+        if (deathReplayPauseResumeAfterMediaSeconds is not double clearedAt) {
+            deathReplayPauseResumeAfterMediaSeconds = now;
+            return;
+        }
+        if (now - clearedAt < MinimumClipSeconds) return;
+        deathReplayPauseSuspended = false;
+        deathReplayPauseResumeAfterMediaSeconds = null;
+        StartDeathReplayBranchAtCurrentTime();
     }
 
     private static void ObserveMusicTimeline(NativeRoomRecording recording) {
@@ -485,7 +514,7 @@ public static class AutoRecorder {
                 $"{DateTime.Now:yyyyMMdd-HHmmss}-{Sanitize(areaSid)}.mp4"
             );
             lastOutput = output;
-            jobs.Insert(0, new RecordingFinalizationJob(clips, output, "完整录像"));
+            jobs.Insert(0, new RecordingFinalizationJob(clips, output, "完整录像", reconstructBgm));
         }
         FinishStoppedRecording(recording, stop, jobs);
         ResetFullRecordingState();
@@ -504,7 +533,8 @@ public static class AutoRecorder {
             clips,
             DateTime.Now,
             level?.Session.Area.SID ?? areaSid,
-            level?.Session.Level ?? "room"
+            level?.Session.Level ?? "room",
+            reconstructBgm
         ));
         int retentionCount = Math.Max(0, settings.DeathReplayRetentionCount);
         if (retentionCount > 0 && PendingDeathReplays.Count > retentionCount) {
@@ -608,6 +638,24 @@ public static class AutoRecorder {
             && player.StateMachine.State != Player.StIntroRespawn;
     }
 
+    private static bool PauseOverlayCleared(Level level) {
+        return !level.Paused
+            && QolSettingsOverlay.ActivePage is null
+            && level.Entities.FindFirst<TextMenu>() is null
+            && level.Entities.FindFirst<MaterialModOptions>() is null;
+    }
+
+    private static bool ShouldReconstructBgm(Level level) {
+        QolSettings settings = MicroblocksQolUtilsModule.Settings;
+        if (settings.BgmMode != BgmRecordingMode.SfxOnlyWithPostMix) return false;
+        bool rhythmSensitive = RhythmMapDetector.IsRhythmSensitive(level.Session.MapData);
+        if (rhythmSensitive) {
+            Logger.Log(LogLevel.Info, "MicroblocksQolUtils/Recorder",
+                "Rhythm-sensitive map detected; keeping the captured game mix for timing accuracy.");
+        }
+        return !rhythmSensitive;
+    }
+
     private static void DiscardCurrentRecording() {
         NativeRoomRecording? recording = current;
         current = null;
@@ -619,6 +667,7 @@ public static class AutoRecorder {
         branchActive = false;
         waitingForStablePlayer = false;
         pauseSuspended = false;
+        pauseResumeAfterMediaSeconds = null;
         transitioningRoom = false;
     }
 
@@ -658,7 +707,7 @@ public static class AutoRecorder {
             string unique = Guid.NewGuid().ToString("N")[..8];
             string fileName = $"{death.OccurredAt:yyyyMMdd-HHmmss-fff}-{room}-death-{unique}.mp4";
             string output = Path.Combine(DeathReplayRoot, area, fileName);
-            return new RecordingFinalizationJob(death.Clips, output, "死亡回放");
+            return new RecordingFinalizationJob(death.Clips, output, "死亡回放", death.ReconstructBgm);
         }).ToList();
         PendingDeathReplays.Clear();
         return jobs;
@@ -697,6 +746,7 @@ public static class AutoRecorder {
                     job.Clips,
                     job.Output,
                     job.Description,
+                    job.ReconstructBgm,
                     progress => UpdateFinalization(
                         finalizationId,
                         job.Output,
@@ -787,6 +837,7 @@ public static class AutoRecorder {
         ResetFullRecordingState();
         runKey = "";
         areaSid = "";
+        reconstructBgm = false;
         PendingDeathReplays.Clear();
         ResetDeathReplayState(waitForStablePlayer: false);
     }
@@ -800,6 +851,7 @@ public static class AutoRecorder {
         branchActive = false;
         waitingForStablePlayer = false;
         pauseSuspended = false;
+        pauseResumeAfterMediaSeconds = null;
         transitioningRoom = false;
         fullRecordingEnabled = false;
         completing = false;
@@ -812,6 +864,7 @@ public static class AutoRecorder {
         deathReplayBranchActive = false;
         deathReplayWaitingForStablePlayer = waitForStablePlayer;
         deathReplayPauseSuspended = false;
+        deathReplayPauseResumeAfterMediaSeconds = null;
         deathReplayFinalizeRequested = false;
         if (!keepRecording) deathReplayCurrent = null;
     }
@@ -873,13 +926,15 @@ public static class AutoRecorder {
         IReadOnlyList<RecordingClip> Clips,
         DateTime OccurredAt,
         string AreaSid,
-        string Room
+        string Room,
+        bool ReconstructBgm
     );
 
     private sealed record RecordingFinalizationJob(
         IReadOnlyList<RecordingClip> Clips,
         string Output,
-        string Description
+        string Description,
+        bool ReconstructBgm
     ) {
         public double Weight => Math.Max(0.1d, Clips.Sum(clip => clip.DurationSeconds));
     }
