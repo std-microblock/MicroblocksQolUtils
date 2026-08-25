@@ -105,7 +105,9 @@ The portal path works on Wayland and PipeWire-enabled X11 desktops.
   bitrate, encoder preference, UI SFX capture, and retention limits are configurable.
 - FMOD DSP taps capture gameplay_sfx, music, and optional ui_sfx. Chunks are
   streamed to an .sfxchunks sidecar and mixed during finalization against the
-  same video timeline instead of buffering an entire run in memory.
+  same video timeline instead of buffering an entire run in memory. MKV files
+  under `.working` are therefore silent intermediates; play the finalized MP4
+  files under `full` or `deaths` instead.
 - BGM can use the captured game mix or SfxOnlyWithPostMix. The latter splits
   music at event, loop, seek, and other timeline discontinuities; a clean mapped
   file replaces only its matching event segment.

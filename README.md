@@ -89,7 +89,8 @@ macOS 首次使用时需要授予 Celeste“屏幕与系统录音”权限。Lin
   并设置完整录像/死亡回放的保留数量或立即清理旧录像。
 - 音频通过 FMOD DSP tap 采集 gameplay_sfx、music 和可选的 ui_sfx。
   音频块写入 .sfxchunks sidecar，最终化时按视频剪辑时间线混音，不把整段音频
-  堆在内存中。
+  堆在内存中。因此 `.working` 里的 MKV 是无音轨的中间文件；应播放 `full` 或
+  `deaths` 目录下完成最终化的 MP4。
 - BGM 可以直接使用捕获的游戏混音，也可以使用 SfxOnlyWithPostMix：
   该模式按事件、循环、跳转等时间线断点切分音乐；如果配置了干净 BGM 映射，
   则用映射文件替换对应事件片段。

@@ -52,6 +52,9 @@ public static class AutoRecorder {
     public static bool IsCleaning => Volatile.Read(ref cleanupRunning) != 0;
     public static double CurrentSeconds => current?.MediaTimeSeconds ?? 0;
     public static double DisplaySeconds => CurrentSeconds;
+    public static bool HasAudioTap => StatusRecording?.HasAudioTap ?? false;
+    public static ulong AudioFramesCaptured => StatusRecording?.Statistics.AudioFramesCaptured ?? 0;
+    public static ulong AudioChunksDropped => StatusRecording?.Statistics.AudioChunksDropped ?? 0;
     public static double DeathReplaySeconds => Math.Min(
         deathReplayCurrent?.MediaTimeSeconds ?? 0,
         Math.Clamp(MicroblocksQolUtilsModule.Settings.DeathReplayBufferSeconds, 10, 60)
@@ -60,6 +63,7 @@ public static class AutoRecorder {
     public static string LastOutput => lastOutput;
     public static string LastCleanupStatus => lastCleanupStatus;
     public static int PendingDeathReplayCount => PendingDeathReplays.Count;
+    private static NativeRoomRecording? StatusRecording => current ?? deathReplayCurrent;
     public static double FinalizationProgress {
         get {
             lock (FinalizationProgressLock) {
@@ -155,14 +159,14 @@ public static class AutoRecorder {
             SuspendForPause();
             return;
         }
-        if (current is null && !player.Dead && !level.Transitioning) StartRunRecording(level);
+        if (current is null && PlayerIsRecordable(level, player)) StartRunRecording(level);
         NativeRoomRecording? recording = current;
         if (recording is null) return;
 
-        if (pauseSuspended && !player.Dead && !level.Transitioning) {
+        if (pauseSuspended && PlayerIsRecordable(level, player)) {
             pauseSuspended = false;
             StartBranchAtCurrentTime();
-        } else if (waitingForStablePlayer && !player.Dead && !level.Transitioning) {
+        } else if (waitingForStablePlayer && PlayerIsRecordable(level, player)) {
             StartBranchAtCurrentTime();
         }
 
@@ -193,15 +197,15 @@ public static class AutoRecorder {
             SuspendDeathReplayForPause();
             return;
         }
-        if (deathReplayCurrent is null && !player.Dead && !level.Transitioning)
+        if (deathReplayCurrent is null && PlayerIsRecordable(level, player))
             StartDeathReplayRecording();
         NativeRoomRecording? recording = deathReplayCurrent;
         if (recording is null) return;
 
-        if (deathReplayPauseSuspended && !player.Dead && !level.Transitioning) {
+        if (deathReplayPauseSuspended && PlayerIsRecordable(level, player)) {
             deathReplayPauseSuspended = false;
             StartDeathReplayBranchAtCurrentTime();
-        } else if (deathReplayWaitingForStablePlayer && !player.Dead && !level.Transitioning) {
+        } else if (deathReplayWaitingForStablePlayer && PlayerIsRecordable(level, player)) {
             StartDeathReplayBranchAtCurrentTime();
         }
 
@@ -593,6 +597,15 @@ public static class AutoRecorder {
     private static bool ShouldRecord(Player player, QolSettings settings) {
         if (settings.RecordingPolicy == RecordingPolicy.EveryRoom) return true;
         return player.Leader.Followers.Any(follower => follower.Entity is Strawberry { Golden: true });
+    }
+
+    private static bool PlayerIsRecordable(Level level, Player player) {
+        // A freshly respawned Player is already non-dead while the respawn wipe/animation is
+        // still running. Starting a retained branch there puts the tail of the death sequence
+        // back into manually and automatically saved videos.
+        return !player.Dead
+            && !level.Transitioning
+            && player.StateMachine.State != Player.StIntroRespawn;
     }
 
     private static void DiscardCurrentRecording() {
