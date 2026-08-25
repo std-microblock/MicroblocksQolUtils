@@ -26,8 +26,8 @@ public sealed class QolHud : Entity {
         QolSettings settings = MicroblocksQolUtilsModule.Settings;
         if (!settings.Enabled) return;
 
-        if (Scene is Level level) MiniMapRenderer.Render(level);
-        RecordingHudRenderer.Render();
+        float miniMapBottom = Scene is Level level ? MiniMapRenderer.Render(level) : 0f;
+        RecordingHudRenderer.Render(miniMapBottom);
         RenderProfilerStatus();
 
         if (settings.ShowFps) {
