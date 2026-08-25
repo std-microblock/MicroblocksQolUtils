@@ -17,8 +17,8 @@ namespace Celeste.Mod.MicroblocksQolUtils;
 public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private const float ScreenWidth = 1920f;
     private const float ScreenHeight = 1080f;
-    private const float TabHeight = 52f;
-    private const float TabGap = 8f;
+    private const float TabHeight = 60f;
+    private const float TabGap = 4f;
     private const float RowGap = 10f;
     private const float StandardRowHeight = 78f;
     private const float DescribedPrimaryRowHeight = 64f;
@@ -29,6 +29,23 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private const int DropdownMaxVisibleItems = 8;
     private const int DropdownOptionLimit = 24;
     private const int SearchTextLimit = 80;
+
+    private static readonly string[] TabIconPool = [
+        "bolt", "layers", "map", "route", "sports_esports", "timer", "visibility",
+        "replay", "memory", "analytics", "dashboard", "notifications", "group",
+        "deployed_code", "list_alt", "blur_on", "keyboard", "toggle_on", "schedule", "speed"
+    ];
+
+    private static readonly Color[] TabAccentSeeds = [
+        new Color(126, 99, 184),
+        new Color(53, 132, 228),
+        new Color(34, 157, 144),
+        new Color(84, 148, 96),
+        new Color(217, 137, 45),
+        new Color(210, 90, 112),
+        new Color(154, 103, 196),
+        new Color(49, 151, 181)
+    ];
 
     private static Hook? gotoRoutineHook;
     private static bool hookFailed;
@@ -578,15 +595,22 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private void UpdateMouse(ModOptionsLayout layout) {
         if (menu is null) return;
         Vector2 mouse = MInput.Mouse.Position;
+        bool scrolled = false;
         if (MInput.Mouse.WheelDelta != 0) {
             float direction = -Math.Sign(MInput.Mouse.WheelDelta);
             if (layout.Navigation.Contains(mouse)) {
                 tabScroll.Scroll(direction * 180f, MaxTabScroll(layout));
+                scrolled = true;
             } else if (layout.Rows.Contains(mouse)) {
                 rowScroll.Scroll(direction * 220f, MaxRowScroll(layout));
+                scrolled = true;
             }
         }
 
+        // Wheel input can also make Everest report the mouse as moved. Do not retarget the
+        // selection in that frame: selecting the row that was under the pointer before the
+        // scroll would immediately pull the scroll target back toward it.
+        if (scrolled) return;
         if (!MInput.Mouse.WasMoved && !MInput.Mouse.PressedLeftButton) return;
         int tabIndex = TabIndexAt(mouse, layout);
         if (tabIndex >= 0) {
@@ -722,8 +746,6 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         menu.Current = item;
         item.OnEnter?.Invoke();
         item.SelectWiggler?.Start();
-        Audio.Play("event:/ui/main/rollover_down");
-        EnsureSelectionVisible(ModOptionsLayout.Create(0f));
     }
 
     private void EnsureSelectionVisible(ModOptionsLayout layout) {
@@ -774,7 +796,9 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
     private void RenderTabs(ModOptionsLayout layout, MaterialPalette palette, float alpha) {
         MaterialUi.RoundedRect(layout.Navigation.X, layout.Navigation.Y, layout.Navigation.Width,
-            layout.Navigation.Height, 28f, palette.SurfaceHigh * (0.72f * alpha));
+            layout.Navigation.Height, 28f, palette.Surface * (0.56f * alpha));
+        MaterialUi.RoundedOutline(layout.Navigation.X, layout.Navigation.Y, layout.Navigation.Width,
+            layout.Navigation.Height, 28f, 1f, palette.Outline * (0.18f * alpha));
         MaterialUiKit.Text(UiText("microblocks_qol_modoptions_mods", "模组与分类"),
             new Vector2(layout.NavigationItems.X, layout.Navigation.Y + 30f), new Vector2(0f, 0.5f),
             MaterialTextRole.Label, palette.OnSurfaceVariant, alpha, scaleOverride: 0.28f);
@@ -790,18 +814,26 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                 MaterialRect rect = layout.Tab(position, tabScroll.Offset);
                 if (rect.Bottom < layout.NavigationItems.Y || rect.Y > layout.NavigationItems.Bottom) continue;
                 bool selected = index == selectedTab;
+                TabVisual visual = TabVisualFor(tab, palette);
                 if (selected) {
                     MaterialUi.RoundedRect(rect.X, rect.Y, rect.Width, rect.Height, 20f,
-                        palette.Primary * (0.92f * alpha));
+                        Color.Lerp(palette.SurfaceHighest, visual.Accent, 0.20f) * (0.98f * alpha));
                 }
                 motion.RenderStateLayer($"mod-options.tab.{tab.Id}", rect, 20f,
-                    selected ? palette.OnPrimary : palette.Primary, alpha);
-                MaterialUiKit.Icon(index == 0 && tab.Id == "__status" ? "info" : "extension",
-                    new Vector2(rect.X + 26f, rect.Center.Y), 21f,
-                    selected ? palette.OnPrimary : palette.Primary, alpha, filled: selected);
-                string title = MaterialTextUtil.Ellipsize(tab.Title, rect.Width - 72f, 0.29f, UiFontWeight.Bold);
-                MaterialUiKit.Text(title, new Vector2(rect.X + 48f, rect.Center.Y), new Vector2(0f, 0.5f),
-                    MaterialTextRole.Label, selected ? palette.OnPrimary : palette.OnSurfaceVariant,
+                    visual.Accent, alpha);
+                MaterialRect iconTile = new(rect.X + 10f, rect.Center.Y - 20f, 40f, 40f);
+                Color iconContainer = Color.Lerp(
+                    selected ? palette.SurfaceHighest : palette.SurfaceHigh,
+                    visual.Accent,
+                    selected ? 0.34f : 0.15f
+                );
+                MaterialUi.RoundedRect(iconTile.X, iconTile.Y, iconTile.Width, iconTile.Height, 14f,
+                    iconContainer * alpha);
+                MaterialUiKit.Icon(visual.Icon, iconTile.Center, 21f,
+                    visual.Accent, alpha, filled: selected);
+                string title = MaterialTextUtil.Ellipsize(tab.Title, rect.Width - 78f, 0.29f, UiFontWeight.Bold);
+                MaterialUiKit.Text(title, new Vector2(rect.X + 62f, rect.Center.Y), new Vector2(0f, 0.5f),
+                    MaterialTextRole.Label, selected ? palette.OnSurface : palette.OnSurfaceVariant,
                     alpha, scaleOverride: 0.29f);
             }
             if (visibleTabs.Count == 0) {
@@ -814,14 +846,17 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
     private void RenderRows(ModOptionsLayout layout, MaterialPalette palette, float alpha) {
         ModTab tab = tabs[selectedTab];
+        TabVisual visual = TabVisualFor(tab, palette);
         MaterialUi.RoundedRect(layout.Content.X, layout.Content.Y, layout.Content.Width,
-            layout.Content.Height, 28f, palette.Surface * (0.46f * alpha));
-        MaterialUiKit.Icon("tune", new Vector2(layout.ContentHeader.X + 15f, layout.ContentHeader.Center.Y),
-            27f, palette.Primary, alpha, filled: true);
+            layout.Content.Height, 28f, palette.Surface * (0.38f * alpha));
+        MaterialRect headerIcon = new(layout.ContentHeader.X, layout.ContentHeader.Center.Y - 21f, 42f, 42f);
+        MaterialUi.RoundedRect(headerIcon.X, headerIcon.Y, headerIcon.Width, headerIcon.Height, 15f,
+            Color.Lerp(palette.SurfaceHighest, visual.Accent, 0.26f) * alpha);
+        MaterialUiKit.Icon(visual.Icon, headerIcon.Center, 24f, visual.Accent, alpha, filled: true);
         float titleWidth = Math.Max(140f, layout.SettingSearch.X - layout.ContentHeader.X - 210f);
         string shownTitle = MaterialTextUtil.Ellipsize(tab.Title, titleWidth, 0.47f, UiFontWeight.Bold);
         MaterialUiKit.Text(shownTitle,
-            new Vector2(layout.ContentHeader.X + 42f, layout.ContentHeader.Center.Y), new Vector2(0f, 0.5f),
+            new Vector2(layout.ContentHeader.X + 56f, layout.ContentHeader.Center.Y), new Vector2(0f, 0.5f),
             MaterialTextRole.Title, palette.OnSurface, alpha, scaleOverride: 0.47f);
         if (tab.Version.Length > 0) {
             MaterialUiKit.Chip(tab.Version, new Vector2(layout.SettingSearch.X - 16f, layout.ContentHeader.Y + 13f),
@@ -832,7 +867,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
             "mod-options.search.settings", palette, alpha);
 
         menu!.Alpha = alpha;
-        menu.HighlightColor = palette.Primary;
+        menu.HighlightColor = visual.Accent;
         menu.MinWidth = Math.Max(600f, layout.Rows.Width - 54f);
         menu.RecalculateSize();
         rowViewport.Render(layout.Rows, () => {
@@ -851,13 +886,14 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                         palette.Primary, alpha, scaleOverride: 0.34f);
                     continue;
                 }
-                MaterialUi.RoundedRect(rect.X, rect.Y, rect.Width, rect.Height, 22f,
-                    (selected ? palette.SurfaceHighest : palette.SurfaceHigh) * ((selected ? 0.94f : 0.64f) * alpha));
-                if (selected) {
-                    MaterialUi.RoundedRect(rect.X, rect.Y + 14f, 4f, rect.Height - 28f, 2f,
-                        palette.Primary * alpha);
-                }
-                motion.RenderStateLayer(ItemKey(item), rect, 22f, palette.Primary, alpha);
+                Color rowFill = selected
+                    ? Color.Lerp(palette.SurfaceHighest, visual.Accent, 0.10f)
+                    : palette.SurfaceHigh;
+                MaterialUi.RoundedRect(rect.X, rect.Y, rect.Width, rect.Height, 18f,
+                    rowFill * ((selected ? 0.96f : 0.48f) * alpha));
+                MaterialUi.RoundedOutline(rect.X, rect.Y, rect.Width, rect.Height, 18f, 1f,
+                    (selected ? visual.Accent : palette.Outline) * ((selected ? 0.34f : 0.12f) * alpha));
+                motion.RenderStateLayer(ItemKey(item), rect, 18f, visual.Accent, alpha);
                 MaterialRect primary = new(rect.X, rect.Y, rect.Width,
                     PrimaryRowHeight(item, placement.Description is not null));
                 if (!RenderStandardItem(item, primary, palette, alpha, selected)) {
@@ -1473,6 +1509,43 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private static string ItemKey(TextMenu.Item item) =>
         $"mod-options.item.{RuntimeHelpers.GetHashCode(item)}";
 
+    private static TabVisual TabVisualFor(ModTab tab, MaterialPalette palette) {
+        Color seeded = MaterialPalette.FromSeed(TabAccentSeeds[tab.AccentIndex]).Primary;
+        return new TabVisual(tab.Icon, Color.Lerp(palette.Primary, seeded, 0.72f));
+    }
+
+    private static string ResolveTabIcon(string id, string title) {
+        if (id is "__status" or "__empty") return "info";
+        string value = title.ToLowerInvariant();
+        if (ContainsAny(value, "achievement", "成就")) return "dashboard";
+        if (ContainsAny(value, "everest", "core", "settings", "config", "设置", "配置")) return "settings";
+        if (ContainsAny(value, "boss", "death", "skull", "死亡", "首领", "bosses")) return "skull";
+        if (ContainsAny(value, "map", "collab", "lobby", "地图", "大厅")) return "map";
+        if (ContainsAny(value, "route", "path", "路线")) return "route";
+        if (ContainsAny(value, "bounce", "dash", "ultra", "speed", "movement", "移动", "加速"))
+            return "speed";
+        if (ContainsAny(value, "record", "video", "movie", "录像", "录制")) return "movie";
+        if (ContainsAny(value, "discord", "chat", "social", "聊天")) return "group";
+        if (ContainsAny(value, "font", "text", "language", "字体", "语言")) return "font_download";
+        if (ContainsAny(value, "key", "input", "keyboard", "按键", "输入")) return "keyboard";
+        if (ContainsAny(value, "mirror", "database", "镜像", "数据库")) return "deployed_code";
+        if (ContainsAny(value, "berry", "gem", "refill", "草莓", "水晶")) return "blur_on";
+        if (ContainsAny(value, "bolt", "电气", "螺栓")) return "bolt";
+        return TabIconPool[(int)(StableHash(id + "|" + title) % (uint)TabIconPool.Length)];
+    }
+
+    private static bool ContainsAny(string value, params string[] fragments) =>
+        fragments.Any(fragment => value.Contains(fragment, StringComparison.OrdinalIgnoreCase));
+
+    private static uint StableHash(string value) {
+        uint hash = 2166136261;
+        foreach (char character in value) {
+            hash ^= character;
+            hash *= 16777619;
+        }
+        return hash;
+    }
+
     private static string UiText(string key, string fallback) {
         string value = Dialog.Clean(key);
         return string.IsNullOrWhiteSpace(value)
@@ -1490,8 +1563,12 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         public string Title { get; } = title;
         public string Version { get; } = version;
         public List<TextMenu.Item> Items { get; } = items;
+        public string Icon { get; } = ResolveTabIcon(id, title);
+        public int AccentIndex { get; } = (int)(StableHash(id) % (uint)TabAccentSeeds.Length);
         public int Selection { get; set; } = -1;
     }
+
+    private readonly record struct TabVisual(string Icon, Color Accent);
 
     private sealed record OptionSnapshot(
         string Label,
