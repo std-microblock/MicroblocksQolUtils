@@ -17,19 +17,44 @@ namespace Celeste.Mod.MicroblocksQolUtils;
 public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private const float ScreenWidth = 1920f;
     private const float ScreenHeight = 1080f;
-    private const float TabHeight = 52f;
-    private const float TabGap = 8f;
+    private const float TabHeight = 60f;
+    private const float TabGap = 4f;
     private const float RowGap = 10f;
+    private const float StandardRowHeight = 78f;
+    private const float DescribedPrimaryRowHeight = 64f;
+    private const float DescriptionLineHeight = 26f;
+    private const float DescriptionTopPadding = 4f;
+    private const float DescriptionBottomPadding = 10f;
     private const float DropdownItemHeight = 46f;
     private const int DropdownMaxVisibleItems = 8;
     private const int DropdownOptionLimit = 24;
     private const int SearchTextLimit = 80;
 
+    private static readonly string[] TabIconPool = [
+        "bolt", "layers", "map", "route", "sports_esports", "timer", "visibility",
+        "replay", "memory", "analytics", "dashboard", "notifications", "group",
+        "deployed_code", "list_alt", "blur_on", "keyboard", "toggle_on", "schedule", "speed"
+    ];
+
+    private static readonly Color[] TabAccentSeeds = [
+        new Color(126, 99, 184),
+        new Color(53, 132, 228),
+        new Color(34, 157, 144),
+        new Color(84, 148, 96),
+        new Color(217, 137, 45),
+        new Color(210, 90, 112),
+        new Color(154, 103, 196),
+        new Color(49, 151, 181)
+    ];
+
     private static Hook? gotoRoutineHook;
     private static bool hookFailed;
 
     private readonly List<ModTab> tabs = [];
+    private readonly List<ModTab> sourceTabs = [];
     private readonly Dictionary<TextMenu.Item, bool> naturalVisibility = [];
+    private readonly Dictionary<TextMenu.Item, ModTab> itemOwners = [];
+    private readonly Dictionary<TextMenu.Item, string> favoriteKeys = [];
     private readonly MaterialScrollController tabScroll = new();
     private readonly MaterialScrollController rowScroll = new();
     private readonly MaterialScrollController compositePopupScroll = new();
@@ -183,9 +208,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
             ApplyTabVisibility(invokeSelectionCallbacks: false);
             return;
         }
-        menu.Focused = searchTarget == SearchTarget.None
-            && dropdownItem is null
-            && compositePopupItem is null;
+        menu.Focused = searchTarget == SearchTarget.None;
         if (!menu.Focused) {
             menu.Update();
             CaptureNaturalVisibility();
@@ -206,6 +229,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
             return;
         }
         if (compositePopupItem is not null) {
+            menu.Focused = false;
             UpdateCompositePopup(layout);
             return;
         }
@@ -230,6 +254,18 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
             bool backwards = MInput.Keyboard.Pressed(Keys.PageUp)
                 || MInput.Keyboard.Check(Keys.LeftShift, Keys.RightShift);
             MoveTab(backwards ? -1 : 1);
+        }
+
+        bool control = MInput.Keyboard.Check(Keys.LeftControl, Keys.RightControl);
+        if (control && MInput.Keyboard.Pressed(Keys.P)) {
+            ToggleTabPin(tabs[selectedTab]);
+            return;
+        }
+        if (control && MInput.Keyboard.Pressed(Keys.D)
+            && menu.Current is { } favoriteCandidate
+            && CanFavorite(favoriteCandidate)) {
+            ToggleFavorite(favoriteCandidate);
+            return;
         }
 
         if ((Input.MenuConfirm.Pressed
@@ -294,7 +330,6 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         RenderTabs(layout, palette, alpha);
         RenderRows(layout, palette, alpha);
         if (dropdownItem is not null) RenderDropdown(layout, palette, alpha);
-        RenderFooter(layout, palette, alpha);
         if (compositePopupItem is not null) RenderCompositePopup(layout, palette, alpha);
         MaterialUiKit.Cursor(MInput.Mouse.Position, palette, alpha);
     }
@@ -302,7 +337,10 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private void BuildMenu(bool inGame) {
         DetachMenu();
         tabs.Clear();
+        sourceTabs.Clear();
         naturalVisibility.Clear();
+        itemOwners.Clear();
+        favoriteKeys.Clear();
         menu = OuiModOptions.CreateMenu(inGame, null!);
         menu.Active = false;
         menu.Visible = false;
@@ -312,6 +350,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
         List<TextMenu.Item> leading = [];
         ModTab? current = null;
+        Dictionary<string, int> tabTitleOccurrences = new(StringComparer.OrdinalIgnoreCase);
         foreach (TextMenu.Item item in menu.Items) {
             naturalVisibility[item] = item.Visible;
             if (IsEverestHeaderImage(item)) {
@@ -320,8 +359,11 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
             }
             if (item is TextMenu.SubHeader header
                 && TrySplitModuleHeader(header.Title, out string title, out string version)) {
-                current = new ModTab($"{header.Title}#{tabs.Count}", title, version, []);
-                tabs.Add(current);
+                int occurrence = tabTitleOccurrences.GetValueOrDefault(title);
+                tabTitleOccurrences[title] = occurrence + 1;
+                string persistentId = PersistentTabId(title, occurrence);
+                current = new ModTab(persistentId, title, version, [], pinnable: true);
+                sourceTabs.Add(current);
                 naturalVisibility[item] = false;
                 continue;
             }
@@ -330,13 +372,105 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         }
 
         if (leading.Any(item => naturalVisibility.GetValueOrDefault(item))) {
-            tabs.Insert(0, new ModTab("__status", UiText("microblocks_qol_modoptions_status", "状态"), "", leading));
+            sourceTabs.Insert(0, new ModTab("__status",
+                UiText("microblocks_qol_modoptions_status", "状态"), "", leading, pinnable: false));
         } else {
             foreach (TextMenu.Item item in leading) naturalVisibility[item] = false;
         }
-        if (tabs.Count == 0) {
-            tabs.Add(new ModTab("__empty", UiText("microblocks_qol_modoptions_empty", "没有可用设置"), "", []));
+        if (sourceTabs.Count == 0) {
+            sourceTabs.Add(new ModTab("__empty",
+                UiText("microblocks_qol_modoptions_empty", "没有可用设置"), "", [], pinnable: false));
         }
+        IndexSourceItems();
+        RebuildTabs();
+    }
+
+    private void IndexSourceItems() {
+        foreach (ModTab tab in sourceTabs) {
+            int favoriteOrdinal = 0;
+            foreach (TextMenu.Item item in tab.Items) {
+                itemOwners[item] = tab;
+                if (!CanFavorite(item)) continue;
+                favoriteKeys[item] = $"{tab.Id}|item:{favoriteOrdinal}";
+                favoriteOrdinal++;
+            }
+        }
+    }
+
+    private void RebuildTabs(string? preferredTabId = null, TextMenu.Item? preferredItem = null) {
+        string? restoreId = preferredTabId;
+        if (restoreId is null && tabs.Count > 0 && selectedTab >= 0 && selectedTab < tabs.Count)
+            restoreId = tabs[selectedTab].Id;
+
+        tabs.Clear();
+        List<TextMenu.Item> favorites = favoriteKeys
+            .Where(pair => IsFavorite(pair.Key))
+            .Select(pair => pair.Key)
+            .ToList();
+        if (favorites.Count > 0) {
+            tabs.Add(new ModTab("__favorites",
+                UiText("microblocks_qol_modoptions_favorites", "收藏的选项"), "", favorites,
+                pinnable: false));
+        }
+        tabs.AddRange(sourceTabs.Where(IsPinned));
+        tabs.AddRange(sourceTabs.Where(tab => !IsPinned(tab)));
+
+        selectedTab = restoreId is null ? 0 : tabs.FindIndex(tab => tab.Id == restoreId);
+        if (selectedTab < 0) selectedTab = 0;
+        if (preferredItem is not null && tabs.Count > 0)
+            tabs[selectedTab].Selection = menu?.IndexOf(preferredItem) ?? -1;
+    }
+
+    private static string PersistentTabId(string title, int occurrence) =>
+        $"mod:{Uri.EscapeDataString(title)}:{occurrence}";
+
+    private bool IsPinned(ModTab tab) => tab.Pinnable
+        && MicroblocksQolUtilsModule.Settings.PinnedModOptionsTabs.Contains(tab.Id,
+            StringComparer.Ordinal);
+
+    private bool IsFavorite(TextMenu.Item item) => favoriteKeys.TryGetValue(item, out string? key)
+        && MicroblocksQolUtilsModule.Settings.FavoriteModOptionsItems.Contains(key,
+            StringComparer.Ordinal);
+
+    private static bool CanFavorite(TextMenu.Item item) =>
+        item is not TextMenu.SubHeader
+        && item is not TextMenuExt.EaseInSubHeaderExt
+        && item.Selectable;
+
+    private ModTab SourceTabFor(TextMenu.Item item, ModTab fallback) =>
+        itemOwners.GetValueOrDefault(item) ?? fallback;
+
+    private void ToggleTabPin(ModTab tab) {
+        if (!tab.Pinnable) return;
+        List<string> pinned = MicroblocksQolUtilsModule.Settings.PinnedModOptionsTabs;
+        bool remove = pinned.RemoveAll(id => string.Equals(id, tab.Id, StringComparison.Ordinal)) > 0;
+        if (!remove) pinned.Add(tab.Id);
+        RebuildTabs(tab.Id);
+        ApplyTabVisibility();
+        EnsureTabVisible(ModOptionsLayout.Create(0f));
+        Audio.Play(remove ? "event:/ui/main/button_toggle_off" : "event:/ui/main/button_toggle_on");
+    }
+
+    private void ToggleFavorite(TextMenu.Item item) {
+        if (!favoriteKeys.TryGetValue(item, out string? key)) return;
+        List<string> favorites = MicroblocksQolUtilsModule.Settings.FavoriteModOptionsItems;
+        bool remove = favorites.RemoveAll(value => string.Equals(value, key, StringComparison.Ordinal)) > 0;
+        if (!remove) favorites.Add(key);
+
+        string currentTabId = tabs[selectedTab].Id;
+        string sourceTabId = SourceTabFor(item, tabs[selectedTab]).Id;
+        string destination = currentTabId == "__favorites" && remove
+            ? "__favorites"
+            : currentTabId;
+        RebuildTabs(destination, remove ? null : item);
+        if (tabs[selectedTab].Id != destination && currentTabId == "__favorites" && remove) {
+            tabSearchText = "";
+            RebuildTabs(sourceTabId, item);
+        }
+        rowScroll.Reset();
+        ApplyTabVisibility();
+        EnsureSelectionVisible(ModOptionsLayout.Create(0f));
+        Audio.Play(remove ? "event:/ui/main/button_toggle_off" : "event:/ui/main/button_toggle_on");
     }
 
     private void AttachMenu() {
@@ -403,7 +537,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         foreach (TextMenu.Item item in menu.Items) {
             bool visible = tabVisible && active.Contains(item) && naturalVisibility.GetValueOrDefault(item);
             if (visible && item is not TextMenuExt.EaseInSubHeaderExt)
-                visible = MatchesSettingSearch(tab, item);
+                visible = MatchesSettingSearch(SourceTabFor(item, tab), item);
             item.Visible = visible;
         }
         menu.MinWidth = Math.Max(600f, ModOptionsLayout.Create(0f).Rows.Width - 54f);
@@ -420,7 +554,8 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         if (menu is null || tabs.Count == 0) return;
         ModTab tab = tabs[selectedTab];
         foreach (TextMenu.Item item in tab.Items) {
-            if (item is not TextMenuExt.EaseInSubHeaderExt && !MatchesSettingSearch(tab, item)) continue;
+            if (item is not TextMenuExt.EaseInSubHeaderExt
+                && !MatchesSettingSearch(SourceTabFor(item, tab), item)) continue;
             naturalVisibility[item] = item.Visible;
         }
     }
@@ -560,7 +695,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         ModTab tab = tabs[selectedTab];
         foreach (TextMenu.Item item in tab.Items) {
             if (item is TextMenuExt.EaseInSubHeaderExt || !item.Visible) continue;
-            rows.Add(new RowEntry(item, SelectDescription(tab, item)));
+            rows.Add(new RowEntry(item, SelectDescription(SourceTabFor(item, tab), item)));
         }
         return rows;
     }
@@ -602,19 +737,32 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private void UpdateMouse(ModOptionsLayout layout) {
         if (menu is null) return;
         Vector2 mouse = MInput.Mouse.Position;
+        bool scrolled = false;
         if (MInput.Mouse.WheelDelta != 0) {
             float direction = -Math.Sign(MInput.Mouse.WheelDelta);
             if (layout.Navigation.Contains(mouse)) {
                 tabScroll.Scroll(direction * 180f, MaxTabScroll(layout));
+                scrolled = true;
             } else if (layout.Rows.Contains(mouse)) {
                 rowScroll.Scroll(direction * 220f, MaxRowScroll(layout));
+                scrolled = true;
             }
         }
 
+        // Wheel input can also make Everest report the mouse as moved. Do not retarget the
+        // selection in that frame: selecting the row that was under the pointer before the
+        // scroll would immediately pull the scroll target back toward it.
+        if (scrolled) return;
         if (!MInput.Mouse.WasMoved && !MInput.Mouse.PressedLeftButton) return;
         int tabIndex = TabIndexAt(mouse, layout);
         if (tabIndex >= 0) {
-            if (MInput.Mouse.PressedLeftButton && tabIndex != selectedTab) SelectTab(tabIndex);
+            ModTab tab = tabs[tabIndex];
+            MaterialRect tabRect = layout.Tab(FilteredTabIndices().IndexOf(tabIndex), tabScroll.Offset);
+            if (MInput.Mouse.PressedLeftButton && tab.Pinnable && TabPinRect(tabRect).Contains(mouse)) {
+                ToggleTabPin(tab);
+            } else if (MInput.Mouse.PressedLeftButton && tabIndex != selectedTab) {
+                SelectTab(tabIndex);
+            }
             return;
         }
 
@@ -623,6 +771,11 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         SelectItem(placement.Value.Item);
         if (!MInput.Mouse.PressedLeftButton) return;
         TextMenu.Item item = placement.Value.Item;
+        if (CanFavorite(item) && FavoriteRect(placement.Value.Rect).Contains(mouse)) {
+            ToggleFavorite(item);
+            motion.Pulse(FavoriteKey(item), mouse);
+            return;
+        }
         if (item.Disabled) {
             Audio.Play("event:/ui/main/button_invalid");
             return;
@@ -633,17 +786,23 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                 SetOptionIndex(item, option.Index == 0 ? 1 : 0);
             } else if (CanUseDropdown(option)) {
                 OpenDropdown(item, option);
-            } else {
+            } else if (SliderControlArea(rect).Contains(mouse)) {
                 SetOptionFromMouse(item, option, SliderControlRect(rect), mouse.X);
             }
         } else if (TryGetIntSlider(item, out IntSliderSnapshot slider)) {
-            SetIntSliderFromMouse(item, slider, SliderControlRect(rect), mouse.X);
+            if (SliderControlArea(rect).Contains(mouse))
+                SetIntSliderFromMouse(item, slider, SliderControlRect(rect), mouse.X);
         } else if (IsCompositeMenu(item)) {
             OpenCompositePopup(item);
         } else {
-            item.ConfirmPressed();
+            ActivateItem(item);
         }
         motion.Pulse(ItemKey(item), mouse);
+    }
+
+    private static void ActivateItem(TextMenu.Item item) {
+        item.ConfirmPressed();
+        item.OnPressed?.Invoke();
     }
 
     private void UpdateDropdown(ModOptionsLayout layout) {
@@ -832,8 +991,6 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         menu.Current = item;
         item.OnEnter?.Invoke();
         item.SelectWiggler?.Start();
-        Audio.Play("event:/ui/main/rollover_down");
-        EnsureSelectionVisible(ModOptionsLayout.Create(0f));
     }
 
     private void EnsureSelectionVisible(ModOptionsLayout layout) {
@@ -841,11 +998,11 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         float top = 0f;
         foreach (RowEntry row in VisibleRows()) {
             if (row.Item == menu.Current) {
-                float height = RowHeight(row);
+                float height = RowHeight(row, layout.Rows.Width);
                 rowScroll.EnsureVisible(top, top + height, layout.Rows.Height, MaxRowScroll(layout));
                 return;
             }
-            top += RowHeight(row) + RowGap;
+            top += RowHeight(row, layout.Rows.Width) + RowGap;
         }
     }
 
@@ -871,12 +1028,20 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
             if (rect.Bottom < layout.NavigationItems.Y || rect.Y > layout.NavigationItems.Bottom) continue;
             targets.Add(new MaterialInteractionTarget($"mod-options.tab.{tabs[index].Id}", rect,
                 Focused: index == selectedTab));
+            if (tabs[index].Pinnable) {
+                targets.Add(new MaterialInteractionTarget(TabPinKey(tabs[index]), TabPinRect(rect),
+                    Focused: IsPinned(tabs[index])));
+            }
         }
         if (menu is not null && tabs.Count > 0) {
             foreach (RowPlacement placement in RowPlacements(layout)) {
                 if (!placement.Item.Hoverable) continue;
                 targets.Add(new MaterialInteractionTarget(ItemKey(placement.Item), placement.Rect,
                     Focused: menu.Current == placement.Item));
+                if (CanFavorite(placement.Item)) {
+                    targets.Add(new MaterialInteractionTarget(FavoriteKey(placement.Item),
+                        FavoriteRect(placement.Rect), Focused: IsFavorite(placement.Item)));
+                }
             }
         }
         motion.Update(targets);
@@ -884,7 +1049,9 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
     private void RenderTabs(ModOptionsLayout layout, MaterialPalette palette, float alpha) {
         MaterialUi.RoundedRect(layout.Navigation.X, layout.Navigation.Y, layout.Navigation.Width,
-            layout.Navigation.Height, 28f, palette.SurfaceHigh * (0.72f * alpha));
+            layout.Navigation.Height, 28f, palette.Surface * (0.56f * alpha));
+        MaterialUi.RoundedOutline(layout.Navigation.X, layout.Navigation.Y, layout.Navigation.Width,
+            layout.Navigation.Height, 28f, 1f, palette.Outline * (0.18f * alpha));
         MaterialUiKit.Text(UiText("microblocks_qol_modoptions_mods", "模组与分类"),
             new Vector2(layout.NavigationItems.X, layout.Navigation.Y + 30f), new Vector2(0f, 0.5f),
             MaterialTextRole.Label, palette.OnSurfaceVariant, alpha, scaleOverride: 0.28f);
@@ -900,19 +1067,35 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                 MaterialRect rect = layout.Tab(position, tabScroll.Offset);
                 if (rect.Bottom < layout.NavigationItems.Y || rect.Y > layout.NavigationItems.Bottom) continue;
                 bool selected = index == selectedTab;
+                TabVisual visual = TabVisualFor(tab, palette);
                 if (selected) {
                     MaterialUi.RoundedRect(rect.X, rect.Y, rect.Width, rect.Height, 20f,
-                        palette.Primary * (0.92f * alpha));
+                        Color.Lerp(palette.SurfaceHighest, visual.Accent, 0.20f) * (0.98f * alpha));
                 }
                 motion.RenderStateLayer($"mod-options.tab.{tab.Id}", rect, 20f,
-                    selected ? palette.OnPrimary : palette.Primary, alpha);
-                MaterialUiKit.Icon(index == 0 && tab.Id == "__status" ? "info" : "extension",
-                    new Vector2(rect.X + 26f, rect.Center.Y), 21f,
-                    selected ? palette.OnPrimary : palette.Primary, alpha, filled: selected);
-                string title = MaterialTextUtil.Ellipsize(tab.Title, rect.Width - 72f, 0.29f, UiFontWeight.Bold);
-                MaterialUiKit.Text(title, new Vector2(rect.X + 48f, rect.Center.Y), new Vector2(0f, 0.5f),
-                    MaterialTextRole.Label, selected ? palette.OnPrimary : palette.OnSurfaceVariant,
+                    visual.Accent, alpha);
+                MaterialRect iconTile = new(rect.X + 10f, rect.Center.Y - 20f, 40f, 40f);
+                Color iconContainer = Color.Lerp(
+                    selected ? palette.SurfaceHighest : palette.SurfaceHigh,
+                    visual.Accent,
+                    selected ? 0.34f : 0.15f
+                );
+                MaterialUi.RoundedRect(iconTile.X, iconTile.Y, iconTile.Width, iconTile.Height, 14f,
+                    iconContainer * alpha);
+                MaterialUiKit.Icon(visual.Icon, iconTile.Center, 21f,
+                    visual.Accent, alpha, filled: selected);
+                float titleWidth = rect.Width - (tab.Pinnable ? 122f : 78f);
+                string title = MaterialTextUtil.Ellipsize(tab.Title, titleWidth, 0.29f, UiFontWeight.Bold);
+                MaterialUiKit.Text(title, new Vector2(rect.X + 62f, rect.Center.Y), new Vector2(0f, 0.5f),
+                    MaterialTextRole.Label, selected ? palette.OnSurface : palette.OnSurfaceVariant,
                     alpha, scaleOverride: 0.29f);
+                if (tab.Pinnable) {
+                    MaterialRect pin = TabPinRect(rect);
+                    motion.RenderStateLayer(TabPinKey(tab), pin, pin.Width / 2f,
+                        visual.Accent, alpha);
+                    MaterialUiKit.Icon("push_pin", pin.Center, 19f,
+                        visual.Accent, alpha, filled: IsPinned(tab));
+                }
             }
             if (visibleTabs.Count == 0) {
                 MaterialUiKit.Text(UiText("microblocks_qol_modoptions_no_tabs", "没有匹配的模组"),
@@ -924,14 +1107,17 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
     private void RenderRows(ModOptionsLayout layout, MaterialPalette palette, float alpha) {
         ModTab tab = tabs[selectedTab];
+        TabVisual visual = TabVisualFor(tab, palette);
         MaterialUi.RoundedRect(layout.Content.X, layout.Content.Y, layout.Content.Width,
-            layout.Content.Height, 28f, palette.Surface * (0.46f * alpha));
-        MaterialUiKit.Icon("tune", new Vector2(layout.ContentHeader.X + 15f, layout.ContentHeader.Center.Y),
-            27f, palette.Primary, alpha, filled: true);
+            layout.Content.Height, 28f, palette.Surface * (0.38f * alpha));
+        MaterialRect headerIcon = new(layout.ContentHeader.X, layout.ContentHeader.Center.Y - 21f, 42f, 42f);
+        MaterialUi.RoundedRect(headerIcon.X, headerIcon.Y, headerIcon.Width, headerIcon.Height, 15f,
+            Color.Lerp(palette.SurfaceHighest, visual.Accent, 0.26f) * alpha);
+        MaterialUiKit.Icon(visual.Icon, headerIcon.Center, 24f, visual.Accent, alpha, filled: true);
         float titleWidth = Math.Max(140f, layout.SettingSearch.X - layout.ContentHeader.X - 210f);
         string shownTitle = MaterialTextUtil.Ellipsize(tab.Title, titleWidth, 0.47f, UiFontWeight.Bold);
         MaterialUiKit.Text(shownTitle,
-            new Vector2(layout.ContentHeader.X + 42f, layout.ContentHeader.Center.Y), new Vector2(0f, 0.5f),
+            new Vector2(layout.ContentHeader.X + 56f, layout.ContentHeader.Center.Y), new Vector2(0f, 0.5f),
             MaterialTextRole.Title, palette.OnSurface, alpha, scaleOverride: 0.47f);
         if (tab.Version.Length > 0) {
             MaterialUiKit.Chip(tab.Version, new Vector2(layout.SettingSearch.X - 16f, layout.ContentHeader.Y + 13f),
@@ -942,7 +1128,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
             "mod-options.search.settings", palette, alpha);
 
         menu!.Alpha = alpha;
-        menu.HighlightColor = palette.Primary;
+        menu.HighlightColor = visual.Accent;
         menu.MinWidth = Math.Max(600f, layout.Rows.Width - 54f);
         rowViewport.Render(layout.Rows, () => {
             bool renderedAny = false;
@@ -960,16 +1146,25 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                         palette.Primary, alpha, scaleOverride: 0.34f);
                     continue;
                 }
-                MaterialUi.RoundedRect(rect.X, rect.Y, rect.Width, rect.Height, 22f,
-                    (selected ? palette.SurfaceHighest : palette.SurfaceHigh) * ((selected ? 0.94f : 0.64f) * alpha));
-                if (selected) {
-                    MaterialUi.RoundedRect(rect.X, rect.Y + 14f, 4f, rect.Height - 28f, 2f,
-                        palette.Primary * alpha);
+                Color rowFill = selected
+                    ? Color.Lerp(palette.SurfaceHighest, visual.Accent, 0.10f)
+                    : palette.SurfaceHigh;
+                MaterialUi.RoundedRect(rect.X, rect.Y, rect.Width, rect.Height, 18f,
+                    rowFill * ((selected ? 0.96f : 0.48f) * alpha));
+                MaterialUi.RoundedOutline(rect.X, rect.Y, rect.Width, rect.Height, 18f, 1f,
+                    (selected ? visual.Accent : palette.Outline) * ((selected ? 0.34f : 0.12f) * alpha));
+                motion.RenderStateLayer(ItemKey(item), rect, 18f, visual.Accent, alpha);
+                if (CanFavorite(item)) {
+                    MaterialRect favorite = FavoriteRect(rect);
+                    motion.RenderStateLayer(FavoriteKey(item), favorite, favorite.Width / 2f,
+                        visual.Accent, alpha);
+                    MaterialUiKit.Icon("star", favorite.Center, 21f, visual.Accent, alpha,
+                        filled: IsFavorite(item));
                 }
-                motion.RenderStateLayer(ItemKey(item), rect, 22f, palette.Primary, alpha);
-                MaterialRect primary = new(rect.X, rect.Y, rect.Width, PrimaryRowHeight(item));
+                MaterialRect primary = new(rect.X, rect.Y, rect.Width,
+                    PrimaryRowHeight(item, placement.Description is not null));
                 if (!RenderStandardItem(item, primary, palette, alpha, selected)) {
-                    item.Render(new Vector2(primary.X + 26f, primary.Center.Y), selected);
+                    item.Render(new Vector2(primary.X + 60f, primary.Center.Y), selected);
                 }
                 if (placement.Description is { } description) {
                     RenderDescription(description.Title,
@@ -1012,7 +1207,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                 : CanUseDropdown(option)
                     ? DropdownControlRect(rect)
                     : SliderControlArea(rect);
-            RenderItemLabel(option.Label, rect, control.X - rect.X - 28f, labelColor, alpha);
+            RenderItemLabel(option.Label, rect, control.X - rect.X - 62f, labelColor, alpha);
             if (option.Options.Count == 2) {
                 RenderSwitch(option, rect, palette, alpha, enabled);
             } else if (CanUseDropdown(option)) {
@@ -1024,20 +1219,20 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         }
         if (TryGetIntSlider(item, out IntSliderSnapshot slider)) {
             MaterialRect control = SliderControlArea(rect);
-            RenderItemLabel(slider.Label, rect, control.X - rect.X - 28f, labelColor, alpha);
+            RenderItemLabel(slider.Label, rect, control.X - rect.X - 62f, labelColor, alpha);
             RenderIntSlider(slider, rect, palette, alpha, enabled);
             return true;
         }
         if (item is TextMenu.Button button) {
             MaterialRect action = ActionControlRect(rect);
-            RenderItemLabel(button.Label, rect, action.X - rect.X - 28f, labelColor, alpha);
+            RenderItemLabel(button.Label, rect, action.X - rect.X - 62f, labelColor, alpha);
             RenderActionControl(action, UiText("microblocks_qol_modoptions_open", "打开"),
                 palette, alpha, enabled);
             return true;
         }
         if (item is TextMenu.Setting setting) {
             MaterialRect action = ActionControlRect(rect);
-            RenderItemLabel(setting.Label, rect, action.X - rect.X - 28f, labelColor, alpha);
+            RenderItemLabel(setting.Label, rect, action.X - rect.X - 62f, labelColor, alpha);
             string value = setting.Values.Count == 0
                 ? UiText("microblocks_qol_modoptions_unbound", "未绑定")
                 : string.Format(UiText("microblocks_qol_modoptions_bound", "已绑定 {0} 项"), setting.Values.Count);
@@ -1046,7 +1241,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         }
         if (TryGetLabel(item, out string label)) {
             MaterialRect action = ActionControlRect(rect);
-            RenderItemLabel(label, rect, action.X - rect.X - 28f, labelColor, alpha);
+            RenderItemLabel(label, rect, action.X - rect.X - 62f, labelColor, alpha);
             RenderActionControl(action, compositePopupItem == item
                     ? UiText("microblocks_qol_modoptions_active", "弹窗中")
                     : UiText("microblocks_qol_modoptions_open", "打开"),
@@ -1060,7 +1255,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         Color color, float alpha) {
         string shown = MaterialTextUtil.Ellipsize(label, Math.Max(80f, maximumWidth),
             0.34f, UiFontWeight.Bold);
-        MaterialUiKit.Text(shown, new Vector2(rect.X + 24f, rect.Center.Y), new Vector2(0f, 0.5f),
+        MaterialUiKit.Text(shown, new Vector2(rect.X + 58f, rect.Center.Y), new Vector2(0f, 0.5f),
             MaterialTextRole.Label, color, alpha, scaleOverride: 0.34f);
     }
 
@@ -1157,14 +1352,15 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         float inset = embedded ? 24f : 12f;
         if (!embedded) MaterialUi.RoundedRect(rect.X + inset, rect.Y, rect.Width - inset * 2f, rect.Height, 18f,
             palette.Primary * (0.13f * alpha));
-        MaterialUiKit.Icon("info", new Vector2(rect.X + inset + 12f, rect.Y + 17f), 17f,
+        float contentY = rect.Y + DescriptionTopPadding;
+        MaterialUiKit.Icon("info", new Vector2(rect.X + inset + 12f, contentY + 12f), 17f,
             palette.Primary, alpha, filled: true);
-        List<string> lines = MaterialTextUtil.WrapLines(text, rect.Width - inset * 2f - 38f, 0.25f, 4);
-        float y = rect.Y + 5f;
+        List<string> lines = DescriptionLines(text, rect.Width, embedded);
+        float y = contentY;
         foreach (string line in lines) {
             MaterialUiKit.Text(line, new Vector2(rect.X + inset + 30f, y), Vector2.Zero,
                 MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.25f);
-            y += 26f;
+            y += DescriptionLineHeight;
         }
     }
 
@@ -1295,19 +1491,11 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
             new Vector2(popup.Right - 88f, popup.Bottom - 24f), new Vector2(1f, 0.5f),
             MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.25f);
     }
-
-    private void RenderFooter(ModOptionsLayout layout, MaterialPalette palette, float alpha) {
-        string hint = UiText("microblocks_qol_modoptions_help",
-            "Ctrl+F 搜索设置  ·  Ctrl+Shift+F 搜索模组  ·  Tab / PgUp / PgDn 切换分类  ·  Esc 返回");
-        MaterialUiKit.Text(hint, new Vector2(layout.Footer.X, layout.Footer.Center.Y), new Vector2(0f, 0.5f),
-            MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.27f);
-    }
-
     private List<RowPlacement> RowPlacements(ModOptionsLayout layout) {
         List<RowPlacement> placements = [];
         float y = layout.Rows.Y - rowScroll.Offset;
         foreach (RowEntry row in VisibleRows()) {
-            float height = RowHeight(row);
+            float height = RowHeight(row, layout.Rows.Width);
             placements.Add(new RowPlacement(row.Item, row.Description,
                 new MaterialRect(layout.Rows.X, y, layout.Rows.Width, height)));
             y += height + RowGap;
@@ -1320,7 +1508,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         float height = 0f;
         int count = 0;
         foreach (RowEntry row in VisibleRows()) {
-            height += RowHeight(row);
+            height += RowHeight(row, layout.Rows.Width);
             count++;
         }
         height += Math.Max(0, count - 1) * RowGap;
@@ -1577,6 +1765,25 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         return new MaterialRect(popup.Right - 70f, popup.Y + 20f, 46f, 46f);
     }
 
+    private static MaterialRect TabPinRect(MaterialRect rect) => new(
+        rect.Right - 44f,
+        rect.Center.Y - 20f,
+        40f,
+        40f
+    );
+
+    private static MaterialRect FavoriteRect(MaterialRect rect) => new(
+        rect.X + 8f,
+        rect.Y + 8f,
+        40f,
+        Math.Min(40f, rect.Height - 16f)
+    );
+
+    private static string TabPinKey(ModTab tab) => $"mod-options.tab-pin.{tab.Id}";
+
+    private static string FavoriteKey(TextMenu.Item item) =>
+        $"mod-options.favorite.{RuntimeHelpers.GetHashCode(item)}";
+
     private void BeginClose(CloseDestination destination) {
         if (pauseLevel is null || closeDestination != CloseDestination.None) return;
         CloseDropdown(playSound: false);
@@ -1651,38 +1858,97 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
     private static bool CanSelect(TextMenu.Item item) => item.Visible && item.Selectable;
 
-    private static float RowHeight(RowEntry row) {
-        float height = PrimaryRowHeight(row.Item);
+    private static float RowHeight(RowEntry row, float rowWidth) {
+        bool hasDescription = row.Description is not null;
+        float height = PrimaryRowHeight(row.Item, hasDescription);
         if (row.Description is { } description) {
-            int lines = Math.Max(1, MaterialTextUtil.WrapLines(description.Title, 1160f, 0.25f, 4).Count);
-            height += 12f + lines * 26f;
+            height += DescriptionHeight(description.Title, rowWidth, embedded: true);
         }
         return height;
     }
 
-    private static float PrimaryRowHeight(TextMenu.Item item) {
+    private static float PrimaryRowHeight(TextMenu.Item item, bool hasDescription = false) {
         if (item is TextMenu.SubHeader) return 54f;
-        return 78f;
+        return hasDescription ? DescribedPrimaryRowHeight : StandardRowHeight;
+    }
+
+    private static float DescriptionHeight(string text, float rowWidth, bool embedded) =>
+        DescriptionTopPadding
+        + Math.Max(1, DescriptionLines(text, rowWidth, embedded).Count) * DescriptionLineHeight
+        + DescriptionBottomPadding;
+
+    private static List<string> DescriptionLines(string text, float rowWidth, bool embedded) {
+        float inset = embedded ? 24f : 12f;
+        float width = Math.Max(80f, rowWidth - inset * 2f - 38f);
+        return MaterialTextUtil.WrapLines(text, width, 0.25f, 4);
     }
 
     private static string ItemKey(TextMenu.Item item) =>
         $"mod-options.item.{RuntimeHelpers.GetHashCode(item)}";
 
+    private static TabVisual TabVisualFor(ModTab tab, MaterialPalette palette) {
+        Color seeded = MaterialPalette.FromSeed(TabAccentSeeds[tab.AccentIndex]).Primary;
+        return new TabVisual(tab.Icon, Color.Lerp(palette.Primary, seeded, 0.72f));
+    }
+
+    private static string ResolveTabIcon(string id, string title) {
+        if (id == "__favorites") return "star";
+        if (id is "__status" or "__empty") return "info";
+        string value = title.ToLowerInvariant();
+        if (ContainsAny(value, "achievement", "成就")) return "dashboard";
+        if (ContainsAny(value, "everest", "core", "settings", "config", "设置", "配置")) return "settings";
+        if (ContainsAny(value, "boss", "death", "skull", "死亡", "首领", "bosses")) return "skull";
+        if (ContainsAny(value, "map", "collab", "lobby", "地图", "大厅")) return "map";
+        if (ContainsAny(value, "route", "path", "路线")) return "route";
+        if (ContainsAny(value, "bounce", "dash", "ultra", "speed", "movement", "移动", "加速"))
+            return "speed";
+        if (ContainsAny(value, "record", "video", "movie", "录像", "录制")) return "movie";
+        if (ContainsAny(value, "discord", "chat", "social", "聊天")) return "group";
+        if (ContainsAny(value, "font", "text", "language", "字体", "语言")) return "font_download";
+        if (ContainsAny(value, "key", "input", "keyboard", "按键", "输入")) return "keyboard";
+        if (ContainsAny(value, "mirror", "database", "镜像", "数据库")) return "deployed_code";
+        if (ContainsAny(value, "berry", "gem", "refill", "草莓", "水晶")) return "blur_on";
+        if (ContainsAny(value, "bolt", "电气", "螺栓")) return "bolt";
+        return TabIconPool[(int)(StableHash(id + "|" + title) % (uint)TabIconPool.Length)];
+    }
+
+    private static bool ContainsAny(string value, params string[] fragments) =>
+        fragments.Any(fragment => value.Contains(fragment, StringComparison.OrdinalIgnoreCase));
+
+    private static uint StableHash(string value) {
+        uint hash = 2166136261;
+        foreach (char character in value) {
+            hash ^= character;
+            hash *= 16777619;
+        }
+        return hash;
+    }
+
     private static string UiText(string key, string fallback) {
         string value = Dialog.Clean(key);
-        return string.IsNullOrWhiteSpace(value) || value == key ? fallback : value;
+        return string.IsNullOrWhiteSpace(value)
+               || value == key
+               || value == $"{{{key}}}"
+            ? fallback
+            : value;
     }
 
     private delegate IEnumerator GotoRoutineOrig(Overworld self, Oui next);
     private delegate IEnumerator GotoRoutineDetour(GotoRoutineOrig orig, Overworld self, Oui next);
 
-    private sealed class ModTab(string id, string title, string version, List<TextMenu.Item> items) {
+    private sealed class ModTab(string id, string title, string version, List<TextMenu.Item> items,
+        bool pinnable) {
         public string Id { get; } = id;
         public string Title { get; } = title;
         public string Version { get; } = version;
         public List<TextMenu.Item> Items { get; } = items;
+        public string Icon { get; } = ResolveTabIcon(id, title);
+        public int AccentIndex { get; } = (int)(StableHash(id) % (uint)TabAccentSeeds.Length);
+        public bool Pinnable { get; } = pinnable;
         public int Selection { get; set; } = -1;
     }
+
+    private readonly record struct TabVisual(string Icon, Color Accent);
 
     private sealed record OptionSnapshot(
         string Label,
@@ -1733,8 +1999,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         MaterialRect Content,
         MaterialRect ContentHeader,
         MaterialRect SettingSearch,
-        MaterialRect Rows,
-        MaterialRect Footer
+        MaterialRect Rows
     ) {
         public static ModOptionsLayout Create(float transition) {
             float rise = transition * 32f;
@@ -1745,8 +2010,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                 MaterialAxis.Vertical,
                 14f,
                 MaterialTrack.Fixed(72f),
-                MaterialTrack.Flex(),
-                MaterialTrack.Fixed(42f)
+                MaterialTrack.Flex()
             );
             MaterialRect[] body = MaterialLayout.Split(
                 vertical[1],
@@ -1781,7 +2045,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                 body[1].Height - 100f
             );
             return new ModOptionsLayout(frame, vertical[0], body[0], tabSearch, navigationItems,
-                body[1], contentHeader, settingSearch, rows, vertical[2]);
+                body[1], contentHeader, settingSearch, rows);
         }
 
         public MaterialRect Tab(int index, float scrollOffset) => new(

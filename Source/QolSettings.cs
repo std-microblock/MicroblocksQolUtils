@@ -59,6 +59,12 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue(true)]
     public bool ReplaceEverestModOptions { get; set; } = true;
 
+    [SettingIgnore]
+    public List<string> PinnedModOptionsTabs { get; set; } = [];
+
+    [SettingIgnore]
+    public List<string> FavoriteModOptionsItems { get; set; } = [];
+
     [DefaultValue(false)]
     public bool ChapterSelectShowCollabMaps { get; set; }
 
@@ -214,6 +220,14 @@ public sealed class QolSettings : EverestModuleSettings {
 
     [DefaultValue(false)]
     public bool AutoRecorderEnabled { get; set; }
+
+    [SettingName("开始录制")]
+    [DefaultButtonBinding(0, Keys.None)]
+    public ButtonBinding StartRecordingBinding { get; set; } = new(0, Keys.None);
+
+    [SettingName("结束录制")]
+    [DefaultButtonBinding(0, Keys.None)]
+    public ButtonBinding StopRecordingBinding { get; set; } = new(0, Keys.None);
 
     [DefaultValue(true)]
     public bool ShowRecordingIndicator { get; set; } = true;

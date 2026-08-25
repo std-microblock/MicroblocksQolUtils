@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Monocle;
@@ -11,9 +10,13 @@ namespace Celeste.Mod.MicroblocksQolUtils;
 /// creates its game window. Other platforms keep their native DPI behavior.
 /// </summary>
 internal static class HiDpiSupport {
+    private const long ScaleCheckIntervalMs = 250;
     private static readonly nint PerMonitorAwareV2 = new(-4);
     private static bool windowScaleApplied;
     private static float uiScale = 1f;
+    private static long nextScaleCheck;
+    private static nint awarenessWindow;
+    private static bool awarenessWindowIsPerMonitorAware;
 
     /// <summary>
     /// Converts the 1920x1080 UI's device-independent sizes to the physical
@@ -41,11 +44,20 @@ internal static class HiDpiSupport {
     internal static void UpdateScale() {
         if (!OperatingSystem.IsWindows()) return;
 
-        nint window = Process.GetCurrentProcess().MainWindowHandle;
+        long now = Environment.TickCount64;
+        if (now < nextScaleCheck) return;
+        nextScaleCheck = now + ScaleCheckIntervalMs;
+
+        nint window = WindowsGameWindow.NativeHandle;
         if (window == nint.Zero) return;
 
-        bool perMonitorAware = GetAwarenessFromDpiAwarenessContext(
-            GetWindowDpiAwarenessContext(window)) == DpiAwareness.PerMonitorAware;
+        if (window != awarenessWindow) {
+            awarenessWindow = window;
+            awarenessWindowIsPerMonitorAware = GetAwarenessFromDpiAwarenessContext(
+                GetWindowDpiAwarenessContext(window)) == DpiAwareness.PerMonitorAware;
+        }
+
+        bool perMonitorAware = awarenessWindowIsPerMonitorAware;
         uint dpi = perMonitorAware ? GetDpiForWindow(window) : 96;
         uiScale = MicroblocksQolUtilsModule.Settings.HiDpiFix && perMonitorAware
             ? Math.Clamp(dpi / 96f, 1f, 3f)

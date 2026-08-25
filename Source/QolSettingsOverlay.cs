@@ -1524,6 +1524,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             ]),
             new SettingsTab("录制", "videocam", [
                 Toggle("自动录制", () => settings.AutoRecorderEnabled, value => settings.AutoRecorderEnabled = value),
+                Action("键盘快捷键", "使用 Everest 设置", () => OpenBindingConfig(controller: false)),
+                Action("手柄按键", "使用 Everest 设置", () => OpenBindingConfig(controller: true)),
                 Toggle("保存死亡回放", () => settings.DeathReplayEnabled,
                     value => settings.DeathReplayEnabled = value),
                 Range("死亡回放时长", () => settings.DeathReplayBufferSeconds,
@@ -1776,7 +1778,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             (busy ? palette.Outline : palette.Primary)
                 * (alpha * (busy ? 0.26f : MathHelper.Lerp(0.88f, 1f, buttonEmphasis))));
         motion.RenderStateLayer("settings.profiler.start", button, 18f, palette.OnPrimary, alpha);
-        MaterialUiKit.Text(busy ? "正在采样" : "开始 10 秒采样", button.Center + new Vector2(0f, -8f),
+        MaterialUiKit.Text(busy ? "正在采样" : "开始 10 秒采样", button.Center,
             new Vector2(0.5f), MaterialTextRole.Label,
             busy ? palette.OnSurfaceVariant : palette.OnPrimary, alpha, scaleOverride: 0.29f);
 
@@ -1801,10 +1803,10 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             simpleMode ? palette.OnPrimary : palette.Primary, alpha);
         motion.RenderStateLayer("settings.profiler.professional", professionalRect, 14f,
             simpleMode ? palette.Primary : palette.OnPrimary, alpha);
-        MaterialUiKit.Text("简单 · 仅 Mod", simpleRect.Center + new Vector2(0f, -7f),
+        MaterialUiKit.Text("简单 · 仅 Mod", simpleRect.Center,
             new Vector2(0.5f), MaterialTextRole.Label,
             simpleMode ? palette.OnPrimary : palette.OnSurfaceVariant, alpha, scaleOverride: 0.25f);
-        MaterialUiKit.Text("专业 · 全部", professionalRect.Center + new Vector2(0f, -7f),
+        MaterialUiKit.Text("专业 · 全部", professionalRect.Center,
             new Vector2(0.5f), MaterialTextRole.Label,
             simpleMode ? palette.OnSurfaceVariant : palette.OnPrimary, alpha, scaleOverride: 0.25f);
 
