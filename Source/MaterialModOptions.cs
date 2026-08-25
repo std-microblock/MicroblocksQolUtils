@@ -573,15 +573,22 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private void UpdateMouse(ModOptionsLayout layout) {
         if (menu is null) return;
         Vector2 mouse = MInput.Mouse.Position;
+        bool scrolled = false;
         if (MInput.Mouse.WheelDelta != 0) {
             float direction = -Math.Sign(MInput.Mouse.WheelDelta);
             if (layout.Navigation.Contains(mouse)) {
                 tabScroll.Scroll(direction * 180f, MaxTabScroll(layout));
+                scrolled = true;
             } else if (layout.Rows.Contains(mouse)) {
                 rowScroll.Scroll(direction * 220f, MaxRowScroll(layout));
+                scrolled = true;
             }
         }
 
+        // Wheel input can also make Everest report the mouse as moved. Do not retarget the
+        // selection in that frame: selecting the row that was under the pointer before the
+        // scroll would immediately pull the scroll target back toward it.
+        if (scrolled) return;
         if (!MInput.Mouse.WasMoved && !MInput.Mouse.PressedLeftButton) return;
         int tabIndex = TabIndexAt(mouse, layout);
         if (tabIndex >= 0) {
@@ -717,8 +724,6 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         menu.Current = item;
         item.OnEnter?.Invoke();
         item.SelectWiggler?.Start();
-        Audio.Play("event:/ui/main/rollover_down");
-        EnsureSelectionVisible(ModOptionsLayout.Create(0f));
     }
 
     private void EnsureSelectionVisible(ModOptionsLayout layout) {
