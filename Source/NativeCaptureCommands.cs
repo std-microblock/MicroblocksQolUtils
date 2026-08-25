@@ -61,6 +61,8 @@ public static class NativeCaptureCommands {
             + $"deathReplay={AutoRecorder.IsDeathReplayRecording} "
             + $"finalizing={AutoRecorder.IsFinalizing} media={AutoRecorder.CurrentSeconds:0.000}s "
             + $"deathMedia={AutoRecorder.DeathReplaySeconds:0.000}s "
+            + $"audioTap={AutoRecorder.HasAudioTap} audioFrames={AutoRecorder.AudioFramesCaptured} "
+            + $"audioDropped={AutoRecorder.AudioChunksDropped} "
             + $"path={AutoRecorder.CurrentPath} last={AutoRecorder.LastOutput}"
         );
     }

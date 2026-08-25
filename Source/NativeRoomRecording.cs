@@ -8,6 +8,19 @@ internal sealed class NativeRoomRecording {
 
     public string Path { get; }
     public string AudioPath => Path + ".sfxchunks";
+    public bool HasAudioTap => sfxTap is not null;
+
+    public CaptureStatistics Statistics {
+        get {
+            try {
+                return capture.Statistics;
+            } catch (Exception exception) {
+                Logger.Log(LogLevel.Warn, "MicroblocksQolUtils/Recorder",
+                    $"Cannot read native capture statistics: {exception.Message}");
+                return default;
+            }
+        }
+    }
 
     private NativeRoomRecording(NativeCaptureSession capture, FmodSfxTap? sfxTap, string path) {
         this.capture = capture;
@@ -48,6 +61,22 @@ internal sealed class NativeRoomRecording {
         if (Interlocked.Exchange(ref stopped, 1) != 0) return Task.CompletedTask;
         // Detach synchronously so FMOD cannot race another callback into a closing native queue.
         sfxTap?.Dispose();
+        CaptureStatistics statistics = Statistics;
+        if (sfxTap is null || statistics.AudioFramesCaptured == 0) {
+            Logger.Log(
+                LogLevel.Warn,
+                "MicroblocksQolUtils/Recorder",
+                $"Recording stopped without captured FMOD audio (tap={sfxTap is not null}, "
+                + $"videoFrames={statistics.FramesCaptured}, audioFrames={statistics.AudioFramesCaptured})."
+            );
+        } else {
+            Logger.Log(
+                LogLevel.Info,
+                "MicroblocksQolUtils/Recorder",
+                $"Captured {statistics.AudioFramesCaptured} FMOD audio frame(s); "
+                + $"dropped {statistics.AudioChunksDropped} chunk(s)."
+            );
+        }
         return Task.Run(capture.Dispose);
     }
 }
