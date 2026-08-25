@@ -20,6 +20,11 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private const float TabHeight = 52f;
     private const float TabGap = 8f;
     private const float RowGap = 10f;
+    private const float StandardRowHeight = 78f;
+    private const float DescribedPrimaryRowHeight = 64f;
+    private const float DescriptionLineHeight = 26f;
+    private const float DescriptionTopPadding = 4f;
+    private const float DescriptionBottomPadding = 10f;
     private const float DropdownItemHeight = 46f;
     private const int DropdownMaxVisibleItems = 8;
     private const int DropdownOptionLimit = 24;
@@ -726,11 +731,11 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         float top = 0f;
         foreach (RowEntry row in VisibleRows()) {
             if (row.Item == menu.Current) {
-                float height = RowHeight(row);
+                float height = RowHeight(row, layout.Rows.Width);
                 rowScroll.EnsureVisible(top, top + height, layout.Rows.Height, MaxRowScroll(layout));
                 return;
             }
-            top += RowHeight(row) + RowGap;
+            top += RowHeight(row, layout.Rows.Width) + RowGap;
         }
     }
 
@@ -853,7 +858,8 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                         palette.Primary * alpha);
                 }
                 motion.RenderStateLayer(ItemKey(item), rect, 22f, palette.Primary, alpha);
-                MaterialRect primary = new(rect.X, rect.Y, rect.Width, PrimaryRowHeight(item));
+                MaterialRect primary = new(rect.X, rect.Y, rect.Width,
+                    PrimaryRowHeight(item, placement.Description is not null));
                 if (!RenderStandardItem(item, primary, palette, alpha, selected)) {
                     item.Render(new Vector2(primary.X + 26f, primary.Center.Y), selected);
                 }
@@ -1044,14 +1050,15 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         float inset = embedded ? 24f : 12f;
         if (!embedded) MaterialUi.RoundedRect(rect.X + inset, rect.Y, rect.Width - inset * 2f, rect.Height, 18f,
             palette.Primary * (0.13f * alpha));
-        MaterialUiKit.Icon("info", new Vector2(rect.X + inset + 12f, rect.Y + 17f), 17f,
+        float contentY = rect.Y + DescriptionTopPadding;
+        MaterialUiKit.Icon("info", new Vector2(rect.X + inset + 12f, contentY + 12f), 17f,
             palette.Primary, alpha, filled: true);
-        List<string> lines = MaterialTextUtil.WrapLines(text, rect.Width - inset * 2f - 38f, 0.25f, 4);
-        float y = rect.Y + 5f;
+        List<string> lines = DescriptionLines(text, rect.Width, embedded);
+        float y = contentY;
         foreach (string line in lines) {
             MaterialUiKit.Text(line, new Vector2(rect.X + inset + 30f, y), Vector2.Zero,
                 MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.25f);
-            y += 26f;
+            y += DescriptionLineHeight;
         }
     }
 
@@ -1136,7 +1143,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         List<RowPlacement> placements = [];
         float y = layout.Rows.Y - rowScroll.Offset;
         foreach (RowEntry row in VisibleRows()) {
-            float height = RowHeight(row);
+            float height = RowHeight(row, layout.Rows.Width);
             placements.Add(new RowPlacement(row.Item, row.Description,
                 new MaterialRect(layout.Rows.X, y, layout.Rows.Width, height)));
             y += height + RowGap;
@@ -1149,7 +1156,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         float height = 0f;
         int count = 0;
         foreach (RowEntry row in VisibleRows()) {
-            height += RowHeight(row);
+            height += RowHeight(row, layout.Rows.Width);
             count++;
         }
         height += Math.Max(0, count - 1) * RowGap;
@@ -1436,20 +1443,31 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
     private static bool CanSelect(TextMenu.Item item) => item.Visible && item.Selectable;
 
-    private static float RowHeight(RowEntry row) {
-        float height = PrimaryRowHeight(row.Item);
+    private static float RowHeight(RowEntry row, float rowWidth) {
+        bool hasDescription = row.Description is not null;
+        float height = PrimaryRowHeight(row.Item, hasDescription);
         if (row.Description is { } description) {
-            int lines = Math.Max(1, MaterialTextUtil.WrapLines(description.Title, 1160f, 0.25f, 4).Count);
-            height += 12f + lines * 26f;
+            height += DescriptionHeight(description.Title, rowWidth, embedded: true);
         }
         return height;
     }
 
-    private static float PrimaryRowHeight(TextMenu.Item item) {
+    private static float PrimaryRowHeight(TextMenu.Item item, bool hasDescription = false) {
         if (item is TextMenu.SubHeader) return 54f;
         if (IsExpandedComposite(item))
-            return Math.Max(78f, item.Height() + 18f);
-        return 78f;
+            return Math.Max(StandardRowHeight, item.Height() + 18f);
+        return hasDescription ? DescribedPrimaryRowHeight : StandardRowHeight;
+    }
+
+    private static float DescriptionHeight(string text, float rowWidth, bool embedded) =>
+        DescriptionTopPadding
+        + Math.Max(1, DescriptionLines(text, rowWidth, embedded).Count) * DescriptionLineHeight
+        + DescriptionBottomPadding;
+
+    private static List<string> DescriptionLines(string text, float rowWidth, bool embedded) {
+        float inset = embedded ? 24f : 12f;
+        float width = Math.Max(80f, rowWidth - inset * 2f - 38f);
+        return MaterialTextUtil.WrapLines(text, width, 0.25f, 4);
     }
 
     private static string ItemKey(TextMenu.Item item) =>
