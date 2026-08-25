@@ -57,8 +57,10 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private readonly Dictionary<TextMenu.Item, string> favoriteKeys = [];
     private readonly MaterialScrollController tabScroll = new();
     private readonly MaterialScrollController rowScroll = new();
+    private readonly MaterialScrollController compositePopupScroll = new();
     private readonly MaterialScrollViewport tabViewport = new("mqol-mod-options-tabs");
     private readonly MaterialScrollViewport rowViewport = new("mqol-mod-options-rows");
+    private readonly MaterialScrollViewport compositePopupViewport = new("mqol-mod-options-composite-popup");
     private readonly MaterialMotionController motion = new();
 
     private TextMenu? menu;
@@ -75,6 +77,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private string? savedTabId;
     private int savedItemOrdinal = -1;
     private TextMenu.Item? dropdownItem;
+    private TextMenu.Item? compositePopupItem;
     private int dropdownHighlight;
     private int dropdownFirstVisible;
     private string tabSearchText = "";
@@ -172,6 +175,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         if (pauseLevel is not null) pauseLevel.AllowHudHide = oldAllowHudHide;
         tabViewport.Dispose();
         rowViewport.Dispose();
+        compositePopupViewport.Dispose();
         motion.Dispose();
         base.Removed(scene);
     }
@@ -181,6 +185,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         ModOptionsLayout layout = ModOptionsLayout.Create(1f - Ease.CubeOut(ease));
         tabScroll.Update(MaxTabScroll(layout));
         rowScroll.Update(MaxRowScroll(layout));
+        compositePopupScroll.Update(MaxCompositePopupScroll(layout));
         ease = Calc.Approach(ease, display ? 1f : 0f, Engine.RawDeltaTime * 7.5f);
         inputDelay -= Engine.RawDeltaTime;
         UpdateInteractions(layout);
@@ -195,7 +200,8 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
         if (menu is null) return;
         bool acceptsInput = pauseLevel is not null || Selected && Focused;
-        if (acceptsInput && inputDelay <= 0f && UpdateSearchInput(layout)) {
+        if (acceptsInput && inputDelay <= 0f && dropdownItem is null && compositePopupItem is null
+            && UpdateSearchInput(layout)) {
             menu.Focused = false;
             menu.Update();
             CaptureNaturalVisibility();
@@ -220,6 +226,11 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
         if (dropdownItem is not null) {
             UpdateDropdown(layout);
+            return;
+        }
+        if (compositePopupItem is not null) {
+            menu.Focused = false;
+            UpdateCompositePopup(layout);
             return;
         }
 
@@ -260,6 +271,15 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         if ((Input.MenuConfirm.Pressed
                 || MInput.Keyboard.Pressed(Keys.Enter)
                 || MInput.Keyboard.Pressed(Keys.Space))
+            && menu.Current is { } composite
+            && IsCompositeMenu(composite)) {
+            OpenCompositePopup(composite);
+            return;
+        }
+
+        if ((Input.MenuConfirm.Pressed
+                || MInput.Keyboard.Pressed(Keys.Enter)
+                || MInput.Keyboard.Pressed(Keys.Space))
             && menu.Current is { } current
             && TryGetOption(current, out OptionSnapshot option)) {
             if (option.Options.Count == 2) {
@@ -275,6 +295,10 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         UpdateMouse(layout);
         int previousSelection = menu.Selection;
         menu.Update();
+        if (menu.Current is { } expanded && IsCompositeMenu(expanded) && IsExpandedComposite(expanded)) {
+            AdoptCompositePopup(expanded);
+            return;
+        }
         CaptureNaturalVisibility();
         ApplyTabVisibility(invokeSelectionCallbacks: false);
         if (menu.Selection != previousSelection) EnsureSelectionVisible(layout);
@@ -306,6 +330,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         RenderTabs(layout, palette, alpha);
         RenderRows(layout, palette, alpha);
         if (dropdownItem is not null) RenderDropdown(layout, palette, alpha);
+        if (compositePopupItem is not null) RenderCompositePopup(layout, palette, alpha);
         MaterialUiKit.Cursor(MInput.Mouse.Position, palette, alpha);
     }
 
@@ -455,6 +480,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
     private void DetachMenu() {
         if (menu is null) return;
+        CloseCompositePopup(playSound: false);
         if (menu.Scene is not null) menu.RemoveSelf();
         menu = null;
     }
@@ -474,6 +500,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private void SelectTab(int index, bool playSound = true) {
         if (tabs.Count == 0) return;
         CloseDropdown(playSound: false);
+        CloseCompositePopup(playSound: false);
         SaveTabState();
         selectedTab = Math.Clamp(index, 0, tabs.Count - 1);
         rowScroll.Reset();
@@ -765,6 +792,8 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         } else if (TryGetIntSlider(item, out IntSliderSnapshot slider)) {
             if (SliderControlArea(rect).Contains(mouse))
                 SetIntSliderFromMouse(item, slider, SliderControlRect(rect), mouse.X);
+        } else if (IsCompositeMenu(item)) {
+            OpenCompositePopup(item);
         } else {
             ActivateItem(item);
         }
@@ -864,6 +893,96 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         if (dropdownItem is null) return;
         dropdownItem = null;
         if (playSound) Audio.Play("event:/ui/main/button_back");
+    }
+
+    private void UpdateCompositePopup(ModOptionsLayout layout) {
+        TextMenu.Item? item = compositePopupItem;
+        if (menu is null || item is null || !item.Visible || !IsCompositeMenu(item)
+            || !IsExpandedComposite(item)) {
+            ReleaseCompositePopup();
+            return;
+        }
+
+        MaterialRect popup = CompositePopupRect(layout);
+        MaterialRect body = CompositePopupBody(layout);
+        MaterialRect close = CompositePopupCloseRect(layout);
+        Vector2 mouse = MInput.Mouse.Position;
+        if (MInput.Mouse.WheelDelta != 0 && body.Contains(mouse)) {
+            compositePopupScroll.Scroll(-Math.Sign(MInput.Mouse.WheelDelta) * 220f,
+                MaxCompositePopupScroll(layout));
+        }
+        if (MInput.Mouse.PressedLeftButton && (close.Contains(mouse) || !popup.Contains(mouse))) {
+            CloseCompositePopup();
+            return;
+        }
+
+        menu.Update();
+        if (!IsExpandedComposite(item)) {
+            ReleaseCompositePopup();
+            return;
+        }
+        EnsureCompositePopupSelectionVisible(layout, item);
+    }
+
+    private void OpenCompositePopup(TextMenu.Item item) {
+        if (menu is null || item.Disabled || !IsCompositeMenu(item)) return;
+        CloseDropdown(playSound: false);
+        if (compositePopupItem != item) CloseCompositePopup(playSound: false);
+        if (!IsExpandedComposite(item)) {
+            item.ConfirmPressed();
+            item.OnPressed?.Invoke();
+        }
+        if (IsExpandedComposite(item)) AdoptCompositePopup(item);
+    }
+
+    private void AdoptCompositePopup(TextMenu.Item item) {
+        compositePopupItem = item;
+        compositePopupScroll.Reset();
+        if (menu is not null) menu.Focused = false;
+        EnsureCompositePopupSelectionVisible(ModOptionsLayout.Create(0f), item);
+    }
+
+    private void CloseCompositePopup(bool playSound = true) {
+        TextMenu.Item? item = compositePopupItem;
+        if (item is null) return;
+        if (item is TextMenuExt.SubMenu submenu) {
+            submenu.Current?.OnLeave?.Invoke();
+            submenu.Focused = false;
+            submenu.ItemsVisible = false;
+            if (menu is not null) {
+                menu.AutoScroll = submenu.AutoScroll;
+                menu.Focused = true;
+            }
+        } else if (item is TextMenuExt.OptionSubMenu optionSubMenu) {
+            optionSubMenu.Current?.OnLeave?.Invoke();
+            optionSubMenu.Focused = false;
+            if (menu is not null) menu.Focused = true;
+        }
+        ReleaseCompositePopup();
+        if (playSound) Audio.Play("event:/ui/main/button_back");
+    }
+
+    private void ReleaseCompositePopup() {
+        compositePopupItem = null;
+        compositePopupScroll.Reset();
+        if (menu is not null) menu.Focused = searchTarget == SearchTarget.None;
+    }
+
+    private void EnsureCompositePopupSelectionVisible(ModOptionsLayout layout, TextMenu.Item item) {
+        if (!TryGetCompositeContents(item, out float titleHeight, out float spacing,
+                out List<TextMenu.Item> items, out TextMenu.Item? current) || current is null) return;
+        float top = titleHeight + spacing;
+        foreach (TextMenu.Item child in items) {
+            if (!child.Visible) continue;
+            float bottom = top + child.Height();
+            if (child == current) {
+                MaterialRect body = CompositePopupBody(layout);
+                compositePopupScroll.EnsureVisible(top - 14f, bottom + 14f, body.Height,
+                    MaxCompositePopupScroll(layout));
+                return;
+            }
+            top = bottom + spacing;
+        }
     }
 
     private void SelectItem(TextMenu.Item item) {
@@ -1011,7 +1130,6 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         menu!.Alpha = alpha;
         menu.HighlightColor = visual.Accent;
         menu.MinWidth = Math.Max(600f, layout.Rows.Width - 54f);
-        menu.RecalculateSize();
         rowViewport.Render(layout.Rows, () => {
             bool renderedAny = false;
             foreach (RowPlacement placement in RowPlacements(layout)) {
@@ -1121,12 +1239,11 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
             RenderActionControl(action, value, palette, alpha, enabled);
             return true;
         }
-        if (IsExpandedComposite(item)) return false;
         if (TryGetLabel(item, out string label)) {
             MaterialRect action = ActionControlRect(rect);
             RenderItemLabel(label, rect, action.X - rect.X - 62f, labelColor, alpha);
-            RenderActionControl(action, selected
-                    ? UiText("microblocks_qol_modoptions_active", "已展开")
+            RenderActionControl(action, compositePopupItem == item
+                    ? UiText("microblocks_qol_modoptions_active", "弹窗中")
                     : UiText("microblocks_qol_modoptions_open", "打开"),
                 palette, alpha, enabled);
             return true;
@@ -1324,6 +1441,56 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         }
     }
 
+    private void RenderCompositePopup(ModOptionsLayout layout, MaterialPalette palette, float alpha) {
+        TextMenu.Item? item = compositePopupItem;
+        if (item is null || menu is null) return;
+        MaterialRect popup = CompositePopupRect(layout);
+        MaterialRect body = CompositePopupBody(layout);
+        MaterialRect close = CompositePopupCloseRect(layout);
+
+        Draw.Rect(0f, 0f, ScreenWidth, ScreenHeight, Color.Black * (0.58f * alpha));
+        MaterialUi.RoundedRect(popup.X, popup.Y + 10f, popup.Width, popup.Height, 32f,
+            Color.Black * (0.30f * alpha));
+        MaterialUi.RoundedRect(popup.X, popup.Y, popup.Width, popup.Height, 32f,
+            palette.SurfaceHigh * alpha);
+        MaterialUi.RoundedOutline(popup.X, popup.Y, popup.Width, popup.Height, 32f, 2f,
+            palette.Outline * (0.72f * alpha));
+
+        MaterialUiKit.Icon("tune", new Vector2(popup.X + 48f, popup.Y + 43f), 25f,
+            palette.Primary, alpha, filled: true);
+        string title = TryGetLabel(item, out string label)
+            ? MaterialTextUtil.Ellipsize(label, popup.Width - 240f, 0.40f, UiFontWeight.Bold)
+            : UiText("microblocks_qol_modoptions_open", "打开");
+        MaterialUiKit.Text(title, new Vector2(popup.X + 78f, popup.Y + 43f), new Vector2(0f, 0.5f),
+            MaterialTextRole.Title, palette.OnSurface, alpha, scaleOverride: 0.40f);
+        MaterialUi.RoundedRect(close.X, close.Y, close.Width, close.Height, close.Height / 2f,
+            palette.SurfaceHighest * (0.88f * alpha));
+        MaterialUiKit.Icon("close", close.Center, 20f, palette.OnSurfaceVariant, alpha, filled: true);
+        MaterialUi.Line(new Vector2(popup.X + 34f, body.Y - 18f),
+            new Vector2(popup.Right - 34f, body.Y - 18f), 1f, palette.Outline * (0.42f * alpha));
+
+        compositePopupViewport.Render(body, () => {
+            float itemHeight = Math.Max(ActiveFont.LineHeight, item.Height());
+            float x = body.X + Math.Max(18f, (body.Width - menu.Width) / 2f);
+            float y = body.Y - compositePopupScroll.Offset + itemHeight / 2f;
+            item.Render(new Vector2(x, y), highlighted: true);
+        });
+
+        float maximum = MaxCompositePopupScroll(layout);
+        if (maximum > 0f) {
+            float ratio = body.Height / (body.Height + maximum);
+            float thumbHeight = Math.Max(46f, body.Height * ratio);
+            float travel = body.Height - thumbHeight;
+            float y = body.Y + compositePopupScroll.Offset / maximum * travel;
+            MaterialUi.RoundedRect(body.Right + 8f, body.Y, 5f, body.Height, 2.5f,
+                palette.Outline * (0.24f * alpha));
+            MaterialUi.RoundedRect(body.Right + 8f, y, 5f, thumbHeight, 2.5f,
+                palette.Primary * (0.82f * alpha));
+        }
+        MaterialUiKit.Text(UiText("microblocks_qol_modoptions_popup_help", "方向键操作  ·  Esc 返回"),
+            new Vector2(popup.Right - 88f, popup.Bottom - 24f), new Vector2(1f, 0.5f),
+            MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.25f);
+    }
     private List<RowPlacement> RowPlacements(ModOptionsLayout layout) {
         List<RowPlacement> placements = [];
         float y = layout.Rows.Y - rowScroll.Offset;
@@ -1346,6 +1513,11 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         }
         height += Math.Max(0, count - 1) * RowGap;
         return Math.Max(0f, height - layout.Rows.Height);
+    }
+
+    private float MaxCompositePopupScroll(ModOptionsLayout layout) {
+        if (compositePopupItem is null) return 0f;
+        return Math.Max(0f, compositePopupItem.Height() - CompositePopupBody(layout).Height);
     }
 
     private float MaxTabScroll(ModOptionsLayout layout) {
@@ -1445,6 +1617,33 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                 BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
             if (field?.FieldType == typeof(bool) && field.GetValue(item) is true) return true;
         }
+        return false;
+    }
+
+    private static bool IsCompositeMenu(TextMenu.Item item) =>
+        item is TextMenuExt.SubMenu or TextMenuExt.OptionSubMenu;
+
+    private static bool TryGetCompositeContents(TextMenu.Item item, out float titleHeight,
+        out float spacing, out List<TextMenu.Item> items, out TextMenu.Item? current) {
+        if (item is TextMenuExt.SubMenu submenu) {
+            titleHeight = submenu.TitleHeight;
+            spacing = submenu.ItemSpacing;
+            items = submenu.Items;
+            current = submenu.Current;
+            return true;
+        }
+        if (item is TextMenuExt.OptionSubMenu optionSubMenu
+            && optionSubMenu.CurrentMenu is { } currentMenu) {
+            titleHeight = optionSubMenu.TitleHeight;
+            spacing = optionSubMenu.ItemSpacing;
+            items = currentMenu;
+            current = optionSubMenu.Current;
+            return true;
+        }
+        titleHeight = 0f;
+        spacing = 0f;
+        items = [];
+        current = null;
         return false;
     }
 
@@ -1555,6 +1754,17 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         44f
     );
 
+    private static MaterialRect CompositePopupRect(ModOptionsLayout layout) =>
+        layout.Frame.Inset(126f, 54f, 126f, 58f);
+
+    private static MaterialRect CompositePopupBody(ModOptionsLayout layout) =>
+        CompositePopupRect(layout).Inset(42f, 92f, 54f, 52f);
+
+    private static MaterialRect CompositePopupCloseRect(ModOptionsLayout layout) {
+        MaterialRect popup = CompositePopupRect(layout);
+        return new MaterialRect(popup.Right - 70f, popup.Y + 20f, 46f, 46f);
+    }
+
     private static MaterialRect TabPinRect(MaterialRect rect) => new(
         rect.Right - 44f,
         rect.Center.Y - 20f,
@@ -1577,6 +1787,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private void BeginClose(CloseDestination destination) {
         if (pauseLevel is null || closeDestination != CloseDestination.None) return;
         CloseDropdown(playSound: false);
+        CloseCompositePopup(playSound: false);
         closeDestination = destination;
         display = false;
         if (menu is not null) menu.Focused = false;
@@ -1658,8 +1869,6 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
     private static float PrimaryRowHeight(TextMenu.Item item, bool hasDescription = false) {
         if (item is TextMenu.SubHeader) return 54f;
-        if (IsExpandedComposite(item))
-            return Math.Max(StandardRowHeight, item.Height() + 18f);
         return hasDescription ? DescribedPrimaryRowHeight : StandardRowHeight;
     }
 
