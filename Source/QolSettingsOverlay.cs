@@ -1524,6 +1524,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             ]),
             new SettingsTab("录制", "videocam", [
                 Toggle("自动录制", () => settings.AutoRecorderEnabled, value => settings.AutoRecorderEnabled = value),
+                Action("键盘快捷键", "使用 Everest 设置", () => OpenBindingConfig(controller: false)),
+                Action("手柄按键", "使用 Everest 设置", () => OpenBindingConfig(controller: true)),
                 Toggle("保存死亡回放", () => settings.DeathReplayEnabled,
                     value => settings.DeathReplayEnabled = value),
                 Range("死亡回放时长", () => settings.DeathReplayBufferSeconds,

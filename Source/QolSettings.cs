@@ -215,6 +215,14 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue(false)]
     public bool AutoRecorderEnabled { get; set; }
 
+    [SettingName("开始录制")]
+    [DefaultButtonBinding(0, Keys.None)]
+    public ButtonBinding StartRecordingBinding { get; set; } = new(0, Keys.None);
+
+    [SettingName("结束录制")]
+    [DefaultButtonBinding(0, Keys.None)]
+    public ButtonBinding StopRecordingBinding { get; set; } = new(0, Keys.None);
+
     [DefaultValue(true)]
     public bool ShowRecordingIndicator { get; set; } = true;
 

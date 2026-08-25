@@ -85,7 +85,8 @@ The portal path works on Wayland and PipeWire-enabled X11 desktops.
 
 - Automatic recording can cover every room or only runs carrying a golden berry.
 - Manual recording can be started, saved, and discarded from the settings page or
-  through console commands.
+  through console commands. Starting and stopping/saving can also use separate,
+  optional keyboard or controller bindings; both are unbound by default.
 - Full recordings and death replays use independent capture sessions. Death
   replays retain the latest 30 seconds by default, configurable from 10 to 60
   seconds, save after death, and resume automatically after respawn.

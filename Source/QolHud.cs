@@ -17,6 +17,7 @@ public sealed class QolHud : Entity {
         MiaoNetBridge.Update(Scene as Level);
         if (Scene is Level level) {
             UpdateMiniMapZoom();
+            UpdateRecordingBindings(level);
             AutoRecorder.Update(level);
         }
     }
@@ -102,5 +103,15 @@ public sealed class QolHud : Entity {
             settings.MiniMapZoom = Math.Min(12, settings.MiniMapZoom + 1);
         if (settings.MiniMapZoomOutBinding.Pressed)
             settings.MiniMapZoom = Math.Max(0, settings.MiniMapZoom - 1);
+    }
+
+    private static void UpdateRecordingBindings(Level level) {
+        QolSettings settings = MicroblocksQolUtilsModule.Settings;
+        if (AutoRecorder.ManualMode) {
+            if (settings.StopRecordingBinding.Pressed)
+                AutoRecorder.StopManual(level, save: true);
+        } else if (settings.StartRecordingBinding.Pressed) {
+            AutoRecorder.StartManual();
+        }
     }
 }
