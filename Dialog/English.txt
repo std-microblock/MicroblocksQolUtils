@@ -41,7 +41,6 @@ microblocks_qol_modoptions_search_tabs=Search mods…
 microblocks_qol_modoptions_search_settings=Search current settings…
 microblocks_qol_modoptions_no_tabs=No matching mods
 microblocks_qol_modoptions_no_settings=No matching settings
-microblocks_qol_modoptions_help=Ctrl+F: search settings  ·  Ctrl+Shift+F: search mods  ·  Tab / PgUp / PgDn: switch category  ·  Esc: back
 microblocks_qol_modoptions_open=Open
 microblocks_qol_modoptions_active=Expanded
 microblocks_qol_modoptions_unbound=Unbound

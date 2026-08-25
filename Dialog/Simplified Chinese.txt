@@ -41,7 +41,6 @@ microblocks_qol_modoptions_search_tabs=搜索模组…
 microblocks_qol_modoptions_search_settings=搜索当前设置…
 microblocks_qol_modoptions_no_tabs=没有匹配的模组
 microblocks_qol_modoptions_no_settings=没有匹配的设置
-microblocks_qol_modoptions_help=Ctrl+F 搜索设置  ·  Ctrl+Shift+F 搜索模组  ·  Tab / PgUp / PgDn 切换分类  ·  Esc 返回
 microblocks_qol_modoptions_open=打开
 microblocks_qol_modoptions_active=已展开
 microblocks_qol_modoptions_unbound=未绑定
