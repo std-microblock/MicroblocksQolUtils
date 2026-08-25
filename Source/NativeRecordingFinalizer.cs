@@ -7,6 +7,7 @@ internal static class NativeRecordingFinalizer {
         IReadOnlyList<RecordingClip> clips,
         string output,
         string description,
+        bool reconstructBgm,
         Action<double>? progress = null
     ) {
         try {
@@ -20,13 +21,14 @@ internal static class NativeRecordingFinalizer {
                 settings.RecordingEncoder,
                 settings.RecordingBitrateKbps,
                 settings.RecordingFrameRate,
-                settings.BgmMode == BgmRecordingMode.SfxOnlyWithPostMix,
+                reconstructBgm,
                 settings.BgmEventMapFile,
                 value => progress?.Invoke(value * 0.99d)
             ).ConfigureAwait(false);
             await File.WriteAllTextAsync(
                 output + ".timeline.json",
-                JsonSerializer.Serialize(new { clips }, new JsonSerializerOptions { WriteIndented = true })
+                JsonSerializer.Serialize(new { clips, reconstructBgm },
+                    new JsonSerializerOptions { WriteIndented = true })
             ).ConfigureAwait(false);
             progress?.Invoke(1d);
             Logger.Log(LogLevel.Info, "MicroblocksQolUtils/Recorder", $"Saved {description}: {output}");

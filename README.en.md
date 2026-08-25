@@ -104,13 +104,16 @@ The portal path works on Wayland and PipeWire-enabled X11 desktops.
   when no directly usable H.264 encoder is available. Audio uses AAC. Frame rate,
   bitrate, encoder preference, UI SFX capture, and retention limits are configurable.
 - FMOD DSP taps capture gameplay_sfx, music, and optional ui_sfx. Chunks are
-  streamed to an .sfxchunks sidecar and mixed during finalization against the
-  same video timeline instead of buffering an entire run in memory. MKV files
-  under `.working` are therefore silent intermediates; play the finalized MP4
-  files under `full` or `deaths` instead.
-- BGM can use the captured game mix or SfxOnlyWithPostMix. The latter splits
-  music at event, loop, seek, and other timeline discontinuities; a clean mapped
-  file replaces only its matching event segment.
+  streamed by bus to an .sfxchunks sidecar, then SFX edits and the BGM post-mix
+  timeline are handled separately during finalization instead of buffering an
+  entire run in memory. MKV files under `.working` are therefore silent
+  intermediates; play the finalized MP4 files under `full` or `deaths` instead.
+- BGM can use the captured game mix or SfxOnlyWithPostMix. The latter edits only
+  gameplay/UI SFX against the video timeline and lays the separately captured
+  music bus onto a continuous post-mix timeline across deaths and pauses. A clean
+  mapped file replaces only its matching event segment. Maps containing cassette
+  blocks, rhythm entities, or music-sync entities automatically retain the
+  captured game mix to preserve timing.
 
 BgmEventMapFile is an optional JSON object. Relative paths are resolved from the
 directory containing the JSON file:
@@ -121,8 +124,7 @@ directory containing the JSON file:
 }
 ~~~
 
-Without a mapping, captured music is still cut with the same death, respawn-point,
-and SpeedrunTool edit list.
+Without a mapping, the separately captured music bus is used as the post-mix BGM source.
 
 ### Profiler
 

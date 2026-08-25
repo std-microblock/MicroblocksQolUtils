@@ -88,12 +88,14 @@ macOS 首次使用时需要授予 Celeste“屏幕与系统录音”权限。Lin
   MPEG-4 Part 2。音频使用 AAC。可以选择录制 UI 音效、帧率、码率和编码器，
   并设置完整录像/死亡回放的保留数量或立即清理旧录像。
 - 音频通过 FMOD DSP tap 采集 gameplay_sfx、music 和可选的 ui_sfx。
-  音频块写入 .sfxchunks sidecar，最终化时按视频剪辑时间线混音，不把整段音频
-  堆在内存中。因此 `.working` 里的 MKV 是无音轨的中间文件；应播放 `full` 或
-  `deaths` 目录下完成最终化的 MP4。
+  音频块分总线写入 .sfxchunks sidecar，最终化时再分别处理 SFX 剪辑和 BGM 后期
+  时间线，不把整段音频堆在内存中。因此 `.working` 里的 MKV 是无音轨的中间文件；
+  应播放 `full` 或 `deaths` 目录下完成最终化的 MP4。
 - BGM 可以直接使用捕获的游戏混音，也可以使用 SfxOnlyWithPostMix：
-  该模式按事件、循环、跳转等时间线断点切分音乐；如果配置了干净 BGM 映射，
-  则用映射文件替换对应事件片段。
+  普通地图在该模式下只按视频时间线剪辑 SFX/UI，music 总线作为独立后期音源，
+  跨死亡和暂停剪辑点连续铺设；如果配置了干净 BGM 映射，则用映射文件替换对应
+  事件片段。检测到 cassette block、rhythm 或 music-sync 类实体的节奏地图会自动
+  保留现场混音，避免破坏音画同步。
 
 可选的 BgmEventMapFile 是一个 JSON 对象，路径相对 JSON 文件所在目录解析：
 
@@ -103,8 +105,7 @@ macOS 首次使用时需要授予 Celeste“屏幕与系统录音”权限。Lin
 }
 ~~~
 
-没有映射时仍会使用游戏捕获的音乐，并按照相同的死亡、重生点和
-SpeedrunTool 时间线进行裁剪。
+没有映射时仍会使用单独捕获的 music 总线作为后期 BGM 来源。
 
 ### Profiler
 
