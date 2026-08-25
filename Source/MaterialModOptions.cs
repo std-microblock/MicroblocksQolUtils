@@ -269,7 +269,6 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         RenderTabs(layout, palette, alpha);
         RenderRows(layout, palette, alpha);
         if (dropdownItem is not null) RenderDropdown(layout, palette, alpha);
-        RenderFooter(layout, palette, alpha);
         MaterialUiKit.Cursor(MInput.Mouse.Position, palette, alpha);
     }
 
@@ -611,9 +610,14 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         } else if (TryGetIntSlider(item, out IntSliderSnapshot slider)) {
             SetIntSliderFromMouse(item, slider, SliderControlRect(rect), mouse.X);
         } else {
-            item.ConfirmPressed();
+            ActivateItem(item);
         }
         motion.Pulse(ItemKey(item), mouse);
+    }
+
+    private static void ActivateItem(TextMenu.Item item) {
+        item.ConfirmPressed();
+        item.OnPressed?.Invoke();
     }
 
     private void UpdateDropdown(ModOptionsLayout layout) {
@@ -1127,13 +1131,6 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         }
     }
 
-    private void RenderFooter(ModOptionsLayout layout, MaterialPalette palette, float alpha) {
-        string hint = UiText("microblocks_qol_modoptions_help",
-            "Ctrl+F 搜索设置  ·  Ctrl+Shift+F 搜索模组  ·  Tab / PgUp / PgDn 切换分类  ·  Esc 返回");
-        MaterialUiKit.Text(hint, new Vector2(layout.Footer.X, layout.Footer.Center.Y), new Vector2(0f, 0.5f),
-            MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.27f);
-    }
-
     private List<RowPlacement> RowPlacements(ModOptionsLayout layout) {
         List<RowPlacement> placements = [];
         float y = layout.Rows.Y - rowScroll.Offset;
@@ -1459,7 +1456,11 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
     private static string UiText(string key, string fallback) {
         string value = Dialog.Clean(key);
-        return string.IsNullOrWhiteSpace(value) || value == key ? fallback : value;
+        return string.IsNullOrWhiteSpace(value)
+               || value == key
+               || value == $"{{{key}}}"
+            ? fallback
+            : value;
     }
 
     private delegate IEnumerator GotoRoutineOrig(Overworld self, Oui next);
@@ -1522,8 +1523,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         MaterialRect Content,
         MaterialRect ContentHeader,
         MaterialRect SettingSearch,
-        MaterialRect Rows,
-        MaterialRect Footer
+        MaterialRect Rows
     ) {
         public static ModOptionsLayout Create(float transition) {
             float rise = transition * 32f;
@@ -1534,8 +1534,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                 MaterialAxis.Vertical,
                 14f,
                 MaterialTrack.Fixed(72f),
-                MaterialTrack.Flex(),
-                MaterialTrack.Fixed(42f)
+                MaterialTrack.Flex()
             );
             MaterialRect[] body = MaterialLayout.Split(
                 vertical[1],
@@ -1570,7 +1569,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                 body[1].Height - 100f
             );
             return new ModOptionsLayout(frame, vertical[0], body[0], tabSearch, navigationItems,
-                body[1], contentHeader, settingSearch, rows, vertical[2]);
+                body[1], contentHeader, settingSearch, rows);
         }
 
         public MaterialRect Tab(int index, float scrollOffset) => new(
