@@ -605,11 +605,12 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                 SetOptionIndex(item, option.Index == 0 ? 1 : 0);
             } else if (CanUseDropdown(option)) {
                 OpenDropdown(item, option);
-            } else {
+            } else if (SliderControlArea(rect).Contains(mouse)) {
                 SetOptionFromMouse(item, option, SliderControlRect(rect), mouse.X);
             }
         } else if (TryGetIntSlider(item, out IntSliderSnapshot slider)) {
-            SetIntSliderFromMouse(item, slider, SliderControlRect(rect), mouse.X);
+            if (SliderControlArea(rect).Contains(mouse))
+                SetIntSliderFromMouse(item, slider, SliderControlRect(rect), mouse.X);
         } else {
             item.ConfirmPressed();
         }
