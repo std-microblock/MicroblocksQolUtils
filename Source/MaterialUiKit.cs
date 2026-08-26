@@ -478,13 +478,18 @@ internal static class MaterialUiKit {
         bool selected,
         float alpha = 1f
     ) {
-        Color fill = selected ? palette.SurfaceHighest : palette.SurfaceHigh * 0.90f;
-        Color outline = selected ? palette.Primary : palette.Outline;
-        MaterialUi.RoundedRect(rect.X, rect.Y + 6f, rect.Width, rect.Height, 30f,
-            Color.Black * 0.18f * alpha);
+        Color fill = selected
+            ? Color.Lerp(palette.SurfaceHighest, palette.Primary, 0.12f)
+            : palette.SurfaceHigh * 0.82f;
+        if (selected) {
+            MaterialUi.RoundedRect(rect.X, rect.Y + 4f, rect.Width, rect.Height, 30f,
+                Color.Black * 0.12f * alpha);
+        }
         MaterialUi.RoundedRect(rect.X, rect.Y, rect.Width, rect.Height, 30f, fill * alpha);
-        MaterialUi.RoundedOutline(rect.X, rect.Y, rect.Width, rect.Height, 30f,
-            selected ? 3f : 1f, outline * alpha);
+        if (selected) {
+            MaterialUi.RoundedOutline(rect.X, rect.Y, rect.Width, rect.Height, 30f,
+                2f, palette.Primary * (0.72f * alpha));
+        }
     }
 
     public static void NavigationPill(

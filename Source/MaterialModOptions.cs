@@ -21,11 +21,10 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private const float TabGap = 4f;
     private const float RowGap = 10f;
     private const float StandardRowHeight = 78f;
-    private const float DescribedPrimaryRowHeight = 64f;
-    private const float DescriptionLineHeight = 26f;
-    private const float DescriptionTopPadding = 4f;
-    private const float DescriptionBottomPadding = 10f;
-    private const float RowLeadingCenterOffset = 28f;
+    private const float DescribedTitleHeight = 48f;
+    private const float DescriptionLineHeight = 23f;
+    private const float DescriptionTopPadding = 0f;
+    private const float DescriptionBottomPadding = 12f;
     private const float RowTextOffset = 58f;
     private const float DropdownItemHeight = 46f;
     private const int DropdownMaxVisibleItems = 8;
@@ -1165,6 +1164,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                     (selected ? visual.Accent : palette.Outline) * ((selected ? 0.34f : 0.12f) * alpha));
                 motion.RenderStateLayer(ItemKey(item), rect, 18f, visual.Accent, alpha);
                 MaterialRect primary = PrimaryRect(placement);
+                bool hasDescription = placement.Description is not null;
                 if (CanFavorite(item)) {
                     MaterialRect favorite = FavoriteRect(primary);
                     motion.RenderStateLayer(FavoriteKey(item), favorite, favorite.Width / 2f,
@@ -1172,12 +1172,14 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                     MaterialUiKit.Icon("star", favorite.Center, 21f, visual.Accent, alpha,
                         filled: IsFavorite(item));
                 }
-                if (!RenderStandardItem(item, primary, palette, alpha, selected)) {
-                    item.Render(new Vector2(primary.X + 60f, primary.Center.Y), selected);
+                if (!RenderStandardItem(item, primary, palette, alpha, selected, hasDescription)) {
+                    item.Render(new Vector2(primary.X + 60f,
+                        hasDescription ? primary.Y + DescribedTitleHeight / 2f : primary.Center.Y), selected);
                 }
                 if (placement.Description is { } description) {
                     RenderDescription(description.Title,
-                        new MaterialRect(rect.X, primary.Bottom, rect.Width, rect.Bottom - primary.Bottom),
+                        new MaterialRect(rect.X, rect.Y + DescribedTitleHeight,
+                            rect.Width, rect.Bottom - rect.Y - DescribedTitleHeight),
                         palette, alpha, embedded: true);
                 }
             }
@@ -1207,7 +1209,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     }
 
     private bool RenderStandardItem(TextMenu.Item item, MaterialRect rect, MaterialPalette palette,
-        float alpha, bool selected) {
+        float alpha, bool selected, bool hasDescription) {
         bool enabled = !item.Disabled;
         Color labelColor = enabled ? palette.OnSurface : palette.OnSurfaceVariant * 0.5f;
         if (TryGetOption(item, out OptionSnapshot option)) {
@@ -1216,7 +1218,8 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                 : CanUseDropdown(option)
                     ? DropdownControlRect(rect)
                     : SliderControlArea(rect);
-            RenderItemLabel(option.Label, rect, control.X - rect.X - 62f, labelColor, alpha);
+            RenderItemLabel(option.Label, rect, control.X - rect.X - 62f, labelColor, alpha,
+                hasDescription);
             if (option.Options.Count == 2) {
                 RenderSwitch(option, rect, palette, alpha, enabled);
             } else if (CanUseDropdown(option)) {
@@ -1228,20 +1231,23 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         }
         if (TryGetIntSlider(item, out IntSliderSnapshot slider)) {
             MaterialRect control = SliderControlArea(rect);
-            RenderItemLabel(slider.Label, rect, control.X - rect.X - 62f, labelColor, alpha);
+            RenderItemLabel(slider.Label, rect, control.X - rect.X - 62f, labelColor, alpha,
+                hasDescription);
             RenderIntSlider(slider, rect, palette, alpha, enabled);
             return true;
         }
         if (item is TextMenu.Button button) {
             MaterialRect action = ActionControlRect(rect);
-            RenderItemLabel(button.Label, rect, action.X - rect.X - 62f, labelColor, alpha);
+            RenderItemLabel(button.Label, rect, action.X - rect.X - 62f, labelColor, alpha,
+                hasDescription);
             RenderActionControl(action, UiText("microblocks_qol_modoptions_open", "打开"),
                 palette, alpha, enabled);
             return true;
         }
         if (item is TextMenu.Setting setting) {
             MaterialRect action = ActionControlRect(rect);
-            RenderItemLabel(setting.Label, rect, action.X - rect.X - 62f, labelColor, alpha);
+            RenderItemLabel(setting.Label, rect, action.X - rect.X - 62f, labelColor, alpha,
+                hasDescription);
             string value = setting.Values.Count == 0
                 ? UiText("microblocks_qol_modoptions_unbound", "未绑定")
                 : string.Format(UiText("microblocks_qol_modoptions_bound", "已绑定 {0} 项"), setting.Values.Count);
@@ -1250,7 +1256,8 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         }
         if (TryGetLabel(item, out string label)) {
             MaterialRect action = ActionControlRect(rect);
-            RenderItemLabel(label, rect, action.X - rect.X - 62f, labelColor, alpha);
+            RenderItemLabel(label, rect, action.X - rect.X - 62f, labelColor, alpha,
+                hasDescription);
             RenderActionControl(action, compositePopupItem == item
                     ? UiText("microblocks_qol_modoptions_active", "弹窗中")
                     : UiText("microblocks_qol_modoptions_open", "打开"),
@@ -1261,11 +1268,12 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     }
 
     private static void RenderItemLabel(string label, MaterialRect rect, float maximumWidth,
-        Color color, float alpha) {
+        Color color, float alpha, bool hasDescription) {
         string shown = MaterialTextUtil.Ellipsize(label, Math.Max(80f, maximumWidth),
             0.34f, UiFontWeight.Bold);
+        float y = hasDescription ? rect.Y + DescribedTitleHeight / 2f : rect.Center.Y;
         MaterialUiKit.Text(shown,
-            new Vector2(rect.X + RowTextOffset, rect.Center.Y), new Vector2(0f, 0.5f),
+            new Vector2(rect.X + RowTextOffset, y), new Vector2(0f, 0.5f),
             MaterialTextRole.Label, color, alpha, scaleOverride: 0.34f);
     }
 
@@ -1363,10 +1371,11 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         if (!embedded) MaterialUi.RoundedRect(rect.X + inset, rect.Y, rect.Width - inset * 2f, rect.Height, 18f,
             palette.Primary * (0.13f * alpha));
         float contentY = rect.Y + DescriptionTopPadding;
-        float iconX = embedded ? rect.X + RowLeadingCenterOffset : rect.X + inset + 12f;
         float textX = embedded ? rect.X + RowTextOffset : rect.X + inset + 30f;
-        MaterialUiKit.Icon("info", new Vector2(iconX, contentY + 12f), 17f,
-            palette.Primary, alpha, filled: true);
+        if (!embedded) {
+            MaterialUiKit.Icon("info", new Vector2(rect.X + inset + 12f, contentY + 12f), 17f,
+                palette.Primary, alpha, filled: true);
+        }
         List<string> lines = DescriptionLines(text, rect.Width, embedded);
         float y = contentY;
         foreach (string line in lines) {
@@ -1557,22 +1566,22 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     }
 
     private static bool TryGetOption(TextMenu.Item item, out OptionSnapshot snapshot) {
-        Type? optionType = null;
+        FieldInfo? labelField = null;
+        FieldInfo? indexField = null;
+        FieldInfo? previousIndexField = null;
+        FieldInfo? valuesField = null;
+        FieldInfo? changeField = null;
         for (Type? type = item.GetType(); type is not null; type = type.BaseType) {
-            if (!type.IsGenericType || type.GetGenericTypeDefinition() != typeof(TextMenu.Option<>)) continue;
-            optionType = type;
-            break;
+            const BindingFlags declaredInstance = BindingFlags.Instance | BindingFlags.Public
+                | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
+            labelField ??= type.GetField("Label", declaredInstance);
+            indexField ??= type.GetField("Index", declaredInstance);
+            previousIndexField ??= type.GetField("PreviousIndex", declaredInstance);
+            valuesField ??= type.GetField("Values", declaredInstance);
+            changeField ??= type.GetField("OnValueChange", declaredInstance);
         }
-        if (optionType is null) {
-            snapshot = default!;
-            return false;
-        }
-        FieldInfo? labelField = optionType.GetField("Label", BindingFlags.Instance | BindingFlags.Public);
-        FieldInfo? indexField = optionType.GetField("Index", BindingFlags.Instance | BindingFlags.Public);
-        FieldInfo? previousIndexField = optionType.GetField("PreviousIndex", BindingFlags.Instance | BindingFlags.Public);
-        FieldInfo? valuesField = optionType.GetField("Values", BindingFlags.Instance | BindingFlags.Public);
-        FieldInfo? changeField = optionType.GetField("OnValueChange", BindingFlags.Instance | BindingFlags.Public);
         if (labelField is null || indexField is null || valuesField is null
+            || indexField.FieldType != typeof(int)
             || valuesField.GetValue(item) is not IEnumerable values) {
             snapshot = default!;
             return false;
@@ -1797,7 +1806,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         placement.Rect.X,
         placement.Rect.Y,
         placement.Rect.Width,
-        PrimaryRowHeight(placement.Item, placement.Description is not null)
+        placement.Rect.Height
     );
 
     private static string TabPinKey(ModTab tab) => $"mod-options.tab-pin.{tab.Id}";
@@ -1880,17 +1889,17 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private static bool CanSelect(TextMenu.Item item) => item.Visible && item.Selectable;
 
     private static float RowHeight(RowEntry row, float rowWidth) {
-        bool hasDescription = row.Description is not null;
-        float height = PrimaryRowHeight(row.Item, hasDescription);
+        float height = PrimaryRowHeight(row.Item);
         if (row.Description is { } description) {
-            height += DescriptionHeight(description.Title, rowWidth, embedded: true);
+            height = Math.Max(height,
+                DescribedTitleHeight + DescriptionHeight(description.Title, rowWidth, embedded: true));
         }
         return height;
     }
 
-    private static float PrimaryRowHeight(TextMenu.Item item, bool hasDescription = false) {
+    private static float PrimaryRowHeight(TextMenu.Item item) {
         if (item is TextMenu.SubHeader) return 54f;
-        return hasDescription ? DescribedPrimaryRowHeight : StandardRowHeight;
+        return StandardRowHeight;
     }
 
     private static float DescriptionHeight(string text, float rowWidth, bool embedded) =>
@@ -1900,7 +1909,9 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
     private static List<string> DescriptionLines(string text, float rowWidth, bool embedded) {
         float inset = embedded ? 24f : 12f;
-        float width = Math.Max(80f, rowWidth - inset * 2f - 38f);
+        float width = embedded
+            ? Math.Max(80f, rowWidth - RowTextOffset - 456f)
+            : Math.Max(80f, rowWidth - inset * 2f - 38f);
         return MaterialTextUtil.WrapLines(text, width, 0.25f, 4);
     }
 

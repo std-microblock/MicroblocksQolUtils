@@ -149,8 +149,10 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         float rise = (1f - eased) * 34f;
         ChapterLayout layout = ChapterLayout.Create(rise);
 
+        MaterialUiKit.Icon("map", new Vector2(layout.Header.X + 20f, layout.Search.Center.Y),
+            34f, palette.Primary, eased, filled: true);
         MaterialUiKit.Text(UiText("microblocks_qol_chapter_title", "选择章节"),
-            new Vector2(layout.Header.X, layout.Search.Center.Y), new Vector2(0f, 0.5f),
+            new Vector2(layout.Header.X + 52f, layout.Search.Center.Y), new Vector2(0f, 0.5f),
             MaterialTextRole.Display, palette.OnSurface, eased);
         RenderSearchBox(palette, layout, eased);
 
@@ -498,27 +500,32 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         float alpha
     ) {
         MaterialUiKit.Surface(layout.Sidebar,
-            28f, palette with { SurfaceHigh = palette.SurfaceHigh * 0.82f }, alpha);
+            28f, palette with { SurfaceHigh = palette.SurfaceHigh * 0.72f }, alpha);
         MaterialUiKit.Text(UiText("microblocks_qol_chapter_level_sets", "地图集"),
             new Vector2(layout.Sidebar.X + MaterialSpacing.Lg,
                 layout.Sidebar.Y + ChapterLayout.SidebarHeaderHeight / 2f),
-            new Vector2(0f, 0.5f), MaterialTextRole.Section, palette.OnSurface, alpha);
+            new Vector2(0f, 0.5f), MaterialTextRole.Section, palette.Primary, alpha);
         levelSetViewport.Render(layout.SidebarItems, () => {
             for (int index = 0; index < levelSets.Count; index++) {
                 string key = $"chapter.levelset.{levelSets[index].Id}";
                 MaterialRect item = layout.SidebarItem(index, levelSetScroll.Offset);
                 if (item.Bottom < layout.SidebarItems.Y || item.Y > layout.SidebarItems.Bottom) continue;
                 bool selected = index == selectedLevelSet;
-                MaterialUiKit.NavigationPill(item, palette, selected, alpha);
+                if (selected) {
+                    MaterialUi.RoundedRect(item.X, item.Y, item.Width, item.Height, item.Height / 2f,
+                        Color.Lerp(palette.SurfaceHighest, palette.Primary, 0.18f) * alpha);
+                }
                 motion.RenderStateLayer(key, item, item.Height / 2f,
-                    selected ? palette.OnPrimary : palette.Primary, alpha);
+                    palette.Primary, alpha);
+                MaterialUiKit.Icon("folder_open", new Vector2(item.X + 27f, item.Center.Y), 21f,
+                    selected ? palette.Primary : palette.OnSurfaceVariant, alpha, filled: selected);
                 SystemTtfFont.DrawVisual(
-                    MaterialTextUtil.Ellipsize(levelSets[index].Title, item.Width - 40f, 0.37f,
+                    MaterialTextUtil.Ellipsize(levelSets[index].Title, item.Width - 70f, 0.34f,
                         selected ? UiFontWeight.Bold : UiFontWeight.Regular),
-                    new Vector2(item.X + 20f, item.Center.Y),
+                    new Vector2(item.X + 52f, item.Center.Y),
                     new Vector2(0f, 0.5f),
-                    0.37f,
-                    (selected ? palette.OnPrimary : palette.OnSurfaceVariant) * alpha,
+                    0.34f,
+                    (selected ? palette.OnSurface : palette.OnSurfaceVariant) * alpha,
                     weight: selected ? UiFontWeight.Bold : UiFontWeight.Regular
                 );
             }
@@ -916,17 +923,20 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         MaterialUi.RoundedRect(search.X, search.Y, search.Width, search.Height,
             search.Height / 2f, fill * alpha);
         motion.RenderStateLayer("chapter.search", search, search.Height / 2f, palette.Primary, alpha);
-        MaterialUi.RoundedOutline(search.X, search.Y, search.Width, search.Height,
-            search.Height / 2f, searchFocused ? 2f : 1f,
-            (searchFocused ? palette.Primary : palette.Outline) * alpha);
+        if (searchFocused) {
+            MaterialUi.RoundedOutline(search.X, search.Y, search.Width, search.Height,
+                search.Height / 2f, 2f, palette.Primary * (0.88f * alpha));
+        }
+        MaterialUiKit.Icon("search", new Vector2(search.X + 28f, search.Center.Y), 23f,
+            searchFocused ? palette.Primary : palette.OnSurfaceVariant, alpha);
         string shown = searchText + (searchFocused ? imeText : "");
         string text = shown.Length == 0 ? "搜索地图、地图集或 SID…" : shown;
         Color color = shown.Length == 0 ? palette.OnSurfaceVariant * 0.68f : palette.OnSurface;
-        Vector2 textPosition = new(search.X + 24f, search.Center.Y);
-        string visibleText = MaterialTextUtil.Ellipsize(text, search.Width - 48f, 0.36f);
+        Vector2 textPosition = new(search.X + 56f, search.Center.Y);
+        string visibleText = MaterialTextUtil.Ellipsize(text, search.Width - 78f, 0.36f);
         SystemTtfFont.DrawVisual(visibleText, textPosition, new Vector2(0f, 0.5f), 0.36f, color * alpha);
         if (searchFocused && Scene.BetweenInterval(0.5f)) {
-            string visibleInput = MaterialTextUtil.Ellipsize(shown, search.Width - 48f, 0.36f);
+            string visibleInput = MaterialTextUtil.Ellipsize(shown, search.Width - 78f, 0.36f);
             float caretX = textPosition.X + SystemTtfFont.MeasureVisible(visibleInput, 0.36f).X + 2f;
             MaterialUi.Line(new Vector2(caretX, search.Y + 11f),
                 new Vector2(caretX, search.Bottom - 11f), 2f, palette.Primary * alpha);
