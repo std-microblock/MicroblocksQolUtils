@@ -12,7 +12,11 @@ public static class InstantDeaths {
             return;
         }
 
-        PlayerDeadBody? body = level.Tracker.GetEntity<PlayerDeadBody>();
+        // PlayerDeadBody is not tracked by vanilla Monocle. Ask Everest to register the
+        // type on demand instead of indexing Tracker.Entities through GetEntity<T>().
+        PlayerDeadBody? body = level.Tracker
+            .GetEntitiesTrackIfNeeded<PlayerDeadBody>()
+            .FirstOrDefault() as PlayerDeadBody;
         if (body is null) {
             reloadedBody = null;
             return;
