@@ -208,10 +208,10 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private void RenderNavigation(OverlayLayout layout, MaterialPalette palette) {
         MaterialUi.RoundedRect(layout.Navigation.X, layout.Navigation.Y, layout.Navigation.Width,
-            layout.Navigation.Height, 28f, palette.Surface * (0.64f * ease));
+            layout.Navigation.Height, 28f, palette.Surface * (0.42f * ease));
         MaterialUi.RoundedRect(layout.Navigation.X + 10f, tabIndicatorY,
             layout.Navigation.Width - 20f, OverlayLayout.TabHeight, 22f,
-            palette.Primary * (0.90f * ease));
+            Color.Lerp(palette.SurfaceHighest, palette.Primary, 0.18f) * (0.96f * ease));
 
         for (int index = 0; index < tabs.Count; index++) {
             string key = $"settings.tab.{index}";
@@ -219,14 +219,25 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             bool selected = index == selectedTab;
             SettingsTab settingsTab = tabs[index];
             motion.RenderStateLayer(key, tab, 22f,
-                selected ? palette.OnPrimary : palette.Primary, ease);
+                palette.Primary, ease);
             MaterialUiKit.Icon(settingsTab.Icon, new Vector2(tab.X + 28f, tab.Center.Y), 24f,
-                selected ? palette.OnPrimary : palette.Primary, ease, filled: selected);
+                selected ? palette.Primary : palette.OnSurfaceVariant, ease, filled: selected);
             MaterialUiKit.Text(settingsTab.Title, new Vector2(tab.X + 52f, tab.Center.Y),
                 new Vector2(0f, 0.5f), MaterialTextRole.Label,
-                selected ? palette.OnPrimary : palette.OnSurfaceVariant, ease,
+                selected ? palette.OnSurface : palette.OnSurfaceVariant, ease,
                 scaleOverride: NavigationTitleScale);
         }
+    }
+
+    private static void RenderContentHeading(string title, string icon, OverlayLayout layout,
+        MaterialPalette palette, float alpha) {
+        MaterialRect iconTile = new(layout.ContentHeader.X, layout.ContentHeader.Center.Y - 21f, 42f, 42f);
+        MaterialUi.RoundedRect(iconTile.X, iconTile.Y, iconTile.Width, iconTile.Height, 15f,
+            Color.Lerp(palette.SurfaceHighest, palette.Primary, 0.22f) * alpha);
+        MaterialUiKit.Icon(icon, iconTile.Center, 24f, palette.Primary, alpha, filled: true);
+        MaterialUiKit.Text(title, new Vector2(layout.ContentHeader.X + 56f, layout.ContentHeader.Center.Y),
+            new Vector2(0f, 0.5f), MaterialTextRole.Title, palette.OnSurface, alpha,
+            scaleOverride: 0.48f);
     }
 
     private void RenderContent(OverlayLayout layout, MaterialPalette palette) {
@@ -239,11 +250,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             return;
         }
         SettingsTab tab = tabs[selectedTab];
-        MaterialUiKit.Icon(tab.Icon, new Vector2(layout.ContentHeader.X + 14f, layout.ContentHeader.Y + 20f),
-            28f, palette.Primary, ease * contentEase, filled: true);
-        MaterialUiKit.Text(tab.Title, new Vector2(layout.ContentHeader.X + 38f, layout.ContentHeader.Y),
-            Vector2.Zero, MaterialTextRole.Title, palette.OnSurface, ease * contentEase,
-            scaleOverride: 0.48f);
+        RenderContentHeading(tab.Title, tab.Icon, layout, palette, ease * contentEase);
         RenderRows(layout, palette);
 
         float maximum = MaxRowScroll(layout);
@@ -260,10 +267,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private void RenderRecorderPage(OverlayLayout layout, MaterialPalette palette) {
         float alpha = ease * contentEase;
-        MaterialUiKit.Icon("videocam", new Vector2(layout.ContentHeader.X + 14f, layout.ContentHeader.Y + 20f),
-            28f, palette.Primary, alpha, filled: true);
-        MaterialUiKit.Text("录制中心", new Vector2(layout.ContentHeader.X + 38f, layout.ContentHeader.Y),
-            Vector2.Zero, MaterialTextRole.Title, palette.OnSurface, alpha, scaleOverride: 0.48f);
+        RenderContentHeading("录制中心", "videocam", layout, palette, alpha);
         string summary = recordingNoticeTimer > 0f
             ? recordingNotice
             : recordingFiles.Count > 0
@@ -501,9 +505,11 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         bool enabled = row.Enabled();
         float emphasis = Math.Max(row.Pulse * 0.42f,
             Math.Max(motion.Emphasis(key), Math.Max(row.FocusAnimation, row.HoverAnimation * 0.72f)));
-        Color fill = Color.Lerp(palette.SurfaceHigh * 0.72f, palette.SurfaceHighest, emphasis);
-        MaterialUi.RoundedRect(rect.X, rect.Y + 3f, rect.Width, rect.Height, 23f,
-            Color.Black * (0.10f * alpha));
+        Color fill = Color.Lerp(palette.SurfaceHigh * 0.66f, palette.SurfaceHighest, emphasis);
+        if (emphasis > 0.02f) {
+            MaterialUi.RoundedRect(rect.X, rect.Y + 3f, rect.Width, rect.Height, 23f,
+                Color.Black * (0.08f * alpha * emphasis));
+        }
         MaterialUi.RoundedRect(rect.X, rect.Y, rect.Width, rect.Height, 23f,
             fill * (alpha * (enabled ? 1f : 0.48f)));
         motion.RenderStateLayer(key, rect, 23f, palette.Primary, alpha * (enabled ? 1f : 0.45f));
@@ -513,7 +519,12 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         }
 
         Color labelColor = enabled ? palette.OnSurface : palette.OnSurfaceVariant * 0.55f;
-        MaterialUiKit.Text(row.Label, new Vector2(rect.X + 18f, rect.Y + 12f), Vector2.Zero,
+        bool centeredLabel = row.Kind is SettingKind.Toggle or SettingKind.Action;
+        Vector2 labelPosition = centeredLabel
+            ? new Vector2(rect.X + 18f, rect.Center.Y)
+            : new Vector2(rect.X + 18f, rect.Y + 12f);
+        MaterialUiKit.Text(row.Label, labelPosition,
+            centeredLabel ? new Vector2(0f, 0.5f) : Vector2.Zero,
             MaterialTextRole.Label, labelColor, alpha, scaleOverride: 0.31f);
 
         switch (row.Kind) {
@@ -1719,10 +1730,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private void RenderProfilerContent(OverlayLayout layout, MaterialPalette palette) {
         float alpha = ease * contentEase;
-        MaterialUiKit.Icon("speed", new Vector2(layout.ContentHeader.X + 14f, layout.ContentHeader.Y + 20f),
-            28f, palette.Primary, alpha, filled: true);
-        MaterialUiKit.Text("Profiler", new Vector2(layout.ContentHeader.X + 38f, layout.ContentHeader.Y),
-            Vector2.Zero, MaterialTextRole.Title, palette.OnSurface, alpha, scaleOverride: 0.48f);
+        RenderContentHeading("Profiler", "speed", layout, palette, alpha);
         ManagedSamplingStage stage = ManagedCpuSampler.Stage;
         ManagedProfileReport? report = ManagedCpuSampler.LatestReport;
         string status = stage switch {
@@ -2180,7 +2188,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         _ => value.ToString()
     };
 
-    private static MaterialRect ToggleRect(MaterialRect row) => new(row.Right - 78f, row.Y + 45f, 58f, 28f);
+    private static MaterialRect ToggleRect(MaterialRect row) => new(
+        row.Right - 78f, row.Center.Y - 14f, 58f, 28f);
 
     private static MaterialRect SliderRect(MaterialRect row) => new(row.X + 20f, row.Y + 61f,
         Math.Max(40f, row.Width - 154f), 7f);
@@ -2193,7 +2202,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private static MaterialRect ActionControlRect(SettingRow row, MaterialRect rect) {
         float textWidth = SystemTtfFont.MeasureVisible(row.Value(), 0.28f, UiFontWeight.Bold).X;
         float width = Math.Clamp(textWidth + 38f, 98f, 250f);
-        return new MaterialRect(rect.Right - width - 18f, rect.Y + 14f, width, 38f);
+        return new MaterialRect(rect.Right - width - 18f, rect.Center.Y - 19f, width, 38f);
     }
 
     private MaterialRect DropdownControlRect(OverlayLayout layout, SettingRow row) {
