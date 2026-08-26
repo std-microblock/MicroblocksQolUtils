@@ -7,6 +7,10 @@ public static class InstantDeaths {
         "End",
         System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic
     );
+    private static readonly System.Reflection.FieldInfo? FinishedField = typeof(PlayerDeadBody).GetField(
+        "finished",
+        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic
+    );
     private static PlayerDeadBody? reloadedBody;
 
     public static void AfterEngineUpdate() {
@@ -31,10 +35,23 @@ public static class InstantDeaths {
 
         // DeathRoutine is commonly detoured by other mods, so replacing its enumerator is
         // not reliable. Run after the frame instead: the body is in the scene, and recorder
-        // death handling has already completed before we finish the death. Invoke End rather
-        // than DeathAction so hooks such as SpeedrunTool's auto-load-after-death logic still run.
-        if (EndMethod is not null) EndMethod.Invoke(body, null);
-        else (body.DeathAction ?? level.Reload)();
+        // death handling has already completed before we finish the death. Invoke End first so
+        // hooks such as SpeedrunTool's auto-load-after-death logic can take over. If vanilla End
+        // ran, cancel the screen wipe it just created and reload immediately instead.
+        if (EndMethod is null || FinishedField is null) {
+            (body.DeathAction ?? level.Reload)();
+            return;
+        }
+
+        ScreenWipe? previousWipe = level.Wipe;
+        EndMethod.Invoke(body, null);
+        if (FinishedField.GetValue(body) is not true
+            || level.Wipe is not ScreenWipe deathWipe
+            || ReferenceEquals(deathWipe, previousWipe)) return;
+
+        deathWipe.OnComplete = null;
+        deathWipe.Cancel();
+        (body.DeathAction ?? level.Reload)();
     }
 
     public static void Reset() {
