@@ -10,6 +10,7 @@ internal static class CollabUtils2Bridge {
     public static void Load() {
         try {
             typeof(Imports).ModInterop();
+            typeof(SavedStateImports).ModInterop();
             Available = Imports.IsCollabLobby is not null || Imports.IsCollabMap is not null;
             if (Available)
                 Logger.Log(LogLevel.Info, "MicroblocksQolUtils", "CollabUtils2 chapter-select integration enabled");
@@ -26,6 +27,13 @@ internal static class CollabUtils2Bridge {
     public static string? GetLobbyForMap(string sid) => Imports.GetLobbyForMap?.Invoke(sid);
     public static string? GetLobbyLevelSet(string sid) => Imports.GetLobbyLevelSet?.Invoke(sid);
     public static string? GetCollabName(string sid) => Imports.GetCollabNameForSID?.Invoke(sid);
+    public static bool HasSavedState(string sid) => SavedStateImports.HasSavedState?.Invoke(sid) ?? false;
+
+    public static bool ContinueSavedState(string sid) {
+        if (SavedStateImports.TeleportToMapWithReturnToLobby is not { } teleport) return false;
+        teleport(sid, null, 2, true, true);
+        return true;
+    }
 
     [ModImportName("CollabUtils2.LobbyHelper")]
     private static class Imports {
@@ -36,5 +44,11 @@ internal static class CollabUtils2Bridge {
         public static Func<string, string?>? GetLobbyForMap;
         public static Func<string, string?>? GetLobbyLevelSet;
         public static Func<string, string?>? GetCollabNameForSID;
+    }
+
+    [ModImportName("CollabUtils2.ReturnToLobbyHelper")]
+    private static class SavedStateImports {
+        public static Func<string, bool>? HasSavedState;
+        public static Action<string, string?, int, bool, bool>? TeleportToMapWithReturnToLobby;
     }
 }

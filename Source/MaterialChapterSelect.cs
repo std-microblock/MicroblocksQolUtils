@@ -483,15 +483,51 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
             return;
         }
         ChapterEntry entry = entries[selectedIndex];
+        AreaKey area = entry.Area.ToKey();
         Audio.Play("event:/ui/world_map/icon/select");
-        save.LastArea_Safe = entry.Area.ToKey();
+        save.LastArea_Safe = area;
+        AlignSelectedAreaStats(save, area);
         Logger.Log(LogLevel.Info, "MicroblocksQolUtils/ChapterSelect",
             $"Selected {entry.Sid} area={entry.Area.ID} levelSet={entry.LevelSet}");
+
+        // CollabUtils stores "save and return to lobby" progress as a serialized Session,
+        // not as a vanilla checkpoint. Use its supported continue path instead of opening
+        // the normal chapter panel, which otherwise offers a brand-new map start.
+        if (CollabUtils2Bridge.HasSavedState(entry.Sid)) {
+            Focused = false;
+            Add(new Coroutine(ResumeSavedCollabSession(entry)));
+            return;
+        }
+
         // Match the vanilla chapter select and leave saving to the normal game flow.
         // Saving here invokes SaveData.AfterInitialize; CollabUtils2 uses that hook to
         // replace a collab map's LastArea with its lobby, so OuiChapterPanel would open
         // (and then start) the lobby instead of the selected map.
         Overworld.Goto<OuiChapterPanel>();
+    }
+
+    private static void AlignSelectedAreaStats(SaveData save, AreaKey area) {
+        if (area.ID < 0 || area.ID >= save.Areas_Safe.Count || area.GetLevelSet() == "Celeste") return;
+
+        AreaStats? persisted = save.GetAreaStatsFor(area);
+        if (persisted is null || ReferenceEquals(save.Areas_Safe[area.ID], persisted)) return;
+
+        // Some modded level-set flows replace their AreaStats list after Everest built the
+        // flattened Areas_Safe cache. Rebind this slot by SID before OuiChapterPanel and
+        // Session read it, otherwise berries and checkpoints come from a fresh AreaStats.
+        save.Areas_Safe[area.ID] = persisted;
+        Logger.Log(LogLevel.Info, "MicroblocksQolUtils/ChapterSelect",
+            $"Rebound saved stats for {area.SID} at area={area.ID}");
+    }
+
+    private IEnumerator ResumeSavedCollabSession(ChapterEntry entry) {
+        Overworld.Maddy.Hide(down: false);
+        entry.Area.Wipe(Overworld, false, null);
+        Audio.SetMusic(null);
+        Audio.SetAmbience(null);
+        yield return 0.5f;
+        if (!CollabUtils2Bridge.ContinueSavedState(entry.Sid))
+            LevelEnter.Go(new Session(entry.Area.ToKey()), fromSaveData: false);
     }
 
     private void RenderLevelSets(
