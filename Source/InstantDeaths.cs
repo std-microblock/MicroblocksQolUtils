@@ -3,6 +3,10 @@ using Monocle;
 namespace Celeste.Mod.MicroblocksQolUtils;
 
 public static class InstantDeaths {
+    private static readonly System.Reflection.MethodInfo? EndMethod = typeof(PlayerDeadBody).GetMethod(
+        "End",
+        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic
+    );
     private static PlayerDeadBody? reloadedBody;
 
     public static void AfterEngineUpdate() {
@@ -27,8 +31,10 @@ public static class InstantDeaths {
 
         // DeathRoutine is commonly detoured by other mods, so replacing its enumerator is
         // not reliable. Run after the frame instead: the body is in the scene, and recorder
-        // death handling has already completed before we start the reload.
-        (body.DeathAction ?? level.Reload)();
+        // death handling has already completed before we finish the death. Invoke End rather
+        // than DeathAction so hooks such as SpeedrunTool's auto-load-after-death logic still run.
+        if (EndMethod is not null) EndMethod.Invoke(body, null);
+        else (body.DeathAction ?? level.Reload)();
     }
 
     public static void Reset() {
