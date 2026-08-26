@@ -542,11 +542,21 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         }
         menu.MinWidth = Math.Max(600f, ModOptionsLayout.Create(0f).Rows.Width - 54f);
         menu.RecalculateSize();
-        int selection = tab.Selection;
+        // During the normal update pass, TextMenu has already applied keyboard or mouse
+        // navigation. Preserve that live selection instead of restoring the tab's previous
+        // selection every frame; otherwise keyboard focus cannot move and a mouse hover after
+        // scrolling can restore the first item and pull the viewport back to the top.
+        int selection = invokeSelectionCallbacks ? tab.Selection : menu.Selection;
+        if ((selection < 0 || selection >= menu.Items.Count || !CanSelect(menu.Items[selection]))
+            && tab.Selection >= 0 && tab.Selection < menu.Items.Count
+            && CanSelect(menu.Items[tab.Selection])) {
+            selection = tab.Selection;
+        }
         if (selection < 0 || selection >= menu.Items.Count || !CanSelect(menu.Items[selection])) {
             selection = menu.Items.FindIndex(CanSelect);
         }
         menu.Selection = selection;
+        tab.Selection = selection;
         if (invokeSelectionCallbacks && selection >= 0) menu.Items[selection].OnEnter?.Invoke();
     }
 
