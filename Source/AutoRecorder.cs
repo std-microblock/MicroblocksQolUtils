@@ -24,6 +24,8 @@ public static class AutoRecorder {
     private static MusicPosition deathReplayMusicStart;
     private static double branchStartSeconds;
     private static double deathReplayBranchStartSeconds;
+    private static bool branchSeamlessFromPrevious;
+    private static bool deathReplayBranchSeamlessFromPrevious;
     private static double? pauseResumeAfterMediaSeconds;
     private static double? deathReplayPauseResumeAfterMediaSeconds;
     private static string runKey = "";
@@ -283,6 +285,7 @@ public static class AutoRecorder {
             ? null
             : new RecordingTimelineSnapshot(snapshot.RespawnAnchorClips.ToArray());
         branchActive = false;
+        branchSeamlessFromPrevious = false;
         waitingForStablePlayer = true;
         pauseSuspended = false;
         transitioningRoom = false;
@@ -302,6 +305,7 @@ public static class AutoRecorder {
         if (deathReplayCurrent is not null) {
             QueueDeathReplay(self, deathReplayCurrent);
             deathReplayBranchActive = false;
+            deathReplayBranchSeamlessFromPrevious = false;
             deathReplayWaitingForStablePlayer = true;
             deathReplayPauseSuspended = false;
             // Player.Die runs from inside EntityList.Update; the capture is stopped later by
@@ -313,6 +317,7 @@ public static class AutoRecorder {
         ActivePrefix.Clear();
         if (respawnAnchor is not null) ActivePrefix.AddRange(respawnAnchor.Clips);
         branchActive = false;
+        branchSeamlessFromPrevious = false;
         waitingForStablePlayer = true;
         pauseSuspended = false;
         return body;
@@ -355,6 +360,7 @@ public static class AutoRecorder {
         respawnAnchor = null;
         ActivePrefix.Clear();
         branchActive = false;
+        branchSeamlessFromPrevious = false;
         waitingForStablePlayer = false;
         pauseSuspended = false;
         pauseResumeAfterMediaSeconds = null;
@@ -387,20 +393,22 @@ public static class AutoRecorder {
         StartDeathReplayBranchAtCurrentTime();
     }
 
-    private static void StartBranchAtCurrentTime() {
+    private static void StartBranchAtCurrentTime(bool seamlessFromPrevious = false) {
         NativeRoomRecording? recording = current;
         if (recording is null) return;
         branchStartSeconds = recording.MediaTimeSeconds;
         branchMusicStart = MusicPosition.Read();
+        branchSeamlessFromPrevious = seamlessFromPrevious;
         branchActive = true;
         waitingForStablePlayer = false;
     }
 
-    private static void StartDeathReplayBranchAtCurrentTime() {
+    private static void StartDeathReplayBranchAtCurrentTime(bool seamlessFromPrevious = false) {
         NativeRoomRecording? recording = deathReplayCurrent;
         if (recording is null) return;
         deathReplayBranchStartSeconds = recording.MediaTimeSeconds;
         deathReplayMusicStart = MusicPosition.Read();
+        deathReplayBranchSeamlessFromPrevious = seamlessFromPrevious;
         deathReplayBranchActive = true;
         deathReplayWaitingForStablePlayer = false;
     }
@@ -438,7 +446,7 @@ public static class AutoRecorder {
         if (now - clearedAt < MinimumClipSeconds) return;
         pauseSuspended = false;
         pauseResumeAfterMediaSeconds = null;
-        StartBranchAtCurrentTime();
+        StartBranchAtCurrentTime(seamlessFromPrevious: true);
     }
 
     private static void ResumeDeathReplayAfterPause(NativeRoomRecording recording) {
@@ -450,7 +458,7 @@ public static class AutoRecorder {
         if (now - clearedAt < MinimumClipSeconds) return;
         deathReplayPauseSuspended = false;
         deathReplayPauseResumeAfterMediaSeconds = null;
-        StartDeathReplayBranchAtCurrentTime();
+        StartDeathReplayBranchAtCurrentTime(seamlessFromPrevious: true);
     }
 
     private static void ObserveMusicTimeline(NativeRoomRecording recording) {
@@ -468,6 +476,7 @@ public static class AutoRecorder {
         if (completed is not null) ActivePrefix.Add(completed);
         branchStartSeconds = now;
         branchMusicStart = observed;
+        branchSeamlessFromPrevious = false;
     }
 
     private static void ObserveDeathReplayMusicTimeline(NativeRoomRecording recording) {
@@ -485,6 +494,7 @@ public static class AutoRecorder {
         if (completed is not null) DeathReplayPrefix.Add(completed);
         deathReplayBranchStartSeconds = now;
         deathReplayMusicStart = observed;
+        deathReplayBranchSeamlessFromPrevious = false;
     }
 
     private static void Complete(Level level) {
@@ -552,7 +562,8 @@ public static class AutoRecorder {
             Math.Max(0, branchStartSeconds),
             duration,
             branchMusicStart.Event,
-            branchMusicStart.TimelineMilliseconds
+            branchMusicStart.TimelineMilliseconds,
+            branchSeamlessFromPrevious
         );
     }
 
@@ -566,7 +577,8 @@ public static class AutoRecorder {
             Math.Max(0, deathReplayBranchStartSeconds),
             duration,
             deathReplayMusicStart.Event,
-            deathReplayMusicStart.TimelineMilliseconds
+            deathReplayMusicStart.TimelineMilliseconds,
+            deathReplayBranchSeamlessFromPrevious
         );
     }
 
@@ -608,7 +620,8 @@ public static class AutoRecorder {
                 retainedStart,
                 duration,
                 clip.MusicEvent,
-                clip.MusicTimelineMilliseconds + musicOffset
+                clip.MusicTimelineMilliseconds + musicOffset,
+                clip.SeamlessFromPrevious
             ));
             remaining -= duration;
         }
@@ -665,6 +678,7 @@ public static class AutoRecorder {
         ActivePrefix.Clear();
         respawnAnchor = null;
         branchActive = false;
+        branchSeamlessFromPrevious = false;
         waitingForStablePlayer = false;
         pauseSuspended = false;
         pauseResumeAfterMediaSeconds = null;
@@ -849,6 +863,7 @@ public static class AutoRecorder {
         branchStartSeconds = 0;
         branchMusicStart = default;
         branchActive = false;
+        branchSeamlessFromPrevious = false;
         waitingForStablePlayer = false;
         pauseSuspended = false;
         pauseResumeAfterMediaSeconds = null;
@@ -862,6 +877,7 @@ public static class AutoRecorder {
         deathReplayBranchStartSeconds = 0;
         deathReplayMusicStart = default;
         deathReplayBranchActive = false;
+        deathReplayBranchSeamlessFromPrevious = false;
         deathReplayWaitingForStablePlayer = waitForStablePlayer;
         deathReplayPauseSuspended = false;
         deathReplayPauseResumeAfterMediaSeconds = null;

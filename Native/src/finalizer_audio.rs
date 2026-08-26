@@ -1122,6 +1122,7 @@ mod tests {
                 duration_seconds: 1.0,
                 music_event: "event:/music/test".to_owned(),
                 music_timeline_milliseconds: 0,
+                seamless_from_previous: false,
             },
             FinalizeClip {
                 source: "run.mkv".to_owned(),
@@ -1129,6 +1130,7 @@ mod tests {
                 duration_seconds: 1.0,
                 music_event: "event:/music/test".to_owned(),
                 music_timeline_milliseconds: 3_000,
+                seamless_from_previous: false,
             },
         ];
         let segments = post_mix_segments(&clips, 1_000).unwrap();
@@ -1149,6 +1151,7 @@ mod tests {
                 duration_seconds: 1.0,
                 music_event: "event:/music/a".to_owned(),
                 music_timeline_milliseconds: 0,
+                seamless_from_previous: false,
             },
             FinalizeClip {
                 source: "run.mkv".to_owned(),
@@ -1156,6 +1159,7 @@ mod tests {
                 duration_seconds: 1.0,
                 music_event: "event:/music/b".to_owned(),
                 music_timeline_milliseconds: 500,
+                seamless_from_previous: false,
             },
         ];
         let segments = post_mix_segments(&clips, 1_000).unwrap();
@@ -1172,6 +1176,7 @@ mod tests {
                 duration_seconds: 1.0,
                 music_event: "event:/music/test".to_owned(),
                 music_timeline_milliseconds: 0,
+                seamless_from_previous: false,
             },
             FinalizeClip {
                 source: "run.mkv".to_owned(),
@@ -1179,6 +1184,7 @@ mod tests {
                 duration_seconds: 1.0,
                 music_event: "event:/music/test".to_owned(),
                 music_timeline_milliseconds: 750,
+                seamless_from_previous: false,
             },
         ];
         let segments = post_mix_segments(&clips, 1_000).unwrap();
@@ -1216,6 +1222,7 @@ mod tests {
                 duration_seconds: 2.0 / 8_000.0,
                 music_event: String::new(),
                 music_timeline_milliseconds: 0,
+                seamless_from_previous: false,
             }],
             &mixed,
             false,
@@ -1261,6 +1268,7 @@ mod tests {
                 duration_seconds: 1.0,
                 music_event: String::new(),
                 music_timeline_milliseconds: 0,
+                seamless_from_previous: false,
             },
             FinalizeClip {
                 source: "room.mkv".to_owned(),
@@ -1268,6 +1276,7 @@ mod tests {
                 duration_seconds: 1.0,
                 music_event: String::new(),
                 music_timeline_milliseconds: 0,
+                seamless_from_previous: false,
             },
         ];
         let spec = render_mix(&sidecar, &clips, &mixed, false)
@@ -1282,6 +1291,34 @@ mod tests {
         assert!((values[6_000] - 0.8).abs() < 1e-6);
         assert!(values[7_000].abs() < 1e-6);
         assert!((values[8_000] + 0.8).abs() < 1e-6);
+    }
+
+    #[test]
+    fn seamless_clip_keeps_full_audio_gain_at_the_pause_cut() {
+        let clips = [
+            FinalizeClip {
+                source: "room.mkv".to_owned(),
+                start_seconds: 0.0,
+                duration_seconds: 1.0,
+                music_event: String::new(),
+                music_timeline_milliseconds: 0,
+                seamless_from_previous: false,
+            },
+            FinalizeClip {
+                source: "room.mkv".to_owned(),
+                start_seconds: 2.0,
+                duration_seconds: 1.0,
+                music_event: String::new(),
+                music_timeline_milliseconds: 0,
+                seamless_from_previous: true,
+            },
+        ];
+        let layout = audio_timeline_layout(&clips, 8_000).unwrap();
+        assert_eq!(layout[0].fade_out_frames, 0);
+        assert_eq!(layout[1].fade_in_frames, 0);
+        assert_eq!(layout[1].output_start_frames, 8_000);
+        assert_eq!(layout[0].gain_at(7_999), 1.0);
+        assert_eq!(layout[1].gain_at(0), 1.0);
     }
 
     #[test]
@@ -1314,6 +1351,7 @@ mod tests {
                 duration_seconds: 4.0 / 8_000.0,
                 music_event: "event:/music/test".to_owned(),
                 music_timeline_milliseconds: 0,
+                seamless_from_previous: false,
             }],
             &mixed,
             true,
@@ -1373,6 +1411,7 @@ mod tests {
             duration_seconds: 0.20,
             music_event: "event:/test".to_owned(),
             music_timeline_milliseconds: 600,
+            seamless_from_previous: false,
         }];
         assert!(
             build_audio_track(

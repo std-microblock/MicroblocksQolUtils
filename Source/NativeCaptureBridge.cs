@@ -128,7 +128,8 @@ public static class NativeCaptureBridge {
                 start_seconds = clip.StartSeconds,
                 duration_seconds = clip.DurationSeconds,
                 music_event = clip.MusicEvent,
-                music_timeline_milliseconds = clip.MusicTimelineMilliseconds
+                music_timeline_milliseconds = clip.MusicTimelineMilliseconds,
+                seamless_from_previous = clip.SeamlessFromPrevious
             }),
             output_path = Path.GetFullPath(outputPath),
             encoder,

@@ -50,6 +50,8 @@ pub struct FinalizeClip {
     pub music_event: String,
     #[serde(default)]
     pub music_timeline_milliseconds: i64,
+    #[serde(default)]
+    pub seamless_from_previous: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -85,6 +87,9 @@ fn transition_duration(clips: &[FinalizeClip], index: usize) -> f64 {
     let Some(next) = clips.get(index + 1) else {
         return 0.0;
     };
+    if next.seamless_from_previous {
+        return 0.0;
+    }
     let source_gap = next.start_seconds - (current.start_seconds + current.duration_seconds);
     if source_gap <= CUT_GAP_SECONDS {
         return 0.0;
@@ -739,6 +744,7 @@ mod tests {
                 duration_seconds: 2.0,
                 music_event: String::new(),
                 music_timeline_milliseconds: 0,
+                seamless_from_previous: false,
             },
             FinalizeClip {
                 source: "room.mkv".to_owned(),
@@ -746,6 +752,7 @@ mod tests {
                 duration_seconds: 1.0,
                 music_event: String::new(),
                 music_timeline_milliseconds: 0,
+                seamless_from_previous: false,
             },
         ];
         let mut selection = TimelineSelection::new(&clips);
@@ -788,6 +795,7 @@ mod tests {
                 duration_seconds: 1.0,
                 music_event: "event:/music/a".to_owned(),
                 music_timeline_milliseconds: 0,
+                seamless_from_previous: false,
             },
             FinalizeClip {
                 source: "room.mkv".to_owned(),
@@ -795,12 +803,43 @@ mod tests {
                 duration_seconds: 1.0,
                 music_event: "event:/music/a".to_owned(),
                 music_timeline_milliseconds: 1_000,
+                seamless_from_previous: false,
             },
         ];
         let layout = timeline_layout(&clips);
         assert_eq!(layout[0].fade_out_seconds, 0.0);
         assert_eq!(layout[1].fade_in_seconds, 0.0);
         assert_eq!(layout[1].output_start_seconds, 1.0);
+    }
+
+    #[test]
+    fn seamless_clip_uses_a_frame_exact_cut_without_fading() {
+        let clips = vec![
+            FinalizeClip {
+                source: "room.mkv".to_owned(),
+                start_seconds: 0.0,
+                duration_seconds: 1.0,
+                music_event: String::new(),
+                music_timeline_milliseconds: 0,
+                seamless_from_previous: false,
+            },
+            FinalizeClip {
+                source: "room.mkv".to_owned(),
+                start_seconds: 4.0,
+                duration_seconds: 1.0,
+                music_event: String::new(),
+                music_timeline_milliseconds: 0,
+                seamless_from_previous: true,
+            },
+        ];
+        let layout = timeline_layout(&clips);
+        assert_eq!(layout[0].fade_out_seconds, 0.0);
+        assert_eq!(layout[1].fade_in_seconds, 0.0);
+        assert_eq!(layout[1].output_start_seconds, 1.0);
+
+        let mut selection = TimelineSelection::new(&clips);
+        assert_eq!(selection.map(0.9).unwrap().blend, TimelineBlend::Normal);
+        assert_eq!(selection.map(4.0).unwrap().blend, TimelineBlend::Normal);
     }
 
     #[test]
@@ -835,6 +874,7 @@ mod tests {
                     duration_seconds: 0.5,
                     music_event: String::new(),
                     music_timeline_milliseconds: 0,
+                    seamless_from_previous: false,
                 },
                 FinalizeClip {
                     source: source.to_string_lossy().into_owned(),
@@ -842,6 +882,7 @@ mod tests {
                     duration_seconds: 0.5,
                     music_event: String::new(),
                     music_timeline_milliseconds: 0,
+                    seamless_from_previous: false,
                 },
             ],
             output_path: output.to_string_lossy().into_owned(),
