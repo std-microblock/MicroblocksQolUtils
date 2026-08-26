@@ -25,6 +25,8 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private const float DescriptionLineHeight = 26f;
     private const float DescriptionTopPadding = 4f;
     private const float DescriptionBottomPadding = 10f;
+    private const float RowLeadingCenterOffset = 28f;
+    private const float RowTextOffset = 58f;
     private const float DropdownItemHeight = 46f;
     private const int DropdownMaxVisibleItems = 8;
     private const int DropdownOptionLimit = 24;
@@ -781,7 +783,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         SelectItem(placement.Value.Item);
         if (!MInput.Mouse.PressedLeftButton) return;
         TextMenu.Item item = placement.Value.Item;
-        if (CanFavorite(item) && FavoriteRect(placement.Value.Rect).Contains(mouse)) {
+        if (CanFavorite(item) && FavoriteRect(PrimaryRect(placement.Value)).Contains(mouse)) {
             ToggleFavorite(item);
             motion.Pulse(FavoriteKey(item), mouse);
             return;
@@ -1050,7 +1052,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                     Focused: menu.Current == placement.Item));
                 if (CanFavorite(placement.Item)) {
                     targets.Add(new MaterialInteractionTarget(FavoriteKey(placement.Item),
-                        FavoriteRect(placement.Rect), Focused: IsFavorite(placement.Item)));
+                        FavoriteRect(PrimaryRect(placement)), Focused: IsFavorite(placement.Item)));
                 }
             }
         }
@@ -1164,15 +1166,14 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                 MaterialUi.RoundedOutline(rect.X, rect.Y, rect.Width, rect.Height, 18f, 1f,
                     (selected ? visual.Accent : palette.Outline) * ((selected ? 0.34f : 0.12f) * alpha));
                 motion.RenderStateLayer(ItemKey(item), rect, 18f, visual.Accent, alpha);
+                MaterialRect primary = PrimaryRect(placement);
                 if (CanFavorite(item)) {
-                    MaterialRect favorite = FavoriteRect(rect);
+                    MaterialRect favorite = FavoriteRect(primary);
                     motion.RenderStateLayer(FavoriteKey(item), favorite, favorite.Width / 2f,
                         visual.Accent, alpha);
                     MaterialUiKit.Icon("star", favorite.Center, 21f, visual.Accent, alpha,
                         filled: IsFavorite(item));
                 }
-                MaterialRect primary = new(rect.X, rect.Y, rect.Width,
-                    PrimaryRowHeight(item, placement.Description is not null));
                 if (!RenderStandardItem(item, primary, palette, alpha, selected)) {
                     item.Render(new Vector2(primary.X + 60f, primary.Center.Y), selected);
                 }
@@ -1265,7 +1266,8 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         Color color, float alpha) {
         string shown = MaterialTextUtil.Ellipsize(label, Math.Max(80f, maximumWidth),
             0.34f, UiFontWeight.Bold);
-        MaterialUiKit.Text(shown, new Vector2(rect.X + 58f, rect.Center.Y), new Vector2(0f, 0.5f),
+        MaterialUiKit.Text(shown,
+            new Vector2(rect.X + RowTextOffset, rect.Center.Y), new Vector2(0f, 0.5f),
             MaterialTextRole.Label, color, alpha, scaleOverride: 0.34f);
     }
 
@@ -1363,12 +1365,14 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         if (!embedded) MaterialUi.RoundedRect(rect.X + inset, rect.Y, rect.Width - inset * 2f, rect.Height, 18f,
             palette.Primary * (0.13f * alpha));
         float contentY = rect.Y + DescriptionTopPadding;
-        MaterialUiKit.Icon("info", new Vector2(rect.X + inset + 12f, contentY + 12f), 17f,
+        float iconX = embedded ? rect.X + RowLeadingCenterOffset : rect.X + inset + 12f;
+        float textX = embedded ? rect.X + RowTextOffset : rect.X + inset + 30f;
+        MaterialUiKit.Icon("info", new Vector2(iconX, contentY + 12f), 17f,
             palette.Primary, alpha, filled: true);
         List<string> lines = DescriptionLines(text, rect.Width, embedded);
         float y = contentY;
         foreach (string line in lines) {
-            MaterialUiKit.Text(line, new Vector2(rect.X + inset + 30f, y), Vector2.Zero,
+            MaterialUiKit.Text(line, new Vector2(textX, y), Vector2.Zero,
                 MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.25f);
             y += DescriptionLineHeight;
         }
@@ -1784,9 +1788,16 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
     private static MaterialRect FavoriteRect(MaterialRect rect) => new(
         rect.X + 8f,
-        rect.Y + 8f,
+        rect.Center.Y - 20f,
         40f,
-        Math.Min(40f, rect.Height - 16f)
+        40f
+    );
+
+    private static MaterialRect PrimaryRect(RowPlacement placement) => new(
+        placement.Rect.X,
+        placement.Rect.Y,
+        placement.Rect.Width,
+        PrimaryRowHeight(placement.Item, placement.Description is not null)
     );
 
     private static string TabPinKey(ModTab tab) => $"mod-options.tab-pin.{tab.Id}";
