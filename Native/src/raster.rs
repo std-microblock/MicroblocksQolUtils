@@ -139,7 +139,13 @@ fn raster_state() -> &'static Mutex<RasterState> {
     RASTER_STATE.get_or_init(|| Mutex::new(RasterState::new()))
 }
 
-pub fn font_families() -> Vec<String> {
+#[cfg(windows)]
+pub fn font_families() -> Result<Vec<String>, String> {
+    crate::dwrite_raster::font_families()
+}
+
+#[cfg(not(windows))]
+pub fn font_families() -> Result<Vec<String>, String> {
     let state = raster_state()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -151,7 +157,7 @@ pub fn font_families() -> Vec<String> {
         .collect();
     families.sort_by_key(|name| name.to_lowercase());
     families.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
-    families
+    Ok(families)
 }
 
 #[derive(Clone)]

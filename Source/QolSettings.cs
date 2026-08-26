@@ -79,11 +79,9 @@ public sealed class QolSettings : EverestModuleSettings {
     public string FontFile { get; set; } = "";
 
     public void CreateFontFamilyEntry(TextMenu menu, bool inGame) {
-        string current = string.IsNullOrWhiteSpace(FontFamily) ? "Microsoft YaHei UI" : FontFamily.Trim();
+        string current = UiFontCatalog.ResolveFamily(FontFamily);
+        FontFamily = current;
         TextMenu.Option<string> fonts = new(Dialog.Clean("modoptions_microblocksqolutils_fontfamily"));
-
-        if (!UiFontCatalog.InstalledFamilies.Contains(current, StringComparer.OrdinalIgnoreCase))
-            fonts.Add(current, current, selected: true);
 
         foreach (string family in UiFontCatalog.InstalledFamilies)
             fonts.Add(family, family, string.Equals(family, current, StringComparison.OrdinalIgnoreCase));

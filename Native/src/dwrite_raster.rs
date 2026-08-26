@@ -9,7 +9,8 @@ use windows::Win32::Graphics::DirectWrite::{
     DWRITE_MEASURING_MODE_NATURAL, DWRITE_RENDERING_MODE, DWRITE_RENDERING_MODE_GDI_CLASSIC,
     DWRITE_RENDERING_MODE_NATURAL, DWRITE_RENDERING_MODE_NATURAL_SYMMETRIC,
     DWRITE_TEXT_ANTIALIAS_MODE_GRAYSCALE, DWRITE_TEXTURE_ALIASED_1x1, DWriteCreateFactory,
-    IDWriteFactory, IDWriteFactory2, IDWriteFontFace,
+    IDWriteFactory, IDWriteFactory2, IDWriteFontCollection, IDWriteFontFace,
+    IDWriteLocalizedStrings,
 };
 use windows::core::{HSTRING, Interface, PCWSTR};
 
@@ -18,6 +19,44 @@ use crate::raster::{RasterImage, TextRasterRequest};
 struct GlyphMask {
     bounds: RECT,
     alpha: Vec<u8>,
+}
+
+pub fn font_families() -> Result<Vec<String>, String> {
+    let factory: IDWriteFactory = unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED) }
+        .map_err(|error| format!("cannot create DirectWrite factory: {error}"))?;
+    let collection = system_font_collection(&factory)?;
+    let mut families = Vec::new();
+    for family_index in 0..unsafe { collection.GetFontFamilyCount() } {
+        let Ok(family) = (unsafe { collection.GetFontFamily(family_index) }) else {
+            continue;
+        };
+        let Ok(names) = (unsafe { family.GetFamilyNames() }) else {
+            continue;
+        };
+        let Some(name) = localized_string(&names, 0) else {
+            continue;
+        };
+        if name.trim().is_empty()
+            || font_face(&collection, &name, false).is_err()
+            || font_face(&collection, &name, true).is_err()
+        {
+            continue;
+        }
+        families.push(name);
+    }
+    families.sort_by_key(|name| name.to_lowercase());
+    families.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    Ok(families)
+}
+
+fn localized_string(strings: &IDWriteLocalizedStrings, index: u32) -> Option<String> {
+    if index >= unsafe { strings.GetCount() } {
+        return None;
+    }
+    let length = unsafe { strings.GetStringLength(index) }.ok()? as usize;
+    let mut buffer = vec![0u16; length + 1];
+    unsafe { strings.GetString(index, &mut buffer) }.ok()?;
+    String::from_utf16(&buffer[..length]).ok()
 }
 
 pub fn rasterize_text(request: &TextRasterRequest) -> Result<RasterImage, String> {
@@ -204,16 +243,42 @@ fn system_font_face(
     factory: &IDWriteFactory,
     request: &TextRasterRequest,
 ) -> Result<IDWriteFontFace, String> {
-    let mut collection = None;
-    unsafe { factory.GetSystemFontCollection(&mut collection, false) }
-        .map_err(|error| format!("cannot enumerate DirectWrite system fonts: {error}"))?;
-    let collection =
-        collection.ok_or_else(|| "DirectWrite returned no font collection".to_owned())?;
-    let family_name = if request.font_family.trim().is_empty() {
+    let collection = system_font_collection(factory)?;
+    let requested_name = if request.font_family.trim().is_empty() {
         "Microsoft YaHei UI"
     } else {
         request.font_family.trim()
     };
+    if let Ok(face) = font_face(&collection, requested_name, request.bold) {
+        return Ok(face);
+    }
+
+    for fallback in ["Microsoft YaHei UI", "Segoe UI"] {
+        if fallback.eq_ignore_ascii_case(requested_name) {
+            continue;
+        }
+        if let Ok(face) = font_face(&collection, fallback, request.bold) {
+            return Ok(face);
+        }
+    }
+
+    Err(format!(
+        "DirectWrite font family '{requested_name}' was not found and no fallback font is available"
+    ))
+}
+
+fn system_font_collection(factory: &IDWriteFactory) -> Result<IDWriteFontCollection, String> {
+    let mut collection = None;
+    unsafe { factory.GetSystemFontCollection(&mut collection, false) }
+        .map_err(|error| format!("cannot enumerate DirectWrite system fonts: {error}"))?;
+    collection.ok_or_else(|| "DirectWrite returned no font collection".to_owned())
+}
+
+fn font_face(
+    collection: &IDWriteFontCollection,
+    family_name: &str,
+    bold: bool,
+) -> Result<IDWriteFontFace, String> {
     let wide = HSTRING::from(family_name);
     let mut family_index = 0u32;
     let mut exists = BOOL::default();
@@ -228,7 +293,7 @@ fn system_font_face(
         .map_err(|error| format!("cannot open DirectWrite font family '{family_name}': {error}"))?;
     let font = unsafe {
         family.GetFirstMatchingFont(
-            if request.bold {
+            if bold {
                 DWRITE_FONT_WEIGHT_BOLD
             } else {
                 DWRITE_FONT_WEIGHT_NORMAL
@@ -410,5 +475,41 @@ fn linear_to_srgb(value: f32) -> f32 {
         value * 12.92
     } else {
         1.055 * value.powf(1.0 / 2.4) - 0.055
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn enumerated_font_families_can_be_selected() {
+        let factory: IDWriteFactory =
+            unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED) }.unwrap();
+        let collection = system_font_collection(&factory).unwrap();
+        let families = font_families().unwrap();
+        assert!(!families.is_empty());
+        for family in families {
+            font_face(&collection, &family, false).unwrap();
+            font_face(&collection, &family, true).unwrap();
+        }
+    }
+
+    #[test]
+    fn missing_font_family_uses_a_safe_fallback() {
+        let factory: IDWriteFactory =
+            unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED) }.unwrap();
+        let request = TextRasterRequest {
+            text: "fallback".to_owned(),
+            font_family: "__missing_microblocks_qol_font__".to_owned(),
+            font_file: String::new(),
+            bold: false,
+            pixel_size: 20,
+            line_height: 24,
+            red: 255,
+            green: 255,
+            blue: 255,
+        };
+        system_font_face(&factory, &request).unwrap();
     }
 }

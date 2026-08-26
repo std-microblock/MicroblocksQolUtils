@@ -29,6 +29,14 @@ public static class SystemTtfFont {
 
     public static void Prepare() {
         QolSettings settings = MicroblocksQolUtilsModule.Settings;
+        if (string.IsNullOrWhiteSpace(settings.FontFile)) {
+            string resolvedFamily = UiFontCatalog.ResolveFamily(settings.FontFamily);
+            if (!string.Equals(settings.FontFamily, resolvedFamily, StringComparison.Ordinal)) {
+                Logger.Log(LogLevel.Warn, "MicroblocksQolUtils",
+                    $"Configured UI font '{settings.FontFamily}' is unavailable; using '{resolvedFamily}'.");
+                settings.FontFamily = resolvedFamily;
+            }
+        }
         string identity = string.IsNullOrWhiteSpace(settings.FontFile)
             ? $"family:{settings.FontFamily.Trim()}"
             : $"file:{Path.GetFullPath(Environment.ExpandEnvironmentVariables(settings.FontFile.Trim()))}";
