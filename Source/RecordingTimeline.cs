@@ -5,7 +5,8 @@ public sealed record RecordingClip(
     double StartSeconds,
     double DurationSeconds,
     string MusicEvent,
-    int MusicTimelineMilliseconds
+    int MusicTimelineMilliseconds,
+    bool SeamlessFromPrevious = false
 );
 
 public sealed record RecordingTimelineSnapshot(
