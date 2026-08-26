@@ -1322,7 +1322,11 @@ pub unsafe extern "C" fn mqol_raster_svg(
 #[unsafe(no_mangle)]
 pub extern "C" fn mqol_raster_font_families(output: *mut RasterResult) -> i32 {
     ffi_status(|| {
-        let json = serde_json::to_vec(&raster::font_families()).map_err(|error| {
+        let families = raster::font_families().map_err(|error| {
+            set_last_error(error);
+            ERR_CAPTURE
+        })?;
+        let json = serde_json::to_vec(&families).map_err(|error| {
             set_last_error(format!("cannot serialize font family list: {error}"));
             ERR_CAPTURE
         })?;
