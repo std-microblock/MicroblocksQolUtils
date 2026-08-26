@@ -1049,15 +1049,14 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
     private void RenderTabs(ModOptionsLayout layout, MaterialPalette palette, float alpha) {
         MaterialUi.RoundedRect(layout.Navigation.X, layout.Navigation.Y, layout.Navigation.Width,
-            layout.Navigation.Height, 28f, palette.Surface * (0.56f * alpha));
-        MaterialUi.RoundedOutline(layout.Navigation.X, layout.Navigation.Y, layout.Navigation.Width,
-            layout.Navigation.Height, 28f, 1f, palette.Outline * (0.18f * alpha));
-        MaterialUiKit.Text(UiText("microblocks_qol_modoptions_mods", "模组与分类"),
-            new Vector2(layout.NavigationItems.X, layout.Navigation.Y + 30f), new Vector2(0f, 0.5f),
-            MaterialTextRole.Label, palette.OnSurfaceVariant, alpha, scaleOverride: 0.28f);
+            layout.Navigation.Height, 28f, palette.Surface * (0.42f * alpha));
         RenderSearchBox(layout.TabSearch, tabSearchText, searchTarget == SearchTarget.Tabs,
             UiText("microblocks_qol_modoptions_search_tabs", "搜索模组…"), "mod-options.search.tabs",
             palette, alpha);
+        MaterialUiKit.Text(UiText("microblocks_qol_modoptions_mods", "模组与分类"),
+            new Vector2(layout.NavigationItems.X + 8f, layout.Navigation.Y + 91f),
+            new Vector2(0f, 0.5f), MaterialTextRole.Label, palette.Primary, alpha,
+            scaleOverride: 0.26f);
 
         tabViewport.Render(layout.NavigationItems, () => {
             List<int> visibleTabs = FilteredTabIndices();
@@ -1070,25 +1069,24 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                 TabVisual visual = TabVisualFor(tab, palette);
                 if (selected) {
                     MaterialUi.RoundedRect(rect.X, rect.Y, rect.Width, rect.Height, 20f,
-                        Color.Lerp(palette.SurfaceHighest, visual.Accent, 0.20f) * (0.98f * alpha));
+                        Color.Lerp(palette.SurfaceHighest, palette.Primary, 0.18f) * (0.98f * alpha));
                 }
                 motion.RenderStateLayer($"mod-options.tab.{tab.Id}", rect, 20f,
-                    visual.Accent, alpha);
-                MaterialRect iconTile = new(rect.X + 10f, rect.Center.Y - 20f, 40f, 40f);
-                Color iconContainer = Color.Lerp(
-                    selected ? palette.SurfaceHighest : palette.SurfaceHigh,
-                    visual.Accent,
-                    selected ? 0.34f : 0.15f
-                );
-                MaterialUi.RoundedRect(iconTile.X, iconTile.Y, iconTile.Width, iconTile.Height, 14f,
-                    iconContainer * alpha);
-                MaterialUiKit.Icon(visual.Icon, iconTile.Center, 21f,
-                    visual.Accent, alpha, filled: selected);
+                    palette.Primary, alpha);
+                MaterialUiKit.Icon(visual.Icon, new Vector2(rect.X + 30f, rect.Center.Y), 23f,
+                    selected ? palette.Primary : palette.OnSurfaceVariant, alpha, filled: selected);
                 float titleWidth = rect.Width - (tab.Pinnable ? 122f : 78f);
                 string title = MaterialTextUtil.Ellipsize(tab.Title, titleWidth, 0.29f, UiFontWeight.Bold);
-                MaterialUiKit.Text(title, new Vector2(rect.X + 62f, rect.Center.Y), new Vector2(0f, 0.5f),
+                float titleY = tab.Version.Length == 0 ? rect.Center.Y : rect.Center.Y - 9f;
+                MaterialUiKit.Text(title, new Vector2(rect.X + 58f, titleY), new Vector2(0f, 0.5f),
                     MaterialTextRole.Label, selected ? palette.OnSurface : palette.OnSurfaceVariant,
                     alpha, scaleOverride: 0.29f);
+                if (tab.Version.Length > 0) {
+                    string version = MaterialTextUtil.Ellipsize(tab.Version, titleWidth, 0.21f);
+                    MaterialUiKit.Text(version, new Vector2(rect.X + 58f, rect.Center.Y + 14f),
+                        new Vector2(0f, 0.5f), MaterialTextRole.Caption,
+                        palette.OnSurfaceVariant * 0.78f, alpha, scaleOverride: 0.21f);
+                }
                 if (tab.Pinnable) {
                     MaterialRect pin = TabPinRect(rect);
                     motion.RenderStateLayer(TabPinKey(tab), pin, pin.Width / 2f,
@@ -1367,20 +1365,22 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private void RenderSearchBox(MaterialRect rect, string value, bool focused, string placeholder,
         string interactionKey, MaterialPalette palette, float alpha) {
         MaterialUi.RoundedRect(rect.X, rect.Y, rect.Width, rect.Height, rect.Height / 2f,
-            (focused ? palette.SurfaceHighest : palette.SurfaceHigh) * (0.82f * alpha));
+            (focused ? palette.SurfaceHighest : palette.SurfaceHigh) * (0.96f * alpha));
         motion.RenderStateLayer(interactionKey, rect, rect.Height / 2f, palette.Primary, alpha);
-        MaterialUi.RoundedOutline(rect.X, rect.Y, rect.Width, rect.Height, rect.Height / 2f,
-            focused ? 2f : 1f, (focused ? palette.Primary : palette.Outline) * (alpha * 0.78f));
-        MaterialUiKit.Icon("search", new Vector2(rect.X + 21f, rect.Center.Y), 18f,
+        if (focused) {
+            MaterialUi.RoundedOutline(rect.X, rect.Y, rect.Width, rect.Height, rect.Height / 2f,
+                2f, palette.Primary * (alpha * 0.88f));
+        }
+        MaterialUiKit.Icon("search", new Vector2(rect.X + 27f, rect.Center.Y), 22f,
             focused ? palette.Primary : palette.OnSurfaceVariant, alpha);
         string shown = value + (focused ? imeText : "");
         string text = shown.Length == 0 ? placeholder : shown;
         Color color = shown.Length == 0 ? palette.OnSurfaceVariant * 0.64f : palette.OnSurface;
-        Vector2 textPosition = new(rect.X + 42f, rect.Center.Y);
-        string visibleText = MaterialTextUtil.Ellipsize(text, rect.Width - 58f, 0.28f);
+        Vector2 textPosition = new(rect.X + 54f, rect.Center.Y);
+        string visibleText = MaterialTextUtil.Ellipsize(text, rect.Width - 74f, 0.28f);
         SystemTtfFont.DrawVisual(visibleText, textPosition, new Vector2(0f, 0.5f), 0.28f, color * alpha);
         if (focused && Scene.BetweenInterval(0.5f)) {
-            string visibleInput = MaterialTextUtil.Ellipsize(shown, rect.Width - 58f, 0.28f);
+            string visibleInput = MaterialTextUtil.Ellipsize(shown, rect.Width - 74f, 0.28f);
             float caretX = textPosition.X + SystemTtfFont.MeasureVisible(visibleInput, 0.28f).X + 2f;
             MaterialUi.Line(new Vector2(caretX, rect.Y + 9f), new Vector2(caretX, rect.Bottom - 9f),
                 2f, palette.Primary * alpha);
@@ -2021,15 +2021,15 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
             );
             MaterialRect tabSearch = new(
                 body[0].X + 12f,
-                body[0].Y + 50f,
+                body[0].Y + 14f,
                 body[0].Width - 24f,
-                44f
+                52f
             );
             MaterialRect navigationItems = new(
                 body[0].X + 12f,
-                body[0].Y + 106f,
+                body[0].Y + 116f,
                 body[0].Width - 24f,
-                body[0].Height - 120f
+                body[0].Height - 130f
             );
             MaterialRect contentHeader = new(body[1].X + 24f, body[1].Y + 12f, body[1].Width - 48f, 58f);
             MaterialRect settingSearch = new(
