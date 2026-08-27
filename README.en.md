@@ -208,14 +208,17 @@ node scripts/build-qol-mod.mjs --target x86_64-unknown-linux-gnu
 node scripts/build-qol-mod.mjs --target x86_64-apple-darwin
 ~~~
 
-Windows, Linux, and macOS packages all include recording and their FFmpeg shared
-runtime. Only Windows system notifications remain platform-specific. Runtime code
-does not package or invoke an ffmpeg executable.
+Windows, Linux, and macOS builds all include recording and their FFmpeg shared
+runtime. The universal archive places them in Everest's `Code/lib-win-x64`,
+`Code/lib-linux`, and `Code/lib-osx` platform directories so Everest only loads
+the current platform's variant. Only Windows system notifications remain
+platform-specific. Runtime code does not package or invoke an ffmpeg executable.
 
 GitHub Actions runs Rust formatting/tests and builds Windows x64, Linux x64,
-and macOS x64 packages. Every commit pushed to master updates the nightly
-pre-release and its three platform archives; tags matching v* publish the same
-archives as a versioned release.
+and macOS x64 variants, then merges them into one universal
+`MicroblocksQolUtils.zip`. Every commit pushed to master updates the nightly
+pre-release; tags matching v* publish the same universal archive as a versioned
+release.
 
 ## Dependency notes
 

@@ -29,6 +29,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Check package merger
+        run: python3 -m py_compile scripts/merge-qol-packages.py
+
       - name: Install Rust
         run: |
           rustup toolchain install stable --profile minimal
@@ -232,8 +235,8 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          file Build/Code/libmicroblocks_qol_native.so
-          readelf --dyn-syms Build/Code/libmicroblocks_qol_native.so | grep -q mqol_raster_text
+          file Build/Code/lib-linux/libmicroblocks_qol_native.so
+          readelf --dyn-syms Build/Code/lib-linux/libmicroblocks_qol_native.so | grep -q mqol_raster_text
 
       - name: Upload release package
         if: needs.prepare-release.outputs.publish == 'true'
@@ -246,10 +249,61 @@ jobs:
           --repo "$GITHUB_REPOSITORY"
           --clobber
 
+  merge-packages:
+    name: Merge platform packages
+    if: needs.prepare-release.outputs.publish == 'true'
+    needs: [prepare-release, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Download platform packages
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare-release.outputs.release_tag }}
+        run: |
+          mkdir -p .work/platform-packages
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'MicroblocksQolUtils-*-x64.zip' \
+            --dir .work/platform-packages \
+            --clobber
+
+      - name: Merge platform packages
+        shell: bash
+        run: |
+          python3 scripts/merge-qol-packages.py \
+            MicroblocksQolUtils.zip \
+            .work/platform-packages/MicroblocksQolUtils-windows-x64.zip \
+            .work/platform-packages/MicroblocksQolUtils-linux-x64.zip \
+            .work/platform-packages/MicroblocksQolUtils-macos-x64.zip
+          unzip -Z1 MicroblocksQolUtils.zip | sort
+
+      - name: Replace platform packages with universal package
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare-release.outputs.release_tag }}
+        run: |
+          gh release upload "$RELEASE_TAG" MicroblocksQolUtils.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+          for asset in \
+            MicroblocksQolUtils-windows-x64.zip \
+            MicroblocksQolUtils-linux-x64.zip \
+            MicroblocksQolUtils-macos-x64.zip; do
+            gh release delete-asset "$RELEASE_TAG" "$asset" \
+              --repo "$GITHUB_REPOSITORY" \
+              --yes
+          done
+
   publish-release:
     name: Publish release
     if: needs.prepare-release.outputs.publish == 'true'
-    needs: [prepare-release, build]
+    needs: [prepare-release, merge-packages]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

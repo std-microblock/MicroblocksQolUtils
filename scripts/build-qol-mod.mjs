@@ -30,6 +30,11 @@ const nativeName = targetPlatform === "win32"
   : targetPlatform === "darwin"
     ? "libmicroblocks_qol_native.dylib"
     : "libmicroblocks_qol_native.so";
+const nativeFolder = targetPlatform === "win32"
+  ? "lib-win-x64"
+  : targetPlatform === "darwin"
+    ? "lib-osx"
+    : "lib-linux";
 const cargoTargetRoot = resolve(root, process.env.CARGO_TARGET_DIR ?? "target");
 const nativeDirectory = resolve(cargoTargetRoot, ...(target ? [target] : []), "release");
 const nativeOutput = resolve(nativeDirectory, nativeName);
@@ -117,10 +122,12 @@ for (const dependency of [
   const source = resolve(managedOutput, dependency);
   if (existsSync(source)) cpSync(source, resolve(output, "Code", dependency));
 }
-cpSync(nativeOutput, resolve(output, "Code", nativeName));
+const packagedNativeDirectory = resolve(output, "Code", nativeFolder);
+mkdirSync(packagedNativeDirectory, { recursive: true });
+cpSync(nativeOutput, resolve(packagedNativeDirectory, nativeName));
 if (ffmpeg) {
   for (const dependency of ffmpeg.runtimeLibraries) {
-    copyFileSync(dependency, resolve(output, "Code", dependency.split(/[\\/]/u).at(-1)));
+    copyFileSync(dependency, resolve(packagedNativeDirectory, dependency.split(/[\\/]/u).at(-1)));
   }
   cpSync(ffmpeg.license, resolve(output, "Code", "FFmpeg-LICENSE.txt"));
 }
