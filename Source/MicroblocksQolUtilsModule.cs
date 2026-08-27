@@ -34,6 +34,7 @@ public sealed class MicroblocksQolUtilsModule : EverestModule {
         FrameProfiler.Load();
         CollisionBoxRenderer.Load();
         InstantTransitions.Load();
+        InstantDeaths.Load();
         AutoRecorder.Load(Path.GetDirectoryName(Metadata.DLL) ?? "");
         Everest.Events.Level.OnLoadLevel += OnLoadLevel;
         On.Monocle.Engine.Update += EngineUpdate;
@@ -53,7 +54,7 @@ public sealed class MicroblocksQolUtilsModule : EverestModule {
         NativeCaptureCommands.Unload();
         AutoRecorder.Unload();
         CollisionBoxRenderer.Unload();
-        InstantDeaths.Reset();
+        InstantDeaths.Unload();
         InstantTransitions.Unload();
         FrameProfiler.Unload();
         MiaoNetBridge.Unload();
