@@ -80,8 +80,9 @@ xdg-desktop-portal/PipeWire. Runtime capture does not launch an ffmpeg executabl
 use a managed frame buffer, or create a subprocess.
 
 macOS asks for Screen & System Audio Recording permission on first use. Linux
-shows the desktop portal source picker; select the Celeste window or its display.
-The portal path works on Wayland and PipeWire-enabled X11 desktops.
+shows the desktop portal source picker on first use; select the Celeste window or
+its display. Portals that support persistent grants restore that selection on later
+launches. The portal path works on Wayland and PipeWire-enabled X11 desktops.
 
 - Automatic recording can cover every room or only runs carrying a golden berry.
 - Manual recording can be started, saved, and discarded from the settings page or

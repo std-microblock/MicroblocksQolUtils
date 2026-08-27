@@ -2,6 +2,7 @@ pub mod engine;
 
 use std::{
     error::Error,
+    path::PathBuf,
     sync::mpsc,
     time::{Duration, Instant},
 };
@@ -77,6 +78,8 @@ pub struct Options {
     /// Only implemented for Windows and macOS currently
     pub captures_audio: bool,
     pub exclude_current_process_audio: bool,
+    /// On Linux, persist the desktop portal source selection using this token file.
+    pub restore_token_path: Option<PathBuf>,
 }
 
 /// Screen capturer class

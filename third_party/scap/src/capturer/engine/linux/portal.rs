@@ -1,7 +1,13 @@
 use std::{
-    sync::{atomic::AtomicBool, Arc, Mutex},
+    cell::Cell,
+    fs::{self, OpenOptions},
+    io::{self, Write},
+    path::{Path, PathBuf},
+    sync::{atomic::AtomicBool, Arc, Mutex, OnceLock},
     time::Duration,
 };
+
+use std::os::unix::fs::OpenOptionsExt;
 
 use dbus::{
     arg::{self, PropMap, RefArg, Variant},
@@ -161,6 +167,12 @@ impl<'a, T: blocking::BlockingSender, C: ::std::ops::Deref<Target = T>> OrgFreed
 
 type Response = Option<OrgFreedesktopPortalRequestResponse>;
 
+const SCREENCAST_PORTAL_PERSISTENCE_VERSION: u32 = 4;
+const PERSIST_UNTIL_REVOKED: u32 = 2;
+const MAX_RESTORE_TOKEN_BYTES: u64 = 16 * 1024;
+
+static RESTORE_TOKEN_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct StreamVardict {
@@ -221,6 +233,8 @@ pub struct ScreenCastPortal<'a> {
     proxy: Proxy<'a, &'a Connection>,
     token: String,
     cursor_mode: u32,
+    restore_token_path: Option<PathBuf>,
+    used_restore_token: Cell<bool>,
 }
 
 impl<'a> ScreenCastPortal<'a> {
@@ -237,6 +251,8 @@ impl<'a> ScreenCastPortal<'a> {
             proxy,
             token,
             cursor_mode: 1,
+            restore_token_path: None,
+            used_restore_token: Cell::new(false),
         }
     }
 
@@ -268,6 +284,18 @@ impl<'a> ScreenCastPortal<'a> {
             String::from("cursor_mode"),
             Variant(Box::new(self.cursor_mode)),
         );
+        if self.restore_token_path.is_some()
+            && self.proxy.version()? >= SCREENCAST_PORTAL_PERSISTENCE_VERSION
+        {
+            map.insert(
+                String::from("persist_mode"),
+                Variant(Box::new(PERSIST_UNTIL_REVOKED)),
+            );
+            if let Some(token) = self.read_restore_token() {
+                map.insert(String::from("restore_token"), Variant(Box::new(token)));
+                self.used_restore_token.set(true);
+            }
+        }
         Ok(map)
     }
 
@@ -363,6 +391,9 @@ impl<'a> ScreenCastPortal<'a> {
 
         if let Some(res) = response.lock()?.take() {
             match_response!(res.response);
+            if self.used_restore_token.replace(false) {
+                self.remove_restore_token();
+            }
             return Ok(());
         }
 
@@ -384,6 +415,13 @@ impl<'a> ScreenCastPortal<'a> {
 
         if let Some(res) = response.lock()?.take() {
             match_response!(res.response);
+            if let Some(token) = res
+                .results
+                .get("restore_token")
+                .and_then(|token| token.0.as_str())
+            {
+                self.write_restore_token(token);
+            }
             match res.results.get("streams") {
                 Some(s) => match Stream::from_dbus(s) {
                     Some(s) => return Ok(s),
@@ -401,9 +439,18 @@ impl<'a> ScreenCastPortal<'a> {
     }
 
     pub fn create_stream(&self) -> Result<Stream, LinCapError> {
+        let _restore_token_guard = RESTORE_TOKEN_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let session_handle = self.create_session()?;
         self.select_sources(session_handle.clone())?;
         self.start(session_handle)
+    }
+
+    pub fn restore_token_path(mut self, path: Option<PathBuf>) -> Self {
+        self.restore_token_path = path;
+        self
     }
 
     pub fn show_cursor(mut self, mode: bool) -> Result<Self, LinCapError> {
@@ -418,5 +465,101 @@ impl<'a> ScreenCastPortal<'a> {
         }
 
         Err(LinCapError::new("Unsupported cursor mode".to_string()))
+    }
+
+    fn read_restore_token(&self) -> Option<String> {
+        let path = self.restore_token_path.as_deref()?;
+        let metadata = fs::metadata(path).ok()?;
+        if metadata.len() == 0 || metadata.len() > MAX_RESTORE_TOKEN_BYTES {
+            return None;
+        }
+        let token = fs::read_to_string(path).ok()?;
+        let token = token.trim();
+        (!token.is_empty()).then(|| token.to_owned())
+    }
+
+    fn write_restore_token(&self, token: &str) {
+        let Some(path) = self.restore_token_path.as_deref() else {
+            return;
+        };
+        if let Err(error) = write_restore_token(path, token) {
+            eprintln!(
+                "scap: failed to persist desktop portal restore token at {}: {error}",
+                path.display()
+            );
+        }
+    }
+
+    fn remove_restore_token(&self) {
+        let Some(path) = self.restore_token_path.as_deref() else {
+            return;
+        };
+        if let Err(error) = fs::remove_file(path) {
+            if error.kind() != io::ErrorKind::NotFound {
+                eprintln!(
+                    "scap: failed to remove consumed desktop portal restore token at {}: {error}",
+                    path.display()
+                );
+            }
+        }
+    }
+}
+
+fn write_restore_token(path: &Path, token: &str) -> io::Result<()> {
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "restore token path has no parent directory",
+        )
+    })?;
+    fs::create_dir_all(parent)?;
+
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "restore token path has no UTF-8 file name",
+            )
+        })?;
+    let temporary = parent.join(format!(".{file_name}.{}.tmp", rand::random::<u64>()));
+    let result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary)?;
+        file.write_all(token.as_bytes())?;
+        file.sync_all()?;
+        fs::rename(&temporary, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn writes_restore_token_atomically_with_private_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = std::env::temp_dir().join(format!("scap-token-test-{}", rand::random::<u64>()));
+        let path = root.join("nested/restore-token");
+        write_restore_token(&path, "new-token").unwrap();
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), "new-token");
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+
+        write_restore_token(&path, "replacement-token").unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), "replacement-token");
+        fs::remove_dir_all(root).unwrap();
     }
 }

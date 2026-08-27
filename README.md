@@ -68,9 +68,9 @@ Windows 下，关注的玩家换房间且 Celeste 不在前台时，会发送系
 使用 ScreenCaptureKit，Linux 使用 xdg-desktop-portal/PipeWire；不会启动 ffmpeg
 可执行文件，也不会使用托管帧缓冲或子进程。
 
-macOS 首次使用时需要授予 Celeste“屏幕与系统录音”权限。Linux 会显示桌面门户的
-共享选择器，请选择 Celeste 窗口或其所在屏幕；Wayland 和支持 PipeWire 的 X11
-桌面都走同一套门户接口。
+macOS 首次使用时需要授予 Celeste“屏幕与系统录音”权限。Linux 首次使用时会显示
+桌面门户的共享选择器，请选择 Celeste 窗口或其所在屏幕；支持持久授权的桌面门户
+会在后续启动中恢复该选择。Wayland 和支持 PipeWire 的 X11 桌面都走同一套门户接口。
 
 - 自动录制策略：每个房间都录制，或只录制携带金草莓的 run。
 - 控制台和设置页都支持手动录制、保存和丢弃；开始录制和结束保存可以分别绑定
