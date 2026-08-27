@@ -43,6 +43,15 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue(true)]
     public bool HiDpiFix { get; set; } = true;
 
+    public void CreateHiDpiFixEntry(TextMenu menu, bool inGame) {
+        if (!OperatingSystem.IsWindows()) return;
+
+        TextMenu.OnOff entry = new(Dialog.Clean("modoptions_microblocksqolutils_hidpifix"), HiDpiFix);
+        entry.Change(value => HiDpiFix = value);
+        menu.Add(entry);
+        entry.NeedsRelaunch(menu, true);
+    }
+
     [DefaultValue(true)]
     public bool MaterialAcrylicBackground { get; set; } = true;
 
@@ -70,6 +79,17 @@ public sealed class QolSettings : EverestModuleSettings {
 
     [DefaultValue(false)]
     public bool AutoSwitchInputLanguage { get; set; }
+
+    public void CreateAutoSwitchInputLanguageEntry(TextMenu menu, bool inGame) {
+        if (!OperatingSystem.IsWindows()) return;
+
+        TextMenu.OnOff entry = new(
+            Dialog.Clean("modoptions_microblocksqolutils_autoswitchinputlanguage"),
+            AutoSwitchInputLanguage
+        );
+        entry.Change(value => AutoSwitchInputLanguage = value);
+        menu.Add(entry);
+    }
 
     [DefaultValue("Microsoft YaHei UI")]
     public string FontFamily { get; set; } = "Microsoft YaHei UI";
