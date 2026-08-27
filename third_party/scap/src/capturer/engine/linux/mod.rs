@@ -363,6 +363,7 @@ impl LinuxCapturer {
         let stream_id = ScreenCastPortal::new(&connection)
             .show_cursor(options.show_cursor)
             .expect("Unsupported cursor mode")
+            .restore_token_path(options.restore_token_path.clone())
             .create_stream()
             .expect("Failed to get screencast stream")
             .pw_node_id();

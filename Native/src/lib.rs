@@ -722,6 +722,7 @@ fn run_capture(session: &Arc<CaptureSession>) -> Result<(), CaptureError> {
         excluded_targets: None,
         captures_audio: false,
         exclude_current_process_audio: false,
+        restore_token_path: linux_portal_restore_token_path(),
     })
     .map_err(|error| CaptureError::Scap(error.to_string()))?;
 
@@ -770,6 +771,29 @@ fn run_capture(session: &Arc<CaptureSession>) -> Result<(), CaptureError> {
     }
     capturer.stop_capture();
     Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn linux_portal_restore_token_path() -> Option<PathBuf> {
+    let state_root = std::env::var_os("XDG_STATE_HOME")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME")
+                .filter(|path| !path.is_empty())
+                .map(PathBuf::from)
+                .map(|home| home.join(".local/state"))
+        })?;
+    Some(
+        state_root
+            .join("microblocks-qol-utils")
+            .join("screencast-restore-token"),
+    )
+}
+
+#[cfg(not(target_os = "linux"))]
+fn linux_portal_restore_token_path() -> Option<PathBuf> {
+    None
 }
 
 #[cfg(any(windows, target_os = "macos"))]
