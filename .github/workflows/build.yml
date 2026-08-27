@@ -192,7 +192,8 @@ jobs:
         if: runner.os == 'Linux'
         run: >-
           sudo apt-get update && sudo apt-get install -y
-          clang libclang-dev libdbus-1-dev libpipewire-0.3-dev make pkg-config xz-utils unzip zip
+          clang libclang-dev libdbus-1-dev libpipewire-0.3-dev libvpl-dev
+          libffmpeg-nvenc-dev make patchelf pkg-config xz-utils unzip zip
 
       - name: Install Windows build tools
         if: runner.os == 'Windows' && needs.prepare-release.outputs.publish == 'true'

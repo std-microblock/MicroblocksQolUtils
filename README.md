@@ -85,8 +85,8 @@ macOS 首次使用时需要授予 Celeste“屏幕与系统录音”权限。Lin
   也可以在设置中指定目录。录像分别放在 full/<区域> 和 deaths/<区域>；
   每个完成的 MP4 旁边会有 .timeline.json 时间线文件。
 - 视频优先使用平台 H.264 编码器（Windows Media Foundation、macOS
-  VideoToolbox）；Linux 在没有可直接使用的 H.264 编码器时回退到 MP4 中的
-  MPEG-4 Part 2。音频使用 AAC。可以选择录制 UI 音效、帧率、码率和编码器，
+  VideoToolbox、Linux NVENC/QSV）；Linux 在没有可直接使用的 H.264 编码器时回退到
+  MP4 中的 MPEG-4 Part 2。音频使用 AAC。可以选择录制 UI 音效、帧率、码率和编码器，
   并设置完整录像/死亡回放的保留数量或立即清理旧录像。
 - 音频通过 FMOD DSP tap 采集 gameplay_sfx、music 和可选的 ui_sfx。
   音频块分总线写入 .sfxchunks sidecar，最终化时再分别处理 SFX 剪辑和 BGM 后期

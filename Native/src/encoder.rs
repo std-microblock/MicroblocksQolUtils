@@ -333,12 +333,12 @@ pub(crate) fn encoder_candidates(preferred: &str) -> Vec<&str> {
     #[cfg(target_os = "macos")]
     const AUTOMATIC: [&str; 2] = ["h264_videotoolbox", "mpeg4"];
     #[cfg(target_os = "linux")]
-    const AUTOMATIC: [&str; 2] = ["h264_v4l2m2m", "mpeg4"];
+    const AUTOMATIC: [&str; 3] = ["h264_nvenc", "h264_qsv", "mpeg4"];
     #[cfg(not(any(windows, target_os = "macos", target_os = "linux")))]
     const AUTOMATIC: [&str; 1] = ["mpeg4"];
     let mut result = Vec::with_capacity(AUTOMATIC.len() + 1);
     let mut seen = HashSet::new();
-    let preferred = preferred.trim();
+    let preferred = canonical_encoder_name(preferred.trim());
     if !preferred.is_empty() && !preferred.eq_ignore_ascii_case("auto") {
         result.push(preferred);
         seen.insert(preferred);
@@ -349,6 +349,26 @@ pub(crate) fn encoder_candidates(preferred: &str) -> Vec<&str> {
         }
     }
     result
+}
+
+fn canonical_encoder_name(name: &str) -> &str {
+    if name.eq_ignore_ascii_case("nvenc") {
+        "h264_nvenc"
+    } else if name.eq_ignore_ascii_case("qsv") {
+        "h264_qsv"
+    } else if name.eq_ignore_ascii_case("amf") {
+        "h264_amf"
+    } else if name.eq_ignore_ascii_case("mf") {
+        "h264_mf"
+    } else if name.eq_ignore_ascii_case("videotoolbox") {
+        "h264_videotoolbox"
+    } else if name.eq_ignore_ascii_case("v4l2m2m") {
+        "h264_v4l2m2m"
+    } else if name.eq_ignore_ascii_case("openh264") {
+        "libopenh264"
+    } else {
+        name
+    }
 }
 
 pub(crate) fn pixel_format_for_encoder(name: &str) -> ffmpeg::format::Pixel {
@@ -394,7 +414,10 @@ mod tests {
         #[cfg(target_os = "macos")]
         assert_eq!(encoder_candidates("auto")[0], "h264_videotoolbox");
         #[cfg(target_os = "linux")]
-        assert_eq!(encoder_candidates("auto")[0], "h264_v4l2m2m");
+        assert_eq!(
+            encoder_candidates("auto"),
+            ["h264_nvenc", "h264_qsv", "mpeg4"]
+        );
         let candidates = encoder_candidates("h264_mf");
         assert_eq!(candidates[0], "h264_mf");
         assert_eq!(
@@ -404,6 +427,8 @@ mod tests {
                 .count(),
             1
         );
+        assert_eq!(encoder_candidates("nvenc")[0], "h264_nvenc");
+        assert_eq!(encoder_candidates("QSV")[0], "h264_qsv");
     }
 
     #[test]

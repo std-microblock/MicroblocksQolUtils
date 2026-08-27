@@ -24,7 +24,7 @@ const buildName = process.platform === "win32"
   : `ffmpeg-${ffmpegVersion}-qol-minimal-${process.platform}-${process.arch}`;
 const buildId = process.platform === "win32"
   ? "ffmpeg-8.1-qol-minimal-v2"
-  : `ffmpeg-8.1-qol-minimal-v3-${process.platform}-${process.arch}`;
+  : `ffmpeg-8.1-qol-minimal-v4-${process.platform}-${process.arch}`;
 const sourceUrl = `https://ffmpeg.org/releases/${archiveName}`;
 const sourceDigest = "sha256:b072aed6871998cce9b36e7774033105ca29e33632be5b6347f3206898e0756a";
 const downloadAttempts = 3;
@@ -85,7 +85,10 @@ const configureArguments = process.platform === "win32"
     : [
         ...commonConfigureArguments,
         "--disable-x86asm",
-        "--enable-encoder=aac,mpeg4",
+        "--enable-ffnvcodec",
+        "--enable-nvenc",
+        "--enable-libvpl",
+        "--enable-encoder=aac,h264_nvenc,h264_qsv,mpeg4",
       ];
 
 export async function ensureQolFfmpeg(root) {
@@ -352,6 +355,35 @@ function buildMinimalFfmpegUnix(source, output) {
   if (build.status !== 0) throw new Error(`Cannot build minimal FFmpeg (exit ${build.status})`);
   const install = spawnSync("make", ["install"], { cwd: source, stdio: "inherit" });
   if (install.status !== 0) throw new Error(`Cannot install minimal FFmpeg (exit ${install.status})`);
+  if (process.platform === "linux") installLinuxVplRuntime(output);
+}
+
+function installLinuxVplRuntime(output) {
+  const pkgConfig = spawnSync("pkg-config", ["--variable=libdir", "vpl"], { encoding: "utf8" });
+  const libdir = pkgConfig.status === 0 ? pkgConfig.stdout.trim() : "";
+  const library = libdir && existsSync(libdir)
+    ? readdirSync(libdir)
+      .filter((name) => /^libvpl\.so\.\d+$/u.test(name))
+      .sort()
+      .at(-1)
+    : null;
+  if (!library) throw new Error("libvpl runtime library was not found after the FFmpeg build");
+  copyFileSync(resolve(libdir, library), resolve(output, "lib", library));
+  for (const runtime of runtimeLibraries(output)) {
+    const patched = spawnSync("patchelf", ["--set-rpath", "$ORIGIN", runtime], { stdio: "inherit" });
+    if (patched.status !== 0) throw new Error(`Cannot set the Linux runtime path on ${runtime}`);
+  }
+
+  const prefix = spawnSync("pkg-config", ["--variable=prefix", "vpl"], { encoding: "utf8" });
+  const vplPrefix = prefix.status === 0 ? prefix.stdout.trim() : "";
+  const license = firstExisting([
+    "/usr/share/doc/libvpl2/copyright",
+    vplPrefix ? resolve(vplPrefix, "share", "licenses", "oneVPL", "LICENSE") : null,
+    vplPrefix ? resolve(vplPrefix, "share", "licenses", "libvpl", "LICENSE") : null,
+    vplPrefix ? resolve(vplPrefix, "share", "licenses", "vpl", "LICENSE") : null,
+  ]);
+  if (!license) throw new Error("libvpl license file was not found after the FFmpeg build");
+  copyFileSync(license, resolve(output, "VPL-LICENSE.txt"));
 }
 
 function complete(root) {
@@ -364,8 +396,10 @@ function complete(root) {
         : name === `lib${library}.so` || name?.startsWith(`lib${library}.so.`)))
     && (process.platform !== "win32"
       || requiredLibraries.every((name) => existsSync(resolve(root, "lib", `${name}.lib`))))
+    && (process.platform !== "linux" || libraries.some((name) => /^libvpl\.so\.\d+$/u.test(name)))
     && existsSync(resolve(root, "include", "libavcodec", "avcodec.h"))
-    && existsSync(resolve(root, "LICENSE.txt"));
+    && existsSync(resolve(root, "LICENSE.txt"))
+    && (process.platform !== "linux" || existsSync(resolve(root, "VPL-LICENSE.txt")));
 }
 
 function ffmpegLayout(root) {
@@ -373,6 +407,7 @@ function ffmpegLayout(root) {
     root,
     bin: resolve(root, "bin"),
     license: resolve(root, "LICENSE.txt"),
+    additionalLicenses: process.platform === "linux" ? [resolve(root, "VPL-LICENSE.txt")] : [],
     runtimeLibraries: runtimeLibraries(root),
     digest: sourceDigest,
   };
@@ -387,12 +422,10 @@ function runtimeLibraries(root) {
   const directory = resolve(root, "lib");
   if (!existsSync(directory)) return [];
   return readdirSync(directory)
-    .filter((name) => requiredLibraries.some((library) => {
-      if (process.platform === "darwin") {
-        return new RegExp(`^lib${library}\\.\\d+\\.dylib$`, "u").test(name);
-      }
-      return new RegExp(`^lib${library}\\.so\\.\\d+$`, "u").test(name);
-    }))
+    .filter((name) => requiredLibraries.some((library) => process.platform === "darwin"
+      ? new RegExp(`^lib${library}\\.\\d+\\.dylib$`, "u").test(name)
+      : new RegExp(`^lib${library}\\.so\\.\\d+$`, "u").test(name))
+      || process.platform === "linux" && /^libvpl\.so\.\d+$/u.test(name))
     .map((name) => resolve(directory, name));
 }
 
