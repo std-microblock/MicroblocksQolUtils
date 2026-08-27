@@ -25,7 +25,7 @@ and SpeedrunTool are optional runtime integrations rather than hard dependencies
   lobby sections when possible.
 - Embedded Material Symbols and a portable font renderer. Text is rasterized at
   its physical output size and cached; the default font is Microsoft YaHei UI,
-  with a chooser for installed font families.
+  with a chooser for installed font families and 80%-160% font scaling.
 - Windows HiDPI support and optional input-language switching: text fields use a
   Chinese keyboard layout while normal gameplay uses an English layout.
 - Optional removal of room transitions and death animation. Collision boxes have

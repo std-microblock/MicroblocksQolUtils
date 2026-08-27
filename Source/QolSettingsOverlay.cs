@@ -1578,6 +1578,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                     settings.FontFamily = value;
                     settings.FontFile = "";
                 }),
+                Range("字体缩放", () => settings.FontScalePercent, value => settings.FontScalePercent = value,
+                    80, 160, 5, value => $"{value}%"),
                 Toggle("取代原版选关页", () => settings.ReplaceChapterSelect,
                     value => settings.ReplaceChapterSelect = value),
                 Toggle("取代 Everest 模组设置页", () => settings.ReplaceEverestModOptions,
