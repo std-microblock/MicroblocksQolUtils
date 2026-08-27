@@ -144,19 +144,21 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         ChapterEntry? selected = entries.Count == 0 ? null : entries[Math.Clamp(selectedIndex, 0, entries.Count - 1)];
         MaterialPalette palette = MaterialPalette.FromSeed(paletteSeed);
         float eased = Ease.CubeOut(ease);
-        Draw.Rect(0f, 0f, ScreenWidth, ScreenHeight, palette.Scrim * eased);
+        Draw.Rect(0f, 0f, ScreenWidth, ScreenHeight, palette.Scrim * (0.90f * eased));
 
-        float rise = (1f - eased) * 34f;
-        ChapterLayout layout = ChapterLayout.Create(rise);
+        ChapterLayout layout = ChapterLayout.Create(1f - eased);
 
-        MaterialUiKit.Icon("map", new Vector2(layout.Header.X + 20f, layout.Search.Center.Y),
-            34f, palette.Primary, eased, filled: true);
-        MaterialUiKit.Text(UiText("microblocks_qol_chapter_title", "选择章节"),
-            new Vector2(layout.Header.X + 52f, layout.Search.Center.Y), new Vector2(0f, 0.5f),
-            MaterialTextRole.Display, palette.OnSurface, eased);
+        MaterialSplitPageChrome.RenderHeader(layout.Header, "map",
+            UiText("microblocks_qol_chapter_title", "选择章节"), palette, eased);
         RenderSearchBox(palette, layout, eased);
 
         RenderLevelSets(palette, layout, eased);
+        MaterialSplitPageChrome.RenderContentSurface(layout.Content, palette, eased);
+        string levelSetTitle = levelSets.Count == 0
+            ? UiText("microblocks_qol_chapter_level_sets", "地图集")
+            : levelSets[Math.Clamp(selectedLevelSet, 0, levelSets.Count - 1)].Title;
+        MaterialSplitPageChrome.RenderContentHeading(layout.ContentHeader, "folder_open",
+            levelSetTitle, layout.ContentHeader.Width - 56f, palette.Primary, palette, eased);
         RenderCards(palette, layout, eased);
         RenderSelectedMetadata(palette, selected, layout, eased);
         RenderFooter(palette, selected, layout, eased);
@@ -532,35 +534,20 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         ChapterLayout layout,
         float alpha
     ) {
-        MaterialUiKit.Surface(layout.Sidebar,
-            28f, palette with { SurfaceHigh = palette.SurfaceHigh * 0.72f }, alpha);
+        MaterialSplitPageChrome.RenderNavigationSurface(layout.Sidebar, palette, alpha);
         MaterialUiKit.Text(UiText("microblocks_qol_chapter_level_sets", "地图集"),
-            new Vector2(layout.Sidebar.X + MaterialSpacing.Lg,
+            new Vector2(layout.SidebarItems.X + 8f,
                 layout.Sidebar.Y + ChapterLayout.SidebarHeaderHeight / 2f),
-            new Vector2(0f, 0.5f), MaterialTextRole.Section, palette.Primary, alpha);
+            new Vector2(0f, 0.5f), MaterialTextRole.Label, palette.Primary, alpha,
+            scaleOverride: 0.26f);
         levelSetViewport.Render(layout.SidebarItems, () => {
             for (int index = 0; index < levelSets.Count; index++) {
                 string key = $"chapter.levelset.{levelSets[index].Id}";
                 MaterialRect item = layout.SidebarItem(index, levelSetScroll.Offset);
                 if (item.Bottom < layout.SidebarItems.Y || item.Y > layout.SidebarItems.Bottom) continue;
                 bool selected = index == selectedLevelSet;
-                if (selected) {
-                    MaterialUi.RoundedRect(item.X, item.Y, item.Width, item.Height, item.Height / 2f,
-                        Color.Lerp(palette.SurfaceHighest, palette.Primary, 0.18f) * alpha);
-                }
-                motion.RenderStateLayer(key, item, item.Height / 2f,
-                    palette.Primary, alpha);
-                MaterialUiKit.Icon("folder_open", new Vector2(item.X + 27f, item.Center.Y), 21f,
-                    selected ? palette.Primary : palette.OnSurfaceVariant, alpha, filled: selected);
-                SystemTtfFont.DrawVisual(
-                    MaterialTextUtil.Ellipsize(levelSets[index].Title, item.Width - 70f, 0.34f,
-                        selected ? UiFontWeight.Bold : UiFontWeight.Regular),
-                    new Vector2(item.X + 52f, item.Center.Y),
-                    new Vector2(0f, 0.5f),
-                    0.34f,
-                    (selected ? palette.OnSurface : palette.OnSurfaceVariant) * alpha,
-                    weight: selected ? UiFontWeight.Bold : UiFontWeight.Regular
-                );
+                MaterialSplitPageChrome.RenderSimpleTab(motion, key, item, "folder_open",
+                    levelSets[index].Title, selected, palette.Primary, palette, alpha);
             }
         });
     }
@@ -1179,49 +1166,34 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
         MaterialRect Search,
         MaterialRect Sidebar,
         MaterialRect SidebarItems,
+        MaterialRect Content,
+        MaterialRect ContentHeader,
         MaterialRect Cards,
         MaterialRect Details,
         MaterialRect Footer
     ) {
         public const float SidebarHeaderHeight = 64f;
-        public const float SidebarItemHeight = 50f;
-        public const float SidebarItemGap = MaterialSpacing.Xs;
+        public const float SidebarItemHeight = MaterialSplitPageLayout.TabHeight;
+        public const float SidebarItemGap = MaterialSplitPageLayout.TabGap;
 
-        public static ChapterLayout Create(float rise) {
-            MaterialRect frame = new(28f, 24f + rise, 1864f, 1030f);
-            MaterialRect inner = frame.Inset(MaterialSpacing.Xxl, 30f, MaterialSpacing.Xxl, 28f);
-            MaterialRect[] rows = MaterialLayout.Split(
-                inner,
+        public static ChapterLayout Create(float transition) {
+            MaterialSplitPageLayout page = MaterialSplitPageLayout.Create(transition);
+            MaterialRect[] content = MaterialLayout.Split(
+                page.ContentBody,
                 MaterialAxis.Vertical,
                 14f,
-                MaterialTrack.Fixed(72f),
                 MaterialTrack.Flex(),
                 MaterialTrack.Fixed(146f),
                 MaterialTrack.Fixed(44f)
             );
-            MaterialRect[] body = MaterialLayout.Split(
-                rows[1],
-                MaterialAxis.Horizontal,
-                28f,
-                MaterialTrack.Fixed(296f),
-                MaterialTrack.Flex()
-            );
-            MaterialRect search = new(rows[0].Right - 620f, rows[0].Center.Y - 27f, 620f, 54f);
-            MaterialRect sidebarItems = new(
-                body[0].X + MaterialSpacing.Sm,
-                body[0].Y + SidebarHeaderHeight,
-                body[0].Width - MaterialSpacing.Lg,
-                body[0].Height - SidebarHeaderHeight - MaterialSpacing.Md
-            );
-            return new ChapterLayout(frame, rows[0], search, body[0], sidebarItems, body[1], rows[2], rows[3]);
+            MaterialRect search = new(page.Header.Right - 620f, page.Header.Center.Y - 27f, 620f, 54f);
+            return new ChapterLayout(page.Frame, page.Header, search, page.Navigation,
+                page.NavigationItems(SidebarHeaderHeight), page.Content, page.ContentHeader,
+                content[0], content[1], content[2]);
         }
 
-        public MaterialRect SidebarItem(int index, float scrollOffset) => new(
-            SidebarItems.X,
-            SidebarItems.Y + index * (SidebarItemHeight + SidebarItemGap) - scrollOffset,
-            SidebarItems.Width,
-            SidebarItemHeight
-        );
+        public MaterialRect SidebarItem(int index, float scrollOffset) =>
+            MaterialSplitPageLayout.Tab(SidebarItems, index, scrollOffset);
 
         public MaterialRect Card(int index, float scrollOffset) {
             float width = (Cards.Width - CardHorizontalGap * (Columns - 1)) / Columns;

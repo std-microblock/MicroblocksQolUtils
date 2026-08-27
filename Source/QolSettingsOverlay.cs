@@ -15,7 +15,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private const float RecorderSettingHeight = 92f;
     private const float DropdownItemHeight = 42f;
     private const int DropdownMaxVisibleItems = 7;
-    private const float NavigationTitleScale = 0.34f;
     private const float ProfilerRowHeight = 84f;
     private const float ProfilerRowGap = 10f;
     private const float ProfilerScrollStep = (ProfilerRowHeight + ProfilerRowGap) * 2f;
@@ -35,7 +34,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private float inputDelay = 0.16f;
     private float ease;
     private float contentEase = 1f;
-    private float tabIndicatorY;
     private Entity? bindingConfig;
     private SettingRow? editingRow;
     private string editBuffer = "";
@@ -71,7 +69,6 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         this.oldAllowHudHide = oldAllowHudHide;
         tabs = BuildTabs();
         foreach (SettingRow row in tabs.SelectMany(tab => tab.Rows)) row.InitializeVisuals();
-        tabIndicatorY = OverlayLayout.Create(1f).Tab(0, tabs.Count).Y;
         Tag = Tags.HUD | Tags.PauseUpdate | Tags.TransitionUpdate;
         Depth = -2_000_000;
     }
@@ -104,11 +101,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
         if (bindingConfig is not null) return;
 
-        OverlayLayout layout = OverlayLayout.Create(ease);
+        OverlayLayout layout = OverlayLayout.Create(1f - Ease.CubeOut(ease));
         rowScroll.Update(MaxRowScroll(layout));
-        tabIndicatorY = Calc.Approach(tabIndicatorY, layout.Tab(selectedTab, tabs.Count).Y,
-            Math.Max(520f, Math.Abs(tabIndicatorY - layout.Tab(selectedTab, tabs.Count).Y) * 12f)
-                * Engine.RawDeltaTime);
         UpdateRowAnimations(layout);
         UpdateInteractions(layout);
 
@@ -188,12 +182,12 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     public void RenderMaterialContent(bool acrylicActive) {
         if (ease <= 0f) return;
-        OverlayLayout layout = OverlayLayout.Create(ease);
+        OverlayLayout layout = OverlayLayout.Create(1f - Ease.CubeOut(ease));
         MaterialPalette palette = MaterialPalette.FromSeed(new Color(126, 99, 184));
-        Draw.Rect(0f, 0f, ScreenWidth, ScreenHeight, palette.Scrim * (0.92f * ease));
+        Draw.Rect(0f, 0f, ScreenWidth, ScreenHeight, palette.Scrim * (0.90f * ease));
 
-        MaterialUiKit.Text("Microblock 的 QOL 工具", new Vector2(layout.Header.X, layout.Header.Y),
-            Vector2.Zero, MaterialTextRole.Display, palette.OnSurface, ease, scaleOverride: 0.76f);
+        MaterialSplitPageChrome.RenderHeader(layout.Header, "dashboard",
+            "Microblock 的 QOL 工具", palette, ease);
 
         RenderNavigation(layout, palette);
         RenderContent(layout, palette);
@@ -204,40 +198,31 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     }
 
     private void RenderNavigation(OverlayLayout layout, MaterialPalette palette) {
-        MaterialUi.RoundedRect(layout.Navigation.X, layout.Navigation.Y, layout.Navigation.Width,
-            layout.Navigation.Height, 28f, palette.Surface * (0.42f * ease));
-        MaterialUi.RoundedRect(layout.Navigation.X + 10f, tabIndicatorY,
-            layout.Navigation.Width - 20f, OverlayLayout.TabHeight, 22f,
-            Color.Lerp(palette.SurfaceHighest, palette.Primary, 0.18f) * (0.96f * ease));
+        MaterialSplitPageChrome.RenderNavigationSurface(layout.Navigation, palette, ease);
+        MaterialUiKit.Text("功能分类",
+            new Vector2(layout.NavigationItems.X + 8f,
+                layout.Navigation.Y + OverlayLayout.NavigationHeaderHeight / 2f),
+            new Vector2(0f, 0.5f), MaterialTextRole.Label, palette.Primary, ease,
+            scaleOverride: 0.26f);
 
         for (int index = 0; index < tabs.Count; index++) {
             string key = $"settings.tab.{index}";
             MaterialRect tab = layout.Tab(index, tabs.Count);
             bool selected = index == selectedTab;
             SettingsTab settingsTab = tabs[index];
-            motion.RenderStateLayer(key, tab, 22f,
-                palette.Primary, ease);
-            MaterialUiKit.Icon(settingsTab.Icon, new Vector2(tab.X + 28f, tab.Center.Y), 24f,
-                selected ? palette.Primary : palette.OnSurfaceVariant, ease, filled: selected);
-            MaterialUiKit.Text(settingsTab.Title, new Vector2(tab.X + 52f, tab.Center.Y),
-                new Vector2(0f, 0.5f), MaterialTextRole.Label,
-                selected ? palette.OnSurface : palette.OnSurfaceVariant, ease,
-                scaleOverride: NavigationTitleScale);
+            MaterialSplitPageChrome.RenderSimpleTab(motion, key, tab, settingsTab.Icon,
+                settingsTab.Title, selected, palette.Primary, palette, ease);
         }
     }
 
     private static void RenderContentHeading(string title, string icon, OverlayLayout layout,
         MaterialPalette palette, float alpha) {
-        MaterialRect iconTile = new(layout.ContentHeader.X, layout.ContentHeader.Center.Y - 21f, 42f, 42f);
-        MaterialUi.RoundedRect(iconTile.X, iconTile.Y, iconTile.Width, iconTile.Height, 15f,
-            Color.Lerp(palette.SurfaceHighest, palette.Primary, 0.22f) * alpha);
-        MaterialUiKit.Icon(icon, iconTile.Center, 24f, palette.Primary, alpha, filled: true);
-        MaterialUiKit.Text(title, new Vector2(layout.ContentHeader.X + 56f, layout.ContentHeader.Center.Y),
-            new Vector2(0f, 0.5f), MaterialTextRole.Title, palette.OnSurface, alpha,
-            scaleOverride: 0.48f);
+        MaterialSplitPageChrome.RenderContentHeading(layout.ContentHeader, icon, title,
+            layout.ContentHeader.Width - 56f, palette.Primary, palette, alpha);
     }
 
     private void RenderContent(OverlayLayout layout, MaterialPalette palette) {
+        MaterialSplitPageChrome.RenderContentSurface(layout.Body, palette, ease);
         if (IsRecorderTab) {
             RenderRecorderPage(layout, palette);
             return;
@@ -1399,7 +1384,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     }
 
     private void EnsureRowVisible() {
-        OverlayLayout layout = OverlayLayout.Create(ease);
+        OverlayLayout layout = OverlayLayout.Create(1f - Ease.CubeOut(ease));
         int band = selectedRow / Columns;
         float top = band * (RowHeight + RowGap);
         rowScroll.EnsureVisible(top, top + RowHeight, layout.Rows.Height, MaxRowScroll(layout));
@@ -2345,51 +2330,23 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         MaterialRect Panel,
         MaterialRect Header,
         MaterialRect Navigation,
+        MaterialRect NavigationItems,
         MaterialRect Body,
         MaterialRect ContentHeader,
         MaterialRect Rows
     ) {
-        public const float TabHeight = 64f;
-        private const float TabGap = 10f;
+        public const float NavigationHeaderHeight = 64f;
 
-        public static OverlayLayout Create(float ease) {
-            float offsetY = (1f - Ease.CubeOut(ease)) * 26f;
-            MaterialRect panel = new MaterialRect(100f, 40f + offsetY, 1720f, 1000f);
-            MaterialRect inner = panel.Inset(34f, 28f);
-            MaterialRect[] vertical = MaterialLayout.Split(
-                inner,
-                MaterialAxis.Vertical,
-                MaterialSpacing.Md,
-                MaterialTrack.Fixed(82f),
-                MaterialTrack.Flex()
-            );
-            MaterialRect[] main = MaterialLayout.Split(
-                vertical[1],
-                MaterialAxis.Horizontal,
-                MaterialSpacing.Lg,
-                MaterialTrack.Fixed(272f),
-                MaterialTrack.Flex()
-            );
-            MaterialRect body = main[1];
-            MaterialRect[] content = MaterialLayout.Split(
-                body,
-                MaterialAxis.Vertical,
-                MaterialSpacing.Sm,
-                MaterialTrack.Fixed(52f),
-                MaterialTrack.Flex()
-            );
-            MaterialRect rows = content[1].Inset(0f, 0f, 16f, 0f);
-            return new OverlayLayout(panel, vertical[0], main[0], body, content[0], rows);
+        public static OverlayLayout Create(float transition) {
+            MaterialSplitPageLayout page = MaterialSplitPageLayout.Create(transition);
+            return new OverlayLayout(page.Frame, page.Header, page.Navigation,
+                page.NavigationItems(NavigationHeaderHeight), page.Content, page.ContentHeader,
+                page.ContentBody);
         }
 
         public MaterialRect Tab(int index, int count) {
             _ = count;
-            return new MaterialRect(
-                Navigation.X + 10f,
-                Navigation.Y + 12f + index * (TabHeight + TabGap),
-                Navigation.Width - 20f,
-                TabHeight
-            );
+            return MaterialSplitPageLayout.Tab(NavigationItems, index);
         }
 
         public MaterialRect Row(int index, float scrollOffset) {
