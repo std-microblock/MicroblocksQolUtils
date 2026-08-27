@@ -194,12 +194,9 @@ public sealed class MaterialChapterSelect : Oui, IMaterialAcrylicPage {
             return;
         }
 
-        if (MInput.Keyboard.Pressed(Keys.Tab)) {
-            int direction = MInput.Keyboard.Check(Keys.LeftShift, Keys.RightShift) ? -1 : 1;
-            SelectLevelSet(selectedLevelSet + direction);
-        }
-
-        if (entries.Count > 0) {
+        if (MaterialTabNavigation.TryGetShiftVerticalDirection(out int tabDirection)) {
+            SelectLevelSet(selectedLevelSet + tabDirection);
+        } else if (entries.Count > 0) {
             if (Input.MenuLeft.Pressed) MoveSelection(-Vector2.UnitX);
             else if (Input.MenuRight.Pressed) MoveSelection(Vector2.UnitX);
             else if (Input.MenuUp.Pressed) MoveSelection(-Vector2.UnitY);
