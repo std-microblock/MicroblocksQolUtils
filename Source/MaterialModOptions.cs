@@ -17,8 +17,8 @@ namespace Celeste.Mod.MicroblocksQolUtils;
 public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private const float ScreenWidth = 1920f;
     private const float ScreenHeight = 1080f;
-    private const float TabHeight = 60f;
-    private const float TabGap = 4f;
+    private const float TabHeight = MaterialSplitPageLayout.TabHeight;
+    private const float TabGap = MaterialSplitPageLayout.TabGap;
     private const float RowGap = 10f;
     private const float StandardRowHeight = 78f;
     private const float DescribedTitleHeight = 48f;
@@ -314,11 +314,8 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         MaterialPalette palette = MaterialPalette.FromSeed(new Color(126, 99, 184));
         Draw.Rect(0f, 0f, ScreenWidth, ScreenHeight, palette.Scrim * (0.90f * alpha));
 
-        MaterialUiKit.Icon("extension", new Vector2(layout.Header.X + 20f, layout.Header.Center.Y),
-            34f, palette.Primary, alpha, filled: true);
-        MaterialUiKit.Text(UiText("microblocks_qol_modoptions_title", "模组设置"),
-            new Vector2(layout.Header.X + 52f, layout.Header.Center.Y), new Vector2(0f, 0.5f),
-            MaterialTextRole.Display, palette.OnSurface, alpha, scaleOverride: 0.72f);
+        MaterialSplitPageChrome.RenderHeader(layout.Header, "extension",
+            UiText("microblocks_qol_modoptions_title", "模组设置"), palette, alpha);
         int shownTabs = FilteredTabIndices().Count;
         string tabCount = shownTabs == tabs.Count ? tabs.Count.ToString() : $"{shownTabs}/{tabs.Count}";
         MaterialUiKit.Text($"{tabCount} {UiText("microblocks_qol_modoptions_tabs", "个分类")}",
@@ -1056,8 +1053,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     }
 
     private void RenderTabs(ModOptionsLayout layout, MaterialPalette palette, float alpha) {
-        MaterialUi.RoundedRect(layout.Navigation.X, layout.Navigation.Y, layout.Navigation.Width,
-            layout.Navigation.Height, 28f, palette.Surface * (0.42f * alpha));
+        MaterialSplitPageChrome.RenderNavigationSurface(layout.Navigation, palette, alpha);
         RenderSearchBox(layout.TabSearch, tabSearchText, searchTarget == SearchTarget.Tabs,
             UiText("microblocks_qol_modoptions_search_tabs", "搜索模组…"), "mod-options.search.tabs",
             palette, alpha);
@@ -1075,14 +1071,8 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                 if (rect.Bottom < layout.NavigationItems.Y || rect.Y > layout.NavigationItems.Bottom) continue;
                 bool selected = index == selectedTab;
                 TabVisual visual = TabVisualFor(tab, palette);
-                if (selected) {
-                    MaterialUi.RoundedRect(rect.X, rect.Y, rect.Width, rect.Height, 20f,
-                        Color.Lerp(palette.SurfaceHighest, palette.Primary, 0.18f) * (0.98f * alpha));
-                }
-                motion.RenderStateLayer($"mod-options.tab.{tab.Id}", rect, 20f,
-                    palette.Primary, alpha);
-                MaterialUiKit.Icon(visual.Icon, new Vector2(rect.X + 30f, rect.Center.Y), 23f,
-                    selected ? palette.Primary : palette.OnSurfaceVariant, alpha, filled: selected);
+                MaterialSplitPageChrome.RenderTabLead(motion, $"mod-options.tab.{tab.Id}", rect,
+                    visual.Icon, selected, palette.Primary, palette, alpha);
                 float titleWidth = rect.Width - (tab.Pinnable ? 122f : 78f);
                 string title = MaterialTextUtil.Ellipsize(tab.Title, titleWidth, 0.29f, UiFontWeight.Bold);
                 float titleY = tab.Version.Length == 0 ? rect.Center.Y : rect.Center.Y - 9f;
@@ -1114,17 +1104,10 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private void RenderRows(ModOptionsLayout layout, MaterialPalette palette, float alpha) {
         ModTab tab = tabs[selectedTab];
         TabVisual visual = TabVisualFor(tab, palette);
-        MaterialUi.RoundedRect(layout.Content.X, layout.Content.Y, layout.Content.Width,
-            layout.Content.Height, 28f, palette.Surface * (0.38f * alpha));
-        MaterialRect headerIcon = new(layout.ContentHeader.X, layout.ContentHeader.Center.Y - 21f, 42f, 42f);
-        MaterialUi.RoundedRect(headerIcon.X, headerIcon.Y, headerIcon.Width, headerIcon.Height, 15f,
-            Color.Lerp(palette.SurfaceHighest, visual.Accent, 0.26f) * alpha);
-        MaterialUiKit.Icon(visual.Icon, headerIcon.Center, 24f, visual.Accent, alpha, filled: true);
+        MaterialSplitPageChrome.RenderContentSurface(layout.Content, palette, alpha);
         float titleWidth = Math.Max(140f, layout.SettingSearch.X - layout.ContentHeader.X - 210f);
-        string shownTitle = MaterialTextUtil.Ellipsize(tab.Title, titleWidth, 0.47f, UiFontWeight.Bold);
-        MaterialUiKit.Text(shownTitle,
-            new Vector2(layout.ContentHeader.X + 56f, layout.ContentHeader.Center.Y), new Vector2(0f, 0.5f),
-            MaterialTextRole.Title, palette.OnSurface, alpha, scaleOverride: 0.47f);
+        MaterialSplitPageChrome.RenderContentHeading(layout.ContentHeader, visual.Icon, tab.Title,
+            titleWidth, visual.Accent, palette, alpha);
         if (tab.Version.Length > 0) {
             MaterialUiKit.Chip(tab.Version, new Vector2(layout.SettingSearch.X - 16f, layout.ContentHeader.Y + 13f),
                 palette, selected: false, alpha);
@@ -2031,57 +2014,26 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         MaterialRect Rows
     ) {
         public static ModOptionsLayout Create(float transition) {
-            float rise = transition * 32f;
-            MaterialRect frame = new(28f, 24f + rise, 1864f, 1030f);
-            MaterialRect inner = frame.Inset(38f, 28f, 38f, 26f);
-            MaterialRect[] vertical = MaterialLayout.Split(
-                inner,
-                MaterialAxis.Vertical,
-                14f,
-                MaterialTrack.Fixed(72f),
-                MaterialTrack.Flex()
-            );
-            MaterialRect[] body = MaterialLayout.Split(
-                vertical[1],
-                MaterialAxis.Horizontal,
-                24f,
-                MaterialTrack.Fixed(330f),
-                MaterialTrack.Flex()
-            );
+            MaterialSplitPageLayout page = MaterialSplitPageLayout.Create(transition);
             MaterialRect tabSearch = new(
-                body[0].X + 12f,
-                body[0].Y + 14f,
-                body[0].Width - 24f,
+                page.Navigation.X + 12f,
+                page.Navigation.Y + 14f,
+                page.Navigation.Width - 24f,
                 52f
             );
-            MaterialRect navigationItems = new(
-                body[0].X + 12f,
-                body[0].Y + 116f,
-                body[0].Width - 24f,
-                body[0].Height - 130f
-            );
-            MaterialRect contentHeader = new(body[1].X + 24f, body[1].Y + 12f, body[1].Width - 48f, 58f);
+            MaterialRect navigationItems = page.NavigationItems(116f);
+            MaterialRect contentHeader = page.ContentHeader;
             MaterialRect settingSearch = new(
                 contentHeader.Right - 430f,
                 contentHeader.Center.Y - 23f,
                 430f,
                 46f
             );
-            MaterialRect rows = new(
-                body[1].X + 24f,
-                body[1].Y + 82f,
-                body[1].Width - 56f,
-                body[1].Height - 100f
-            );
-            return new ModOptionsLayout(frame, vertical[0], body[0], tabSearch, navigationItems,
-                body[1], contentHeader, settingSearch, rows);
+            return new ModOptionsLayout(page.Frame, page.Header, page.Navigation, tabSearch,
+                navigationItems, page.Content, contentHeader, settingSearch, page.ContentBody);
         }
 
-        public MaterialRect Tab(int index, float scrollOffset) => new(
-            NavigationItems.X,
-            NavigationItems.Y + index * (TabHeight + TabGap) - scrollOffset,
-            NavigationItems.Width,
-            TabHeight
-        );
+        public MaterialRect Tab(int index, float scrollOffset) =>
+            MaterialSplitPageLayout.Tab(NavigationItems, index, scrollOffset);
     }
 }
