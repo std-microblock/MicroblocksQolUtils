@@ -13,6 +13,15 @@ public static class InstantDeaths {
     );
     private static PlayerDeadBody? reloadedBody;
 
+    public static void Load() {
+        On.Celeste.Level.Reload += LevelReload;
+    }
+
+    public static void Unload() {
+        On.Celeste.Level.Reload -= LevelReload;
+        Reset();
+    }
+
     public static void AfterEngineUpdate() {
         if (!MicroblocksQolUtilsModule.Settings.RemoveDeathAnimation
             || Engine.Scene is not Level level) {
@@ -32,6 +41,12 @@ public static class InstantDeaths {
 
         if (ReferenceEquals(body, reloadedBody)) return;
         reloadedBody = body;
+
+        // End can reload the level before the vanilla death coroutine has finished. In
+        // particular, a manual retry may unload the dead body while DeathRoutine is still
+        // scheduled for a later update, where it then dereferences the unloaded level.
+        // The animation is being skipped anyway, so stop that coroutine before ending.
+        CancelDeathRoutine(body);
 
         // DeathRoutine is commonly detoured by other mods, so replacing its enumerator is
         // not reliable. Run after the frame instead: the body is in the scene, and recorder
@@ -56,5 +71,19 @@ public static class InstantDeaths {
 
     public static void Reset() {
         reloadedBody = null;
+    }
+
+    private static void LevelReload(On.Celeste.Level.orig_Reload orig, Level self) {
+        if (MicroblocksQolUtilsModule.Settings.RemoveDeathAnimation) {
+            foreach (Entity entity in self.Tracker.GetEntitiesTrackIfNeeded<PlayerDeadBody>()) {
+                if (entity is PlayerDeadBody body) CancelDeathRoutine(body);
+            }
+        }
+
+        orig(self);
+    }
+
+    private static void CancelDeathRoutine(PlayerDeadBody body) {
+        body.Get<Coroutine>()?.Cancel();
     }
 }
