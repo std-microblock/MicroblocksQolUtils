@@ -20,7 +20,7 @@ MiaoNet、CollabUtils2 和 SpeedrunTool 都是运行时可选集成，不是硬�
 - CollabUtils2 集成是反射式的：默认隐藏 Collab 地图和 Gym；打开高级选项后
   可以显示它们。多大厅 Collab 会按 Lobby 分组，并可以折叠整个 Lobby。
 - 内置 Material Symbols 图标和跨平台字体渲染。文本按实际像素栅格化并做缓存，
-  默认字体是 Microsoft YaHei UI，可以从已安装字体中选择。
+  默认字体是 Microsoft YaHei UI，可以从已安装字体中选择，并支持 80%–160% 字体缩放。
 - Windows HiDPI 支持、输入法自动切换（文本输入使用中文布局，正常游戏使用英文布局）。
 - 可选移除房间过渡和死亡动画；碰撞箱支持隐藏、叠加显示、仅显示碰撞箱三种模式。
 - 暂停菜单中提供“Microblock 的 QOL 工具”入口。

@@ -74,6 +74,10 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue("Microsoft YaHei UI")]
     public string FontFamily { get; set; } = "Microsoft YaHei UI";
 
+    [SettingRange(80, 160)]
+    [DefaultValue(120)]
+    public int FontScalePercent { get; set; } = 120;
+
     [SettingIgnore]
     [DefaultValue("")]
     public string FontFile { get; set; } = "";
