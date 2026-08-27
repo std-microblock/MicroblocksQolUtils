@@ -157,7 +157,119 @@ pub fn font_families() -> Result<Vec<String>, String> {
         .collect();
     families.sort_by_key(|name| name.to_lowercase());
     families.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
+    // The managed catalog preserves this first entry as the platform recommendation before
+    // alphabetizing the font picker. Avoid making an arbitrary Latin-only family the fallback.
+    if let Some(recommended) = recommended_font_family(&state.database) {
+        if let Some(index) = families
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(&recommended))
+        {
+            let recommended = families.remove(index);
+            families.insert(0, recommended);
+        }
+    }
     Ok(families)
+}
+
+#[cfg(not(windows))]
+fn recommended_font_family(database: &Database) -> Option<String> {
+    const PREFERRED_CJK_FAMILIES: &[&str] = &[
+        "Microsoft YaHei UI",
+        "Microsoft YaHei",
+        "Noto Sans CJK SC",
+        "Noto Sans SC",
+        "Source Han Sans CN",
+        "Source Han Sans SC",
+        "WenQuanYi Micro Hei",
+        "WenQuanYi Zen Hei",
+        "PingFang SC",
+        "Hiragino Sans GB",
+        "Droid Sans Fallback",
+        "Arial Unicode MS",
+    ];
+
+    // Prefer the user's fontconfig sans-serif choice when it actually covers Chinese.
+    let generic_families = [Family::SansSerif];
+    if let Some(id) = database.query(&Query {
+        families: &generic_families,
+        weight: Weight::NORMAL,
+        stretch: Stretch::Normal,
+        style: Style::Normal,
+    }) {
+        if font_cjk_coverage(database, id) == CJK_SAMPLE.len() {
+            if let Some(family) = database
+                .face(id)
+                .and_then(|face| face.families.first())
+                .map(|(name, _)| name.clone())
+            {
+                return Some(family);
+            }
+        }
+    }
+
+    for family_name in PREFERRED_CJK_FAMILIES {
+        let families = [Family::Name(family_name)];
+        let Some(id) = database.query(&Query {
+            families: &families,
+            weight: Weight::NORMAL,
+            stretch: Stretch::Normal,
+            style: Style::Normal,
+        }) else {
+            continue;
+        };
+        if font_cjk_coverage(database, id) == CJK_SAMPLE.len() {
+            return Some((*family_name).to_owned());
+        }
+    }
+
+    database
+        .faces()
+        .filter_map(|face| {
+            let family = face.families.first()?.0.clone();
+            let coverage = font_cjk_coverage(database, face.id);
+            if coverage == 0 {
+                return None;
+            }
+            let style_penalty = usize::from(face.style != Style::Normal);
+            let weight_penalty = face.weight.0.abs_diff(Weight::NORMAL.0) as usize;
+            let monospace_penalty = usize::from(face.monospaced);
+            Some((
+                family.to_lowercase(),
+                family,
+                coverage,
+                style_penalty,
+                weight_penalty,
+                monospace_penalty,
+            ))
+        })
+        .max_by(|left, right| {
+            left.2
+                .cmp(&right.2)
+                .then_with(|| right.3.cmp(&left.3))
+                .then_with(|| right.4.cmp(&left.4))
+                .then_with(|| right.5.cmp(&left.5))
+                .then_with(|| right.0.cmp(&left.0))
+        })
+        .map(|(_, family, _, _, _, _)| family)
+}
+
+#[cfg(not(windows))]
+const CJK_SAMPLE: &[char] = &['中', '文', '简', '体', '界', '面'];
+
+#[cfg(not(windows))]
+fn font_cjk_coverage(database: &Database, id: fontdb::ID) -> usize {
+    database
+        .with_face_data(id, |data, index| {
+            let Some(font) = FontRef::from_index(data, index as usize) else {
+                return 0;
+            };
+            let charmap = font.charmap();
+            CJK_SAMPLE
+                .iter()
+                .filter(|character| charmap.map(**character) != 0)
+                .count()
+        })
+        .unwrap_or(0)
 }
 
 #[derive(Clone)]
