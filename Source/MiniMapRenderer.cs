@@ -9,6 +9,7 @@ public static class MiniMapRenderer {
     private const float ScreenWidth = 1920f;
     private const float Margin = 22f;
     private static readonly ConditionalWeakTable<SolidTiles, SolidRunCache> SolidRuns = new();
+    private static readonly ConditionalWeakTable<Level, MapFocusState> MapFocusStates = new();
     private static Texture2D? solidPixel;
 
     public static void Dispose() {
@@ -21,7 +22,7 @@ public static class MiniMapRenderer {
         if (!settings.MiniMapEnabled) return 0f;
         Player? player = level.Tracker.GetEntity<Player>();
         SolidTiles? solids = level.Tracker.GetEntity<SolidTiles>();
-        if (player is null || solids is null) return 0f;
+        if (solids is null || !TryResolvePlayerCenter(level, player, out Vector2 playerCenter)) return 0f;
 
         float size = settings.MiniMapSize;
         float radius = size / 2f;
@@ -46,21 +47,21 @@ public static class MiniMapRenderer {
             ? AdaptiveForeground(mapBackdrop) * 0.9f
             : Color.SlateGray * 0.9f;
         if (settings.MiniMapRoomBackgrounds && settings.MiniMapRoomBackgroundOpacity > 0)
-            DrawRoomBackgrounds(level, player.Center, center, radius, pixelsPerWorld, settings.MiniMapShape,
+            DrawRoomBackgrounds(level, playerCenter, center, radius, pixelsPerWorld, settings.MiniMapShape,
                 settings.MiniMapRoomBackgroundOpacity / 10f);
         if (settings.MiniMapRoomBounds) {
             IReadOnlySet<string>? route = settings.MiniMapHighlightRoute
                 ? RoomRouteCache.RouteToGoal(level)
                 : null;
-            DrawRoomBounds(level, player.Center, center, radius, pixelsPerWorld, settings.MiniMapShape,
+            DrawRoomBounds(level, playerCenter, center, radius, pixelsPerWorld, settings.MiniMapShape,
                 terrainColor * 0.52f, palette.Primary * 0.9f, new Color(255, 190, 64) * 0.95f, route);
         }
-        DrawSolids(solids, player.Center, center, radius, pixelsPerWorld, settings.MiniMapShape, terrainColor);
+        DrawSolids(solids, playerCenter, center, radius, pixelsPerWorld, settings.MiniMapShape, terrainColor);
         if (settings.MiniMapCollectibles && level.Session.MapData is MapData map)
-            DrawCollectibles(map, level, player.Center, center, radius, pixelsPerWorld, settings);
+            DrawCollectibles(map, level, playerCenter, center, radius, pixelsPerWorld, settings);
         foreach (RemotePlayer remote in MiaoNetBridge.Players) {
             if (!settings.ShowMiaoNetPlayers) break;
-            DrawRemote(remote, player.Center, center, radius, pixelsPerWorld, settings);
+            DrawRemote(remote, playerCenter, center, radius, pixelsPerWorld, settings);
         }
         DrawLocalPlayer(center, settings.MiniMapAvatarShape);
 
@@ -113,6 +114,28 @@ public static class MiniMapRenderer {
             reservedBottom = textPosition.Y + measured.Y + 5f;
         }
         return reservedBottom;
+    }
+
+    private static bool TryResolvePlayerCenter(Level level, Player? player, out Vector2 center) {
+        MapFocusState state = MapFocusStates.GetValue(level, static _ => new MapFocusState());
+        if (player is not null) {
+            center = player.Center;
+            state.LastPlayerCenter = center;
+            state.HasPlayerCenter = true;
+            return true;
+        }
+
+        PlayerDeadBody? deadBody = level.Entities.FindFirst<PlayerDeadBody>();
+        if (deadBody is null) {
+            center = default;
+            return false;
+        }
+
+        // Player.Die removes the Player immediately and replaces it with a body for the
+        // animation. Keep using the exact collider center captured on the preceding frame;
+        // Position is only a fallback for a death before this HUD has rendered once.
+        center = state.HasPlayerCenter ? state.LastPlayerCenter : deadBody.Position;
+        return true;
     }
 
     private static float ResolveScale(Level level, float size, int zoom) {
@@ -583,5 +606,10 @@ public static class MiniMapRenderer {
                 }
             }
         }
+    }
+
+    private sealed class MapFocusState {
+        public Vector2 LastPlayerCenter;
+        public bool HasPlayerCenter;
     }
 }
