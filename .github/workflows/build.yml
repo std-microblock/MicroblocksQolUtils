@@ -140,7 +140,8 @@ jobs:
             target: x86_64-pc-windows-msvc
             artifact: MicroblocksQolUtils-windows-x64
           - name: Linux x64
-            runner: ubuntu-22.04
+            # scap's VideoInfoRaw binding matches PipeWire 0.3.65 and newer.
+            runner: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
             artifact: MicroblocksQolUtils-linux-x64
           - name: macOS x64
