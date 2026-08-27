@@ -186,12 +186,14 @@ node scripts/build-qol-mod.mjs --target x86_64-unknown-linux-gnu
 node scripts/build-qol-mod.mjs --target x86_64-apple-darwin
 ~~~
 
-Windows、Linux 和 macOS 包都包含录制后端及其 FFmpeg shared runtime；只有
-Windows 系统通知仍是平台专用功能。运行时不会打包或调用 ffmpeg 可执行文件。
+Windows、Linux 和 macOS 构建都包含录制后端及其 FFmpeg shared runtime；合并
+后的通用包按 Everest 约定分别放入 `Code/lib-win-x64`、`Code/lib-linux` 和
+`Code/lib-osx`，由 Everest 只加载当前平台的版本。只有 Windows 系统通知仍是
+平台专用功能。运行时不会打包或调用 ffmpeg 可执行文件。
 
 GitHub Actions 会运行 Rust 格式检查和测试，并构建 Windows x64、Linux x64
-和 macOS x64 包。master 的每个提交会更新 nightly 预发布，v* 标签会发布相同的
-三个平台构建产物。
+和 macOS x64 版本，再将三个版本合并为一个 `MicroblocksQolUtils.zip` 通用包。
+master 的每个提交会更新 nightly 预发布，v* 标签会发布相同的通用包。
 
 ## 依赖说明
 
