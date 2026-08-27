@@ -130,6 +130,9 @@ if (ffmpeg) {
     copyFileSync(dependency, resolve(packagedNativeDirectory, dependency.split(/[\\/]/u).at(-1)));
   }
   cpSync(ffmpeg.license, resolve(output, "Code", "FFmpeg-LICENSE.txt"));
+  for (const license of ffmpeg.additionalLicenses) {
+    cpSync(license, resolve(output, "Code", basename(license)));
+  }
 }
 for (const path of ["everest.yaml", "Dialog", "Graphics"]) {
   const source = resolve(root, path);

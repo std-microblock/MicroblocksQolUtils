@@ -100,10 +100,11 @@ The portal path works on Wayland and PipeWire-enabled X11 desktops.
   %USERPROFILE%\Videos\Celeste\microblocks-qol-recordings. It can be changed in
   settings. Completed files are stored under full/<area> and deaths/<area>;
   each MP4 also has a .timeline.json sidecar.
-- Video prefers the platform H.264 encoder (Media Foundation on Windows and
-  VideoToolbox on macOS). Linux falls back to MPEG-4 Part 2 in the MP4 container
-  when no directly usable H.264 encoder is available. Audio uses AAC. Frame rate,
-  bitrate, encoder preference, UI SFX capture, and retention limits are configurable.
+- Video prefers the platform H.264 encoder (Media Foundation on Windows,
+  VideoToolbox on macOS, and NVENC/QSV on Linux). Linux falls back to MPEG-4 Part 2
+  in the MP4 container when no directly usable H.264 encoder is available. Audio
+  uses AAC. Frame rate, bitrate, encoder preference, UI SFX capture, and retention
+  limits are configurable.
 - FMOD DSP taps capture gameplay_sfx, music, and optional ui_sfx. Chunks are
   streamed by bus to an .sfxchunks sidecar, then SFX edits and the BGM post-mix
   timeline are handled separately during finalization instead of buffering an
