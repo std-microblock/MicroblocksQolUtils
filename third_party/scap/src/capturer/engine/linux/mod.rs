@@ -32,7 +32,7 @@ use pw::{
 
 use crate::{
     capturer::Options,
-    frame::{BGRxFrame, Frame, RGBFrame, RGBxFrame, XBGRFrame},
+    frame::{BGRxFrame, Frame, RGBFrame, RGBxFrame, VideoFrame, XBGRFrame},
 };
 
 use self::{error::LinCapError, portal::ScreenCastPortal};
@@ -162,42 +162,37 @@ fn process_callback(stream: &StreamRef, user_data: &mut ListenerUserData) {
                 };
                 frame_data.extend_from_slice(bytes);
             }
-            let timestamp = if timestamp >= 0 {
-                timestamp as u64
+            let display_time = if timestamp >= 0 {
+                UNIX_EPOCH + Duration::from_nanos(timestamp as u64)
             } else {
                 SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos()
-                    .try_into()
-                    .unwrap_or(u64::MAX)
             };
 
             if let Err(e) = match format {
-                VideoFormat::RGBx => user_data.tx.send(Frame::RGBx(RGBxFrame {
-                    display_time: timestamp,
+                VideoFormat::RGBx => user_data.tx.send(Frame::Video(VideoFrame::RGBx(RGBxFrame {
+                    display_time,
                     width: frame_size.width as i32,
                     height: frame_size.height as i32,
                     data: frame_data,
-                })),
-                VideoFormat::RGB => user_data.tx.send(Frame::RGB(RGBFrame {
-                    display_time: timestamp,
+                }))),
+                VideoFormat::RGB => user_data.tx.send(Frame::Video(VideoFrame::RGB(RGBFrame {
+                    display_time,
                     width: frame_size.width as i32,
                     height: frame_size.height as i32,
                     data: frame_data,
-                })),
-                VideoFormat::xBGR => user_data.tx.send(Frame::XBGR(XBGRFrame {
-                    display_time: timestamp,
+                }))),
+                VideoFormat::xBGR => user_data.tx.send(Frame::Video(VideoFrame::XBGR(XBGRFrame {
+                    display_time,
                     width: frame_size.width as i32,
                     height: frame_size.height as i32,
                     data: frame_data,
-                })),
-                VideoFormat::BGRx => user_data.tx.send(Frame::BGRx(BGRxFrame {
-                    display_time: timestamp,
+                }))),
+                VideoFormat::BGRx => user_data.tx.send(Frame::Video(VideoFrame::BGRx(BGRxFrame {
+                    display_time,
                     width: frame_size.width as i32,
                     height: frame_size.height as i32,
                     data: frame_data,
-                })),
+                }))),
                 _ => panic!("Unsupported frame format received"),
             } {
                 eprintln!("{e}");
