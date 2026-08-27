@@ -809,13 +809,7 @@ fn captured_frame(frame: scap::frame::VideoFrame) -> Option<CapturedFrame> {
     }
     let mut bgra = Vec::with_capacity(pixel_count * 4);
     for pixel in data.chunks_exact(bytes_per_pixel).take(pixel_count) {
-        let (red, green, blue) = match layout {
-            3 | 4 => (pixel[0], pixel[1], pixel[2]),
-            5 => (pixel[3], pixel[2], pixel[1]),
-            6 => (pixel[2], pixel[1], pixel[0]),
-            _ => unreachable!(),
-        };
-        bgra.extend_from_slice(&[blue, green, red, u8::MAX]);
+        bgra.extend_from_slice(&pipewire_pixel_to_bgra(pixel, layout)?);
     }
     Some(CapturedFrame {
         width: width.max(0) as u32,
@@ -828,6 +822,32 @@ fn captured_frame(frame: scap::frame::VideoFrame) -> Option<CapturedFrame> {
             .unwrap_or(u64::MAX),
         bgra,
     })
+}
+
+#[cfg(any(test, target_os = "linux"))]
+fn pipewire_pixel_to_bgra(pixel: &[u8], layout: u8) -> Option<[u8; 4]> {
+    let (red, green, blue) = if layout == 3 {
+        (*pixel.first()?, *pixel.get(1)?, *pixel.get(2)?)
+    } else {
+        // SPA names packed 32-bit formats in big-endian component order, while the PipeWire
+        // buffer stores native-endian words. Decode the word before extracting its components.
+        let packed = u32::from_ne_bytes(pixel.try_into().ok()?);
+        match layout {
+            4 => (
+                (packed >> 24) as u8,
+                (packed >> 16) as u8,
+                (packed >> 8) as u8,
+            ), // RGBx
+            5 => (packed as u8, (packed >> 8) as u8, (packed >> 16) as u8), // xBGR
+            6 => (
+                (packed >> 8) as u8,
+                (packed >> 16) as u8,
+                (packed >> 24) as u8,
+            ), // BGRx
+            _ => return None,
+        }
+    };
+    Some([blue, green, red, u8::MAX])
 }
 
 #[cfg(target_os = "linux")]
@@ -1389,6 +1409,26 @@ mod tests {
         assert!(queue.push_latest(frame(3)));
         assert_eq!(queue.pop().unwrap().captured_at_unix_nanos, 2);
         assert_eq!(queue.pop().unwrap().captured_at_unix_nanos, 3);
+    }
+
+    #[test]
+    fn pipewire_packed_pixels_follow_native_endian_order() {
+        assert_eq!(
+            pipewire_pixel_to_bgra(&[0x11, 0x22, 0x33], 3),
+            Some([0x33, 0x22, 0x11, 0xff])
+        );
+        assert_eq!(
+            pipewire_pixel_to_bgra(&0x11223300_u32.to_ne_bytes(), 4),
+            Some([0x33, 0x22, 0x11, 0xff])
+        );
+        assert_eq!(
+            pipewire_pixel_to_bgra(&0x00332211_u32.to_ne_bytes(), 5),
+            Some([0x33, 0x22, 0x11, 0xff])
+        );
+        assert_eq!(
+            pipewire_pixel_to_bgra(&0x33221100_u32.to_ne_bytes(), 6),
+            Some([0x33, 0x22, 0x11, 0xff])
+        );
     }
 
     #[test]
