@@ -30,6 +30,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private const int DropdownMaxVisibleItems = 8;
     private const int DropdownOptionLimit = 24;
     private const int SearchTextLimit = 80;
+    private const float CompositePopupHorizontalPadding = 48f;
 
     private static readonly string[] TabIconPool = [
         "bolt", "layers", "map", "route", "sports_esports", "timer", "visibility",
@@ -50,6 +51,8 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
     private static Hook? gotoRoutineHook;
     private static bool hookFailed;
+    private static readonly FieldInfo? textMenuWidthField = typeof(TextMenu).GetField("width",
+        BindingFlags.Instance | BindingFlags.NonPublic);
 
     private readonly List<ModTab> tabs = [];
     private readonly List<ModTab> sourceTabs = [];
@@ -911,6 +914,14 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
             return;
         }
 
+        if (!Input.MenuConfirm.Pressed
+            && (Input.MenuCancel.Pressed || Input.ESC.Pressed
+                || MInput.Keyboard.Pressed(Keys.Escape))) {
+            ConsumeCompositePopupCancelInput();
+            CloseCompositePopup();
+            return;
+        }
+
         MaterialRect popup = CompositePopupRect(layout);
         MaterialRect body = CompositePopupBody(layout);
         MaterialRect close = CompositePopupCloseRect(layout);
@@ -1491,9 +1502,18 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
         compositePopupViewport.Render(body, () => {
             float itemHeight = Math.Max(ActiveFont.LineHeight, item.Height());
-            float x = body.X + Math.Max(18f, (body.Width - menu.Width) / 2f);
-            float y = body.Y - compositePopupScroll.Offset + itemHeight / 2f;
-            item.Render(new Vector2(x, y), highlighted: true);
+            float originalWidth = menu.Width;
+            float renderWidth = Math.Min(originalWidth,
+                Math.Max(320f, body.Width - CompositePopupHorizontalPadding * 2f));
+            bool widthOverridden = TrySetTextMenuRenderWidth(menu, renderWidth);
+            try {
+                float actualWidth = widthOverridden ? renderWidth : originalWidth;
+                float x = body.X + Math.Max(18f, (body.Width - actualWidth) / 2f);
+                float y = body.Y - compositePopupScroll.Offset + itemHeight / 2f;
+                item.Render(new Vector2(x, y), highlighted: true);
+            } finally {
+                if (widthOverridden) TrySetTextMenuRenderWidth(menu, originalWidth);
+            }
         });
 
         float maximum = MaxCompositePopupScroll(layout);
@@ -1642,6 +1662,19 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
 
     private static bool IsCompositeMenu(TextMenu.Item item) =>
         item is TextMenuExt.SubMenu or TextMenuExt.OptionSubMenu;
+
+    private static void ConsumeCompositePopupCancelInput() {
+        Input.MenuCancel.ConsumePress();
+        Input.MenuCancel.ConsumeBuffer();
+        Input.ESC.ConsumePress();
+        Input.ESC.ConsumeBuffer();
+    }
+
+    private static bool TrySetTextMenuRenderWidth(TextMenu target, float width) {
+        if (textMenuWidthField?.FieldType != typeof(float)) return false;
+        textMenuWidthField.SetValue(target, width);
+        return true;
+    }
 
     private static bool TryGetCompositeContents(TextMenu.Item item, out float titleHeight,
         out float spacing, out List<TextMenu.Item> items, out TextMenu.Item? current) {
