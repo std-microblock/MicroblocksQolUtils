@@ -1583,8 +1583,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                     value => settings.ReplaceEverestModOptions = value),
                 Toggle("选关页显示 Collab 地图", () => settings.ChapterSelectShowCollabMaps,
                     value => settings.ChapterSelectShowCollabMaps = value),
-                Toggle("输入框中文、游戏内英文输入法", () => settings.AutoSwitchInputLanguage,
-                    value => settings.AutoSwitchInputLanguage = value),
+                ..WindowsSystemRows(settings),
                 Toggle("完全移除场景过渡", () => settings.RemoveRoomTransitions,
                     value => settings.RemoveRoomTransitions = value),
                 Toggle("完全移除死亡动画", () => settings.RemoveDeathAnimation,
@@ -1594,6 +1593,13 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                     value => settings.WatchedPlayerNotifications = value)
             ])
         ];
+    }
+
+    private static IEnumerable<SettingRow> WindowsSystemRows(QolSettings settings) {
+        if (!OperatingSystem.IsWindows()) yield break;
+
+        yield return Toggle("输入框中文、游戏内英文输入法", () => settings.AutoSwitchInputLanguage,
+            value => settings.AutoSwitchInputLanguage = value);
     }
 
     private static SettingRow Toggle(string label, Func<bool> get, Action<bool> set) => new(
