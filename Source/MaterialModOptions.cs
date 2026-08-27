@@ -249,12 +249,9 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
             return;
         }
 
-        if (MInput.Keyboard.Pressed(Keys.Tab)
-            || MInput.Keyboard.Pressed(Keys.PageDown)
-            || MInput.Keyboard.Pressed(Keys.PageUp)) {
-            bool backwards = MInput.Keyboard.Pressed(Keys.PageUp)
-                || MInput.Keyboard.Check(Keys.LeftShift, Keys.RightShift);
-            MoveTab(backwards ? -1 : 1);
+        if (MaterialTabNavigation.TryGetShiftVerticalDirection(out int tabDirection)) {
+            MoveTab(tabDirection);
+            return;
         }
 
         bool control = MInput.Keyboard.Check(Keys.LeftControl, Keys.RightControl);

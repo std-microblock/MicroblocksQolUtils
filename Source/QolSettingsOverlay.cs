@@ -146,12 +146,9 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             BeginClose(CloseDestination.PauseMenu);
             return;
         }
-        if (MInput.Keyboard.Pressed(Keys.Tab)
-            || MInput.Keyboard.Pressed(Keys.PageDown)
-            || MInput.Keyboard.Pressed(Keys.PageUp)) {
-            bool backwards = MInput.Keyboard.Pressed(Keys.PageUp)
-                || MInput.Keyboard.Check(Keys.LeftShift, Keys.RightShift);
-            SelectTab(selectedTab + (backwards ? -1 : 1));
+        if (MaterialTabNavigation.TryGetShiftVerticalDirection(out int tabDirection)) {
+            SelectTab(selectedTab + tabDirection);
+            return;
         }
 
         if (IsRecorderTab) {
