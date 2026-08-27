@@ -820,7 +820,12 @@ fn captured_frame(frame: scap::frame::VideoFrame) -> Option<CapturedFrame> {
     Some(CapturedFrame {
         width: width.max(0) as u32,
         height: height.max(0) as u32,
-        captured_at_unix_nanos: display_time,
+        captured_at_unix_nanos: display_time
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+            .try_into()
+            .unwrap_or(u64::MAX),
         bgra,
     })
 }
