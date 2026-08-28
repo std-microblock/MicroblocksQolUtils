@@ -432,7 +432,7 @@ fn remove_freeze_segments(clips: &[FinalizeClip], freezes: &[FreezeSegment]) -> 
     for clip in clips {
         let clip_end = clip.start_seconds + clip.duration_seconds;
         let mut cursor = clip.start_seconds;
-        let mut retained = 0.0;
+        let mut retained: f64 = 0.0;
         let mut first_piece = true;
         for freeze in freezes {
             if freeze.end_seconds <= clip.start_seconds {
