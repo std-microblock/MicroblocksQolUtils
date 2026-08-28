@@ -485,9 +485,12 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private void RenderRow(SettingRow row, MaterialRect rect, MaterialPalette palette, float alpha, string key) {
         bool enabled = row.Enabled();
+        bool highlighted = row.HighlightWhenOn && row.ToggleValue?.Invoke() == true;
         float emphasis = Math.Max(row.Pulse * 0.42f,
             Math.Max(motion.Emphasis(key), Math.Max(row.FocusAnimation, row.HoverAnimation * 0.72f)));
-        Color fill = Color.Lerp(palette.SurfaceHigh * 0.66f, palette.SurfaceHighest, emphasis);
+        Color fill = highlighted
+            ? Color.Lerp(palette.Primary * 0.18f, palette.Primary * 0.34f, Math.Max(emphasis, 0.35f))
+            : Color.Lerp(palette.SurfaceHigh * 0.66f, palette.SurfaceHighest, emphasis);
         if (emphasis > 0.02f) {
             MaterialUi.RoundedRect(rect.X, rect.Y + 3f, rect.Width, rect.Height, 23f,
                 Color.Black * (0.08f * alpha * emphasis));
@@ -499,8 +502,14 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             MaterialUi.RoundedOutline(rect.X, rect.Y, rect.Width, rect.Height, 23f,
                 1f + emphasis, palette.Primary * (alpha * emphasis));
         }
+        if (highlighted) {
+            MaterialUi.RoundedOutline(rect.X, rect.Y, rect.Width, rect.Height, 23f,
+                2f, palette.Primary * (0.92f * alpha));
+        }
 
-        Color labelColor = enabled ? palette.OnSurface : palette.OnSurfaceVariant * 0.55f;
+        Color labelColor = highlighted
+            ? palette.Primary
+            : enabled ? palette.OnSurface : palette.OnSurfaceVariant * 0.55f;
         bool centeredLabel = row.Kind is SettingKind.Toggle or SettingKind.Action;
         Vector2 labelPosition = centeredLabel
             ? new Vector2(rect.X + 18f, rect.Center.Y)
@@ -1532,6 +1541,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                 EnumRow("BGM 拼接", () => settings.BgmMode, value => settings.BgmMode = value),
                 Toggle("录制 UI 音效", () => settings.RecordingIncludeUiSfx,
                     value => settings.RecordingIncludeUiSfx = value),
+                Toggle("剪辑冻结帧", () => settings.RecordingRemoveFreezeFrames,
+                    value => settings.RecordingRemoveFreezeFrames = value, highlightWhenOn: true),
                 Range("录制帧率", () => settings.RecordingFrameRate, value => settings.RecordingFrameRate = value,
                     30, 120, 30, value => $"{value} FPS"),
                 Range("录制码率", () => settings.RecordingBitrateKbps,
@@ -1587,12 +1598,14 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             value => settings.AutoSwitchInputLanguage = value);
     }
 
-    private static SettingRow Toggle(string label, Func<bool> get, Action<bool> set) => new(
+    private static SettingRow Toggle(string label, Func<bool> get, Action<bool> set,
+        bool highlightWhenOn = false) => new(
         label,
         SettingKind.Toggle,
         () => get() ? "开" : "关",
         direction => set(direction > 0),
-        toggleValue: get
+        toggleValue: get,
+        highlightWhenOn: highlightWhenOn
     );
 
     private static SettingRow Range(
@@ -2272,6 +2285,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         public Action<int>? Change { get; }
         public Func<bool>? IsEnabled { get; }
         public Func<bool>? ToggleValue { get; }
+        public bool HighlightWhenOn { get; }
         public Func<float>? Normalized { get; }
         public Action<float>? SetNormalized { get; }
         public IReadOnlyList<string>? Options { get; }
@@ -2295,6 +2309,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             Action<int>? change = null,
             Func<bool>? isEnabled = null,
             Func<bool>? toggleValue = null,
+            bool highlightWhenOn = false,
             Func<float>? normalized = null,
             Action<float>? setNormalized = null,
             IReadOnlyList<string>? options = null,
@@ -2312,6 +2327,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             Change = change;
             IsEnabled = isEnabled;
             ToggleValue = toggleValue;
+            HighlightWhenOn = highlightWhenOn;
             Normalized = normalized;
             SetNormalized = setNormalized;
             Options = options;
