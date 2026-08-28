@@ -34,7 +34,7 @@ const run = (command, args, options = {}) => {
 };
 
 const files = new Map();
-const canonicalBaseFiles = new Set(["Code/MicroblocksQolUtils.dll"]);
+const platformFolders = ["Code/lib-win-x64/", "Code/lib-linux/", "Code/lib-osx/"];
 const work = mkdtempSync(join(tmpdir(), "microblocks-qol-merge-"));
 
 const walkFiles = (root) => {
@@ -61,10 +61,13 @@ try {
       if (!name || name.startsWith("/") || name.split("/").includes("..")) {
         throw new Error(`Unsafe archive entry after extraction: ${name}`);
       }
+      // The Windows package is the canonical source for managed files and assets.
+      // Other platform builds can differ in text line endings or compiler metadata;
+      // only their Everest-selected native runtime directories belong in the merge.
+      if (index > 0 && !platformFolders.some((folder) => name.startsWith(folder))) continue;
       const contents = readFileSync(source);
       const previous = files.get(name);
       if (previous && !previous.contents.equals(contents)) {
-        if (canonicalBaseFiles.has(name)) continue;
         throw new Error(`Platform packages contain different shared file contents: ${name}`);
       }
       files.set(name, { contents });
