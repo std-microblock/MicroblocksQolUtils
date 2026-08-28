@@ -63,7 +63,6 @@ struct FreezeSegment {
 }
 
 const FREEZE_GAP_MULTIPLIER: f64 = 1.5;
-const MIN_FREEZE_GAP_SECONDS: f64 = 0.10;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct TimelineClipLayout {
@@ -387,9 +386,7 @@ fn detect_freeze_segments(path: &Path, fps: u32) -> Result<Vec<FreezeSegment>, F
     let mut decoded = frame::Video::empty();
     let mut previous = None;
     let mut segments = Vec::new();
-    let threshold = (1.0 / f64::from(fps))
-        .mul_add(FREEZE_GAP_MULTIPLIER, 0.0)
-        .max(MIN_FREEZE_GAP_SECONDS);
+    let threshold = (1.0 / f64::from(fps)).mul_add(FREEZE_GAP_MULTIPLIER, 0.0);
     let mut observe = |decoded: &frame::Video| {
         let Some(timestamp) = decoded.timestamp() else {
             return;
