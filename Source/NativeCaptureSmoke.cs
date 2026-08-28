@@ -69,6 +69,7 @@ internal static class NativeCaptureSmoke {
                 2_000,
                 30,
                 false,
+                false,
                 ""
             ).ConfigureAwait(false);
             if (!File.Exists(finalized) || new FileInfo(finalized).Length < 1_000)

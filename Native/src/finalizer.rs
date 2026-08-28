@@ -24,6 +24,7 @@ pub struct FinalizePlan {
     pub bitrate_kbps: u32,
     pub fps: u32,
     pub reconstruct_bgm: bool,
+    pub remove_freeze_frames: bool,
     pub bgm_event_map_file: String,
 }
 
@@ -36,12 +37,13 @@ impl Default for FinalizePlan {
             bitrate_kbps: 12_000,
             fps: 60,
             reconstruct_bgm: false,
+            remove_freeze_frames: false,
             bgm_event_map_file: String::new(),
         }
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct FinalizeClip {
     pub source: String,
     pub start_seconds: f64,
@@ -53,6 +55,15 @@ pub struct FinalizeClip {
     #[serde(default)]
     pub seamless_from_previous: bool,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct FreezeSegment {
+    start_seconds: f64,
+    end_seconds: f64,
+}
+
+const FREEZE_GAP_MULTIPLIER: f64 = 1.5;
+const MIN_FREEZE_GAP_SECONDS: f64 = 0.10;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct TimelineClipLayout {
@@ -211,6 +222,15 @@ pub fn finalize_with_progress(
     }
 
     let source_path = Path::new(&plan.clips[0].source);
+    let effective_clips = if plan.remove_freeze_frames {
+        let freezes = detect_freeze_segments(source_path, plan.fps)?;
+        remove_freeze_segments(&plan.clips, &freezes)
+    } else {
+        plan.clips.iter().map(Clone::clone).collect()
+    };
+    if effective_clips.is_empty() {
+        return Err(FinalizeError::NoFrames);
+    }
     let mut input = format::input(source_path).map_err(|source| FinalizeError::OpenInput {
         path: source_path.to_owned(),
         source,
@@ -226,10 +246,10 @@ pub fn finalize_with_progress(
         .map_err(FinalizeError::Decoder)?;
     drop(video);
 
-    let mut selection = TimelineSelection::new(&plan.clips);
-    let total_duration = timeline_layout(&plan.clips)
+    let mut selection = TimelineSelection::new(&effective_clips);
+    let total_duration = timeline_layout(&effective_clips)
         .last()
-        .zip(plan.clips.last())
+        .zip(effective_clips.last())
         .map(|(layout, clip)| layout.output_start_seconds + clip.duration_seconds)
         .unwrap_or(1.0);
     let mut output = None;
@@ -281,7 +301,7 @@ pub fn finalize_with_progress(
         .then(|| Path::new(plan.bgm_event_map_file.trim()));
     let has_audio = finalizer_audio::build_audio_track(
         &sidecar,
-        &plan.clips,
+        &effective_clips,
         &mixed_pcm,
         &audio_temporary,
         plan.reconstruct_bgm,
@@ -346,6 +366,120 @@ fn validate_plan(plan: &FinalizePlan) -> Result<(), FinalizeError> {
         previous_start = clip.start_seconds;
     }
     Ok(())
+}
+
+fn detect_freeze_segments(path: &Path, fps: u32) -> Result<Vec<FreezeSegment>, FinalizeError> {
+    let mut input = format::input(path).map_err(|source| FinalizeError::OpenInput {
+        path: path.to_owned(),
+        source,
+    })?;
+    let video = input
+        .streams()
+        .best(media::Type::Video)
+        .ok_or_else(|| FinalizeError::MissingVideo(path.to_owned()))?;
+    let stream_index = video.index();
+    let time_base = video.time_base();
+    let mut decoder = codec::context::Context::from_parameters(video.parameters())
+        .and_then(|context| context.decoder().video())
+        .map_err(FinalizeError::Decoder)?;
+    drop(video);
+
+    let mut decoded = frame::Video::empty();
+    let mut previous = None;
+    let mut segments = Vec::new();
+    let threshold = (1.0 / f64::from(fps))
+        .mul_add(FREEZE_GAP_MULTIPLIER, 0.0)
+        .max(MIN_FREEZE_GAP_SECONDS);
+    let mut observe = |decoded: &frame::Video| {
+        let Some(timestamp) = decoded.timestamp() else {
+            return;
+        };
+        let current = timestamp as f64 * f64::from(time_base);
+        if let Some(previous) = previous {
+            let gap = current - previous;
+            if gap > threshold {
+                let start = previous + 1.0 / f64::from(fps);
+                if current > start {
+                    segments.push(FreezeSegment {
+                        start_seconds: start,
+                        end_seconds: current,
+                    });
+                }
+            }
+        }
+        previous = Some(current);
+    };
+    for (stream, packet) in input.packets() {
+        if stream.index() != stream_index {
+            continue;
+        }
+        decoder
+            .send_packet(&packet)
+            .map_err(FinalizeError::SendPacket)?;
+        while decoder.receive_frame(&mut decoded).is_ok() {
+            observe(&decoded);
+        }
+    }
+    decoder.send_eof().map_err(FinalizeError::FlushDecoder)?;
+    while decoder.receive_frame(&mut decoded).is_ok() {
+        observe(&decoded);
+    }
+    Ok(segments)
+}
+
+fn remove_freeze_segments(clips: &[FinalizeClip], freezes: &[FreezeSegment]) -> Vec<FinalizeClip> {
+    let mut result = Vec::with_capacity(clips.len());
+    for clip in clips {
+        let clip_end = clip.start_seconds + clip.duration_seconds;
+        let mut cursor = clip.start_seconds;
+        let mut retained: f64 = 0.0;
+        let mut first_piece = true;
+        for freeze in freezes {
+            if freeze.end_seconds <= clip.start_seconds {
+                continue;
+            }
+            if freeze.start_seconds >= clip_end {
+                break;
+            }
+            let start = freeze.start_seconds.max(clip.start_seconds);
+            if start > cursor {
+                let duration = start - cursor;
+                result.push(FinalizeClip {
+                    source: clip.source.clone(),
+                    start_seconds: cursor,
+                    duration_seconds: duration,
+                    music_event: clip.music_event.clone(),
+                    music_timeline_milliseconds: clip.music_timeline_milliseconds
+                        + (retained * 1_000.0).round() as i64,
+                    seamless_from_previous: if first_piece {
+                        clip.seamless_from_previous
+                    } else {
+                        true
+                    },
+                });
+                retained += duration;
+                first_piece = false;
+            }
+            cursor = cursor.max(freeze.end_seconds.min(clip_end));
+        }
+        if cursor < clip_end {
+            let duration = clip_end - cursor;
+            result.push(FinalizeClip {
+                source: clip.source.clone(),
+                start_seconds: cursor,
+                duration_seconds: duration,
+                music_event: clip.music_event.clone(),
+                music_timeline_milliseconds: clip.music_timeline_milliseconds
+                    + (retained * 1_000.0).round() as i64,
+                seamless_from_previous: if first_piece {
+                    clip.seamless_from_previous
+                } else {
+                    true
+                },
+            });
+        }
+    }
+    result
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -810,6 +944,33 @@ mod tests {
         assert_eq!(layout[0].fade_out_seconds, 0.0);
         assert_eq!(layout[1].fade_in_seconds, 0.0);
         assert_eq!(layout[1].output_start_seconds, 1.0);
+    }
+
+    #[test]
+    fn removing_freeze_segments_splits_clips_and_keeps_music_continuous() {
+        let clips = vec![FinalizeClip {
+            source: "room.mkv".to_owned(),
+            start_seconds: 0.0,
+            duration_seconds: 3.0,
+            music_event: "event:/music/a".to_owned(),
+            music_timeline_milliseconds: 100,
+            seamless_from_previous: false,
+        }];
+        let edited = remove_freeze_segments(
+            &clips,
+            &[FreezeSegment {
+                start_seconds: 1.0,
+                end_seconds: 2.0,
+            }],
+        );
+        assert_eq!(edited.len(), 2);
+        assert!((edited[0].duration_seconds - 1.0).abs() < 1e-9);
+        assert!((edited[1].start_seconds - 2.0).abs() < 1e-9);
+        assert!((edited[1].duration_seconds - 1.0).abs() < 1e-9);
+        assert_eq!(edited[0].music_timeline_milliseconds, 100);
+        assert_eq!(edited[1].music_timeline_milliseconds, 1_100);
+        assert!(!edited[0].seamless_from_previous);
+        assert!(edited[1].seamless_from_previous);
     }
 
     #[test]

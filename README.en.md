@@ -129,6 +129,10 @@ directory containing the JSON file:
 
 Without a mapping, the separately captured music bus is used as the post-mix BGM source.
 
+The recording setting **Remove freeze frames** is disabled by default. When enabled, finalization
+detects stalls in the captured timeline and removes those intervals from the video, audio, and BGM
+timelines. The enabled state is highlighted in the settings page.
+
 ### Profiler
 
 The Profiler page can start a 10-second in-process EventPipe stack sample:
