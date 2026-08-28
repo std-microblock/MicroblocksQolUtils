@@ -8,6 +8,7 @@ internal static class NativeRecordingFinalizer {
         string output,
         string description,
         bool reconstructBgm,
+        bool removeFreezeFrames,
         Action<double>? progress = null
     ) {
         try {
@@ -22,12 +23,13 @@ internal static class NativeRecordingFinalizer {
                 settings.RecordingBitrateKbps,
                 settings.RecordingFrameRate,
                 reconstructBgm,
+                removeFreezeFrames,
                 settings.BgmEventMapFile,
                 value => progress?.Invoke(value * 0.99d)
             ).ConfigureAwait(false);
             await File.WriteAllTextAsync(
                 output + ".timeline.json",
-                JsonSerializer.Serialize(new { clips, reconstructBgm },
+                JsonSerializer.Serialize(new { clips, reconstructBgm, removeFreezeFrames },
                     new JsonSerializerOptions { WriteIndented = true })
             ).ConfigureAwait(false);
             progress?.Invoke(1d);

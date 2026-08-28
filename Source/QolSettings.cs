@@ -266,6 +266,9 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue(true)]
     public bool RecordingIncludeUiSfx { get; set; } = true;
 
+    [DefaultValue(false)]
+    public bool RecordingRemoveFreezeFrames { get; set; }
+
     [DefaultValue(60)]
     [SettingRange(30, 120)]
     public int RecordingFrameRate { get; set; } = 60;

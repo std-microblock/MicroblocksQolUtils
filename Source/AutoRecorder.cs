@@ -524,7 +524,8 @@ public static class AutoRecorder {
                 $"{DateTime.Now:yyyyMMdd-HHmmss}-{Sanitize(areaSid)}.mp4"
             );
             lastOutput = output;
-            jobs.Insert(0, new RecordingFinalizationJob(clips, output, "完整录像", reconstructBgm));
+            jobs.Insert(0, new RecordingFinalizationJob(clips, output, "完整录像", reconstructBgm,
+                MicroblocksQolUtilsModule.Settings.RecordingRemoveFreezeFrames));
         }
         FinishStoppedRecording(recording, stop, jobs);
         ResetFullRecordingState();
@@ -544,7 +545,8 @@ public static class AutoRecorder {
             DateTime.Now,
             level?.Session.Area.SID ?? areaSid,
             level?.Session.Level ?? "room",
-            reconstructBgm
+            reconstructBgm,
+            MicroblocksQolUtilsModule.Settings.RecordingRemoveFreezeFrames
         ));
         int retentionCount = Math.Max(0, settings.DeathReplayRetentionCount);
         if (retentionCount > 0 && PendingDeathReplays.Count > retentionCount) {
@@ -721,7 +723,8 @@ public static class AutoRecorder {
             string unique = Guid.NewGuid().ToString("N")[..8];
             string fileName = $"{death.OccurredAt:yyyyMMdd-HHmmss-fff}-{room}-death-{unique}.mp4";
             string output = Path.Combine(DeathReplayRoot, area, fileName);
-            return new RecordingFinalizationJob(death.Clips, output, "死亡回放", death.ReconstructBgm);
+            return new RecordingFinalizationJob(death.Clips, output, "死亡回放", death.ReconstructBgm,
+                death.RemoveFreezeFrames);
         }).ToList();
         PendingDeathReplays.Clear();
         return jobs;
@@ -761,6 +764,7 @@ public static class AutoRecorder {
                     job.Output,
                     job.Description,
                     job.ReconstructBgm,
+                    job.RemoveFreezeFrames,
                     progress => UpdateFinalization(
                         finalizationId,
                         job.Output,
@@ -943,14 +947,16 @@ public static class AutoRecorder {
         DateTime OccurredAt,
         string AreaSid,
         string Room,
-        bool ReconstructBgm
+        bool ReconstructBgm,
+        bool RemoveFreezeFrames
     );
 
     private sealed record RecordingFinalizationJob(
         IReadOnlyList<RecordingClip> Clips,
         string Output,
         string Description,
-        bool ReconstructBgm
+        bool ReconstructBgm,
+        bool RemoveFreezeFrames
     ) {
         public double Weight => Math.Max(0.1d, Clips.Sum(clip => clip.DurationSeconds));
     }

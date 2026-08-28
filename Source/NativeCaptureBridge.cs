@@ -99,6 +99,7 @@ public static class NativeCaptureBridge {
         int bitrateKbps,
         int fps,
         bool reconstructBgm,
+        bool removeFreezeFrames,
         string bgmEventMapFile,
         Action<double>? progress = null
     ) {
@@ -117,6 +118,7 @@ public static class NativeCaptureBridge {
             bitrate_kbps = bitrateKbps,
             fps,
             reconstruct_bgm = reconstructBgm,
+            remove_freeze_frames = removeFreezeFrames,
             bgm_event_map_file = string.IsNullOrWhiteSpace(bgmEventMapFile)
                 ? ""
                 : Path.GetFullPath(Environment.ExpandEnvironmentVariables(bgmEventMapFile))
