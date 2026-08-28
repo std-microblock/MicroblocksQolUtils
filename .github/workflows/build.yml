@@ -29,9 +29,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Check package merger
-        run: python3 -m py_compile scripts/merge-qol-packages.py
-
       - name: Install Rust
         run: |
           rustup toolchain install stable --profile minimal
@@ -239,16 +236,14 @@ jobs:
           file Build/Code/lib-linux/libmicroblocks_qol_native.so
           readelf --dyn-syms Build/Code/lib-linux/libmicroblocks_qol_native.so | grep -q mqol_raster_text
 
-      - name: Upload release package
+      - name: Upload platform package
         if: needs.prepare-release.outputs.publish == 'true'
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh release upload "${{ needs.prepare-release.outputs.release_tag }}"
-          "${{ matrix.artifact }}.zip"
-          --repo "$GITHUB_REPOSITORY"
-          --clobber
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.zip
+          if-no-files-found: error
+          retention-days: 1
 
   merge-packages:
     name: Merge platform packages
@@ -261,29 +256,23 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Download platform packages
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ needs.prepare-release.outputs.release_tag }}
-        run: |
-          mkdir -p .work/platform-packages
-          gh release download "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --pattern 'MicroblocksQolUtils-*-x64.zip' \
-            --dir .work/platform-packages \
-            --clobber
+        uses: actions/download-artifact@v4
+        with:
+          pattern: MicroblocksQolUtils-*-x64
+          path: .work/platform-packages
+          merge-multiple: true
 
       - name: Merge platform packages
         shell: bash
         run: |
-          python3 scripts/merge-qol-packages.py \
+          node scripts/merge-qol-packages.mjs \
             MicroblocksQolUtils.zip \
             .work/platform-packages/MicroblocksQolUtils-windows-x64.zip \
             .work/platform-packages/MicroblocksQolUtils-linux-x64.zip \
             .work/platform-packages/MicroblocksQolUtils-macos-x64.zip
           unzip -Z1 MicroblocksQolUtils.zip | sort
 
-      - name: Replace platform packages with universal package
+      - name: Upload universal package
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -298,7 +287,7 @@ jobs:
             MicroblocksQolUtils-macos-x64.zip; do
             gh release delete-asset "$RELEASE_TAG" "$asset" \
               --repo "$GITHUB_REPOSITORY" \
-              --yes
+              --yes || true
           done
 
   publish-release:
