@@ -28,7 +28,6 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private const float RowTextOffset = 58f;
     private const float DropdownItemHeight = 46f;
     private const int DropdownMaxVisibleItems = 8;
-    private const int DropdownOptionLimit = 24;
     private const int SearchTextLimit = 80;
     private const float CompositePopupHorizontalPadding = 48f;
 
@@ -1684,7 +1683,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     }
 
     private static bool CanUseDropdown(OptionSnapshot option) =>
-        option.Options.Count is >= 3 and <= DropdownOptionLimit;
+        option.Options.Count >= 3;
 
     private static void SetOptionIndex(TextMenu.Item item, int targetIndex) {
         if (!TryGetOption(item, out OptionSnapshot option) || option.Options.Count == 0) return;
