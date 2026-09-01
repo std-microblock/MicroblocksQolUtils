@@ -853,21 +853,17 @@ fn pipewire_pixel_to_bgra(pixel: &[u8], layout: u8) -> Option<[u8; 4]> {
     let (red, green, blue) = if layout == 3 {
         (*pixel.first()?, *pixel.get(1)?, *pixel.get(2)?)
     } else {
-        // SPA names packed 32-bit formats in big-endian component order, while the PipeWire
-        // buffer stores native-endian words. Decode the word before extracting its components.
+        // SPA names packed 32-bit formats into in-memory order, identical to GStreamer.
+        // Decode the word before extracting its components.
         let packed = u32::from_ne_bytes(pixel.try_into().ok()?);
         match layout {
-            4 => (
+            4 => (packed as u8, (packed >> 8) as u8, (packed >> 16) as u8), // RGBx
+            5 => (
                 (packed >> 24) as u8,
                 (packed >> 16) as u8,
                 (packed >> 8) as u8,
-            ), // RGBx
-            5 => (packed as u8, (packed >> 8) as u8, (packed >> 16) as u8), // xBGR
-            6 => (
-                (packed >> 8) as u8,
-                (packed >> 16) as u8,
-                (packed >> 24) as u8,
-            ), // BGRx
+            ), // xBGR
+            6 => ((packed >> 16) as u8, (packed >> 8) as u8, packed as u8), // BGRx
             _ => return None,
         }
     };
@@ -1436,21 +1432,21 @@ mod tests {
     }
 
     #[test]
-    fn pipewire_packed_pixels_follow_native_endian_order() {
+    fn pipewire_packed_pixels_decode_in_memory_order() {
         assert_eq!(
             pipewire_pixel_to_bgra(&[0x11, 0x22, 0x33], 3),
             Some([0x33, 0x22, 0x11, 0xff])
         );
         assert_eq!(
-            pipewire_pixel_to_bgra(&0x11223300_u32.to_ne_bytes(), 4),
+            pipewire_pixel_to_bgra(&[0x11, 0x22, 0x33, 0x00], 4),
             Some([0x33, 0x22, 0x11, 0xff])
         );
         assert_eq!(
-            pipewire_pixel_to_bgra(&0x00332211_u32.to_ne_bytes(), 5),
+            pipewire_pixel_to_bgra(&[0x00, 0x33, 0x22, 0x11], 5),
             Some([0x33, 0x22, 0x11, 0xff])
         );
         assert_eq!(
-            pipewire_pixel_to_bgra(&0x33221100_u32.to_ne_bytes(), 6),
+            pipewire_pixel_to_bgra(&[0x33, 0x22, 0x11, 0x00], 6),
             Some([0x33, 0x22, 0x11, 0xff])
         );
     }
