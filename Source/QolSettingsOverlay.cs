@@ -56,6 +56,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private string recordingNotice = "";
     private float recordingNoticeTimer;
     private Task<bool>? recorderAuthorizationTask;
+    private bool pendingManualAfterAuthorization;
     private bool recordingAuthorized;
 
     public static QolSettingsOverlay? ActivePage => activePage is { Scene: not null, Visible: true }
@@ -926,9 +927,25 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private void ToggleManualRecording() {
         bool wasActive = RecorderActive;
-        if (wasActive) AutoRecorder.StopManual(level, save: true);
-        else AutoRecorder.StartManual();
-        ShowRecordingNotice(wasActive ? "已停止，正在保存录像" : "已开启手动录制");
+        if (wasActive) {
+            AutoRecorder.StopManual(level, save: true);
+            ShowRecordingNotice("已停止，正在保存录像");
+            Audio.Play("event:/ui/main/button_toggle_on");
+            return;
+        }
+        if (recorderAuthorizationTask is { IsCompleted: false }) {
+            Audio.Play("event:/ui/main/button_invalid");
+            return;
+        }
+        if (NativeCaptureBridge.AuthorizationSupported && !NativeCaptureBridge.HasRecordingAuthorization()) {
+            pendingManualAfterAuthorization = true;
+            recorderAuthorizationTask = NativeCaptureBridge.AuthorizeRecordingAsync(force: false);
+            ShowRecordingNotice("正在请求录像授权，请在系统选择器中选择窗口…");
+            Audio.Play("event:/ui/main/button_select");
+            return;
+        }
+        AutoRecorder.StartManual();
+        ShowRecordingNotice("已开启手动录制");
         Audio.Play("event:/ui/main/button_toggle_on");
     }
 
@@ -955,9 +972,16 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         bool authorized = task.Result;
         recordingAuthorized = authorized;
         if (authorized) {
-            ShowRecordingNotice("录像授权成功");
+            if (pendingManualAfterAuthorization) {
+                pendingManualAfterAuthorization = false;
+                AutoRecorder.StartManual();
+                ShowRecordingNotice("已授权，已开启手动录制");
+            } else {
+                ShowRecordingNotice("录像授权成功");
+            }
             Audio.Play("event:/ui/main/button_toggle_on");
         } else {
+            pendingManualAfterAuthorization = false;
             ShowRecordingNotice("未完成录像授权");
             Audio.Play("event:/ui/main/button_invalid");
         }
