@@ -223,6 +223,10 @@ impl AudioBusClock {
             }
         }
     }
+
+    fn reset(&self) {
+        self.next_nanos.store(u64::MAX, Ordering::Release);
+    }
 }
 
 impl AudioChunkQueue {
@@ -404,6 +408,7 @@ struct CaptureSession {
     queue: Arc<LatestFrameQueue>,
     audio_queue: Arc<AudioChunkQueue>,
     audio_clocks: [AudioBusClock; AUDIO_BUS_COUNT],
+    origin_established: AtomicBool,
     stats: Arc<AtomicStats>,
     capture_thread: Mutex<Option<JoinHandle<()>>>,
     consumer_thread: Mutex<Option<JoinHandle<()>>>,
@@ -424,6 +429,7 @@ impl CaptureSession {
             running: AtomicBool::new(false),
             stop_requested: AtomicBool::new(false),
             capture_finished: AtomicBool::new(true),
+            origin_established: AtomicBool::new(false),
             stats: Arc::new(AtomicStats::default()),
             capture_thread: Mutex::new(None),
             consumer_thread: Mutex::new(None),
@@ -588,6 +594,13 @@ impl CaptureSession {
             audio_chunks_dropped: self.stats.audio_chunks_dropped.load(Ordering::Relaxed),
         }
     }
+
+    fn mark_video_origin(&self) {
+        for clock in &self.audio_clocks {
+            clock.reset();
+        }
+        self.origin_established.store(true, Ordering::Release);
+    }
 }
 
 fn run_consumer(session: &Arc<CaptureSession>) -> Result<(), String> {
@@ -742,7 +755,11 @@ fn run_capture(session: &Arc<CaptureSession>) -> Result<(), CaptureError> {
             continue;
         };
         let captured_at_unix_nanos = captured.captured_at_unix_nanos;
-        let origin = *origin_unix_nanos.get_or_insert(captured_at_unix_nanos);
+        if origin_unix_nanos.is_none() {
+            origin_unix_nanos = Some(captured_at_unix_nanos);
+            session.mark_video_origin();
+        }
+        let origin = origin_unix_nanos.expect("video origin set on first frame");
         let media_time_nanos = captured_at_unix_nanos.saturating_sub(origin);
         session.stats.width.store(captured.width, Ordering::Relaxed);
         session
@@ -1170,6 +1187,12 @@ pub unsafe extern "C" fn mqol_capture_push_audio(
         if session.config.output_path.is_none() || !session.running.load(Ordering::Acquire) {
             return Ok(OK);
         }
+        // Sometimes audio arrives before the first video frame, especially when
+        // the user is granting screen recording permission in desktop portal picker.
+        // Drop the part ahead of video frame, so both tracks start from the same origin.
+        if !session.origin_established.load(Ordering::Acquire) {
+            return Ok(OK);
+        }
         // SAFETY: The caller guarantees `sample_count` readable f32 samples for this call.
         let values = unsafe { std::slice::from_raw_parts(samples, sample_count) };
         let frame_count = (sample_count / channels as usize) as u64;
@@ -1494,6 +1517,16 @@ mod tests {
         assert_eq!(clock.reserve(960, 48_000, 2_050_000_000), 2_010_000_000);
         assert_eq!(clock.reserve(480, 48_000, 9_000_000_000), 9_000_000_000);
         assert_eq!(clock.reserve(480, 48_000, 9_000_000_000), 9_010_000_000);
+    }
+
+    #[test]
+    fn audio_bus_clock_resets_to_the_video_origin_when_capture_starts() {
+        let clock = AudioBusClock::new();
+        assert_eq!(clock.reserve(480, 48_000, 0), 0);
+        assert_eq!(clock.reserve(480, 48_000, 0), 10_000_000);
+        clock.reset();
+        assert_eq!(clock.reserve(480, 48_000, 0), 0);
+        assert_eq!(clock.reserve(480, 48_000, 10_000_000), 10_000_000);
     }
 
     #[test]
