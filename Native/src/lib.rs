@@ -1156,6 +1156,48 @@ pub extern "C" fn mqol_capture_destroy(handle: u64) -> i32 {
     })
 }
 
+/// Authorize screen capture without starting a recording. On Linux this runs the desktop
+/// portal source-selection flow and persists the restore token, so a later capture session
+/// can skip the picker. When `force` is non-zero the persisted selection is discarded first
+/// and the picker is always shown. Other platforms are always authorized and return OK.
+#[unsafe(no_mangle)]
+pub extern "C" fn mqol_capture_authorize(force: i32) -> i32 {
+    ffi_status(|| {
+        #[cfg(target_os = "linux")]
+        {
+            scap::authorize_source(linux_portal_restore_token_path(), force != 0).map_err(
+                |error| {
+                    set_last_error(format!("portal authorization failed: {error}"));
+                    ERR_CAPTURE
+                },
+            )?;
+            Ok(OK)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = force;
+            Ok(OK)
+        }
+    })
+}
+
+/// Returns 1 when a usable screen-capture authorization exists, 0 otherwise.
+#[unsafe(no_mangle)]
+pub extern "C" fn mqol_capture_has_authorization() -> i32 {
+    #[cfg(target_os = "linux")]
+    {
+        if scap::has_authorization(linux_portal_restore_token_path()) {
+            1
+        } else {
+            0
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        1
+    }
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mqol_capture_push_audio(
     handle: u64,

@@ -5,6 +5,9 @@ pub mod frame;
 mod targets;
 mod utils;
 
+#[cfg(target_os = "linux")]
+pub use capturer::engine::linux::{authorize_source, has_authorization};
+
 // Helper Methods
 pub use targets::{get_all_targets, get_main_display};
 pub use targets::{Display, Target, Window};
