@@ -40,6 +40,7 @@ const AUDIO_MAX_SAMPLES_PER_CHUNK: usize = 16_384;
 const AUDIO_BUS_COUNT: usize = 3;
 
 static NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
+static AUTHORIZATION_EVENTS: AtomicU64 = AtomicU64::new(0);
 static SESSIONS: OnceLock<Mutex<HashMap<u64, Arc<CaptureSession>>>> = OnceLock::new();
 static LAST_ERROR: OnceLock<Mutex<String>> = OnceLock::new();
 
@@ -738,6 +739,8 @@ fn run_capture(session: &Arc<CaptureSession>) -> Result<(), CaptureError> {
         restore_token_path: linux_portal_restore_token_path(),
     })
     .map_err(|error| CaptureError::Scap(error.to_string()))?;
+    #[cfg(target_os = "linux")]
+    record_authorization_event();
 
     capturer.start_capture();
     let mut origin_unix_nanos = None;
@@ -1023,6 +1026,10 @@ fn set_last_error(message: impl Into<String>) {
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = message.into();
 }
 
+fn record_authorization_event() {
+    AUTHORIZATION_EVENTS.fetch_add(1, Ordering::Relaxed);
+}
+
 fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
     if let Some(message) = payload.downcast_ref::<&str>() {
         (*message).to_owned()
@@ -1171,6 +1178,8 @@ pub extern "C" fn mqol_capture_authorize(force: i32) -> i32 {
                     ERR_CAPTURE
                 },
             )?;
+            #[cfg(target_os = "linux")]
+            record_authorization_event();
             Ok(OK)
         }
         #[cfg(not(target_os = "linux"))]
@@ -1196,6 +1205,11 @@ pub extern "C" fn mqol_capture_has_authorization() -> i32 {
     {
         1
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mqol_capture_authorization_events() -> u64 {
+    AUTHORIZATION_EVENTS.load(Ordering::Relaxed)
 }
 
 #[unsafe(no_mangle)]
@@ -1569,6 +1583,13 @@ mod tests {
         clock.reset();
         assert_eq!(clock.reserve(480, 48_000, 0), 0);
         assert_eq!(clock.reserve(480, 48_000, 10_000_000), 10_000_000);
+    }
+
+    #[test]
+    fn authorization_events_counter_accumulates() {
+        let before = AUTHORIZATION_EVENTS.load(Ordering::Relaxed);
+        record_authorization_event();
+        assert_eq!(AUTHORIZATION_EVENTS.load(Ordering::Relaxed), before + 1);
     }
 
     #[test]

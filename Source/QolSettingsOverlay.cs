@@ -57,7 +57,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private float recordingNoticeTimer;
     private Task<bool>? recorderAuthorizationTask;
     private bool pendingManualAfterAuthorization;
-    private bool recordingAuthorized;
+    private static bool recordingAuthorized;
 
     public static QolSettingsOverlay? ActivePage => activePage is { Scene: not null, Visible: true }
         ? activePage
@@ -311,7 +311,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         if (authorizeCount == 1) {
             bool authorizing = recorderAuthorizationTask is { IsCompleted: false };
             RenderRecorderButton(RecorderButtonRect(hero, 0), AuthorizeButtonLabel(authorizing),
-                !authorizing, palette, alpha, "settings.recorder.authorize");
+                !authorizing && !RecorderCapturing, palette, alpha, "settings.recorder.authorize");
         }
         RenderRecorderButton(RecorderButtonRect(hero, authorizeCount + 0), "打开文件夹", true, palette, alpha,
             "settings.recorder.folder");
@@ -937,10 +937,12 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             Audio.Play("event:/ui/main/button_invalid");
             return;
         }
-        if (NativeCaptureBridge.AuthorizationSupported && !NativeCaptureBridge.HasRecordingAuthorization()) {
+        if (NativeCaptureBridge.AuthorizationSupported) {
+            // Always validate through the portal, so a persisted-but-revoked selection
+            // is caught here, instead of popping the picker during gameplay.
             pendingManualAfterAuthorization = true;
             recorderAuthorizationTask = NativeCaptureBridge.AuthorizeRecordingAsync(force: false);
-            ShowRecordingNotice("正在请求录像授权，请在系统选择器中选择窗口…");
+            ShowRecordingNotice("正在确认录像授权…");
             Audio.Play("event:/ui/main/button_select");
             return;
         }
@@ -956,6 +958,10 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     }
 
     private void AuthorizeRecording() {
+        if (RecorderCapturing) {
+            Audio.Play("event:/ui/main/button_invalid");
+            return;
+        }
         if (recorderAuthorizationTask is { IsCompleted: false }) {
             Audio.Play("event:/ui/main/button_invalid");
             return;
@@ -1388,7 +1394,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             if (authorizeCount == 1) {
                 bool authorizing = recorderAuthorizationTask is { IsCompleted: false };
                 targets.Add(new MaterialInteractionTarget("settings.recorder.authorize",
-                    RecorderButtonRect(hero, 0), Enabled: !authorizing));
+                    RecorderButtonRect(hero, 0), Enabled: !authorizing && !RecorderCapturing));
             }
             targets.Add(new MaterialInteractionTarget("settings.recorder.folder",
                 RecorderButtonRect(hero, authorizeCount + 0)));
@@ -2074,12 +2080,15 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private static bool RecorderActive => AutoRecorder.ManualMode || AutoRecorder.IsRecording;
 
+    private static bool RecorderCapturing =>
+        AutoRecorder.IsRecording || AutoRecorder.ManualMode || AutoRecorder.IsDeathReplayRecording;
+
     private static bool IsRecordingFinalizing(RecordingLibraryEntry file) =>
         AutoRecorder.TryGetFinalizationProgress(file.Path, out _, out _);
 
     private void RefreshRecordingFiles() {
         bool firstRefresh = !recordingLibraryInitialized;
-        recordingAuthorized = NativeCaptureBridge.HasRecordingAuthorization();
+        if (NativeCaptureBridge.AuthorizationEventCount > 0) recordingAuthorized = true;
         int previousCount = recordingFiles.Count;
         int recorderSettingCount = RecorderRows.Count;
         int selectedSetting = recorderSelectedItem >= 0 && recorderSelectedItem < recorderSettingCount
@@ -2215,7 +2224,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private static MaterialRect RecorderButtonRect(MaterialRect hero, int index) {
         const float gap = 10f;
         float[] widths = RecorderAuthorizeButtonCount == 1
-            ? [104f, 150f, 176f, 96f]
+            ? [148f, 150f, 176f, 96f]
             : [150f, 176f, 96f];
         float total = widths.Sum() + gap * (widths.Length - 1);
         float x = hero.Right - total - 20f;

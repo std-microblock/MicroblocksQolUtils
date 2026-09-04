@@ -22,6 +22,13 @@ public static class NativeCaptureBridge {
         return CaptureHasAuthorization() != 0;
     }
 
+    public static ulong AuthorizationEventCount {
+        get {
+            if (!available) return 0;
+            return CaptureAuthorizationEvents();
+        }
+    }
+
     public static Task<bool> AuthorizeRecordingAsync(bool force) {
         if (!available) return Task.FromResult(false);
         return Task.Run(() => CaptureAuthorize(force ? 1 : 0) == 0);
@@ -259,6 +266,9 @@ public static class NativeCaptureBridge {
 
     [DllImport(LibraryName, EntryPoint = "mqol_capture_has_authorization", CallingConvention = CallingConvention.Cdecl)]
     private static extern int CaptureHasAuthorization();
+
+    [DllImport(LibraryName, EntryPoint = "mqol_capture_authorization_events", CallingConvention = CallingConvention.Cdecl)]
+    private static extern ulong CaptureAuthorizationEvents();
 
     [DllImport(LibraryName, EntryPoint = "mqol_capture_push_audio", CallingConvention = CallingConvention.Cdecl)]
     internal static extern unsafe int CapturePushAudio(
