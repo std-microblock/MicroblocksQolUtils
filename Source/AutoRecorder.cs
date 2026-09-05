@@ -43,6 +43,10 @@ public static class AutoRecorder {
     private static bool completing;
     private static bool manualMode;
     private static Task<bool>? recordingAuthorizationTask;
+    private static bool fullRecordingStartFailed;
+    private static bool deathReplayStartFailed;
+    private static bool fullRecordingStartAwaiting;
+    private static bool deathReplayStartAwaiting;
     private static int finalizingCount;
     private static int cleanupRunning;
     private static long nextFinalizationId;
@@ -378,10 +382,28 @@ public static class AutoRecorder {
         transitioningRoom = false;
         ResetDeathReplayState(waitForStablePlayer: false);
         fullRecordingEnabled = false;
+        fullRecordingStartFailed = false;
+        deathReplayStartFailed = false;
+        fullRecordingStartAwaiting = false;
+        deathReplayStartAwaiting = false;
         reconstructBgm = ShouldReconstructBgm(level);
     }
 
     private static void StartRunRecording(Level level) {
+        // Re-confirm the authorization right before the capture grabs the screen.
+        // A failed attempt is latched until the next trigger.
+        if (fullRecordingStartFailed) return;
+        Task<bool> authorization = ResolveStartAuthorization(ref fullRecordingStartAwaiting);
+        if (!authorization.IsCompleted) return;
+        fullRecordingStartAwaiting = false;
+        if (!authorization.Result) {
+            fullRecordingStartFailed = true;
+            return;
+        }
+        ActuallyStartRunRecording(level);
+    }
+
+    private static void ActuallyStartRunRecording(Level level) {
         string tempRoot = Path.Combine(ResolveRecordingRoot(), ".working", Sanitize(runKey));
         Directory.CreateDirectory(tempRoot);
         string path = Path.Combine(tempRoot, $"full-{DateTime.UtcNow:yyyyMMdd-HHmmss-fff}-{Guid.NewGuid():N}.mkv");
@@ -394,6 +416,18 @@ public static class AutoRecorder {
     }
 
     private static void StartDeathReplayRecording() {
+        if (deathReplayStartFailed) return;
+        Task<bool> authorization = ResolveStartAuthorization(ref deathReplayStartAwaiting);
+        if (!authorization.IsCompleted) return;
+        deathReplayStartAwaiting = false;
+        if (!authorization.Result) {
+            deathReplayStartFailed = true;
+            return;
+        }
+        ActuallyStartDeathReplayRecording();
+    }
+
+    private static void ActuallyStartDeathReplayRecording() {
         string tempRoot = Path.Combine(ResolveRecordingRoot(), ".working", Sanitize(runKey));
         Directory.CreateDirectory(tempRoot);
         string path = Path.Combine(tempRoot,
@@ -402,6 +436,20 @@ public static class AutoRecorder {
         if (deathReplayCurrent is null) return;
         ResetDeathReplayState(waitForStablePlayer: false, keepRecording: true);
         StartDeathReplayBranchAtCurrentTime();
+    }
+
+    private static Task<bool> ResolveStartAuthorization(ref bool awaiting) {
+        if (awaiting) return recordingAuthorizationTask ?? Task.FromResult(false);
+        if (recordingAuthorizationTask is { IsCompleted: false } inFlight) {
+            awaiting = true;
+            return inFlight;
+        }
+        // A previously declined confirmation is latched so the picker is not re-shown mid-run;
+        // an accepted one is re-validated with a fresh round-trip right before capturing.
+        if (recordingAuthorizationTask is { IsCompleted: true, Result: false })
+            return Task.FromResult(false);
+        awaiting = true;
+        return EnsureRecordingAuthorization();
     }
 
     private static void StartBranchAtCurrentTime(bool seamlessFromPrevious = false) {
