@@ -1,5 +1,6 @@
 use std::{
     mem::size_of,
+    path::PathBuf,
     sync::{
         atomic::{AtomicBool, AtomicU8},
         mpsc::{self, sync_channel, SyncSender},
@@ -421,4 +422,23 @@ impl LinuxCapturer {
 
 pub fn create_capturer(options: &Options, tx: mpsc::Sender<Frame>) -> LinuxCapturer {
     LinuxCapturer::new(options, tx)
+}
+
+/// Run the desktop portal source-selection flow and persist the restore token
+/// without starting a capture stream. This allows an application to (re-)authorize
+/// screen capture ahead of time, instead of blocking the first capture session.
+pub fn authorize_source(
+    restore_token_path: Option<PathBuf>,
+    force: bool,
+) -> Result<(), LinCapError> {
+    let connection = dbus::blocking::Connection::new_session()
+        .map_err(|error| LinCapError::new(format!("dbus session: {error}")))?;
+    ScreenCastPortal::new(&connection)
+        .restore_token_path(restore_token_path)
+        .authorize(force)
+}
+
+/// Whether a persisted source selection can be restored, so the picker can be skipped.
+pub fn has_authorization(restore_token_path: Option<PathBuf>) -> bool {
+    ScreenCastPortal::has_restore_token(restore_token_path)
 }

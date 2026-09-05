@@ -15,6 +15,25 @@ public static class NativeCaptureBridge {
 
     public static bool Available => available;
 
+    public static bool AuthorizationSupported => OperatingSystem.IsLinux();
+
+    public static bool HasRecordingAuthorization() {
+        if (!available) return false;
+        return CaptureHasAuthorization() != 0;
+    }
+
+    public static ulong AuthorizationEventCount {
+        get {
+            if (!available) return 0;
+            return CaptureAuthorizationEvents();
+        }
+    }
+
+    public static Task<bool> AuthorizeRecordingAsync(bool force) {
+        if (!available) return Task.FromResult(false);
+        return Task.Run(() => CaptureAuthorize(force ? 1 : 0) == 0);
+    }
+
     public static void InitializeFromMod(EverestModuleMetadata metadata) {
         ArgumentNullException.ThrowIfNull(metadata);
         Initialize(null);
@@ -241,6 +260,15 @@ public static class NativeCaptureBridge {
 
     [DllImport(LibraryName, EntryPoint = "mqol_capture_destroy", CallingConvention = CallingConvention.Cdecl)]
     private static extern int CaptureDestroy(ulong handle);
+
+    [DllImport(LibraryName, EntryPoint = "mqol_capture_authorize", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int CaptureAuthorize(int force);
+
+    [DllImport(LibraryName, EntryPoint = "mqol_capture_has_authorization", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int CaptureHasAuthorization();
+
+    [DllImport(LibraryName, EntryPoint = "mqol_capture_authorization_events", CallingConvention = CallingConvention.Cdecl)]
+    private static extern ulong CaptureAuthorizationEvents();
 
     [DllImport(LibraryName, EntryPoint = "mqol_capture_push_audio", CallingConvention = CallingConvention.Cdecl)]
     internal static extern unsafe int CapturePushAudio(

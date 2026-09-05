@@ -448,6 +448,34 @@ impl<'a> ScreenCastPortal<'a> {
         self.start(session_handle)
     }
 
+    /// Run the source-selection flow and persist the resulting restore token.
+    /// When `force` is true, discard any restore token so the picker is always shown.
+    pub fn authorize(&self, force: bool) -> Result<(), LinCapError> {
+        if force {
+            self.remove_restore_token();
+        }
+        self.create_stream().map(|_| ())
+    }
+
+    pub fn has_restore_token(path: Option<PathBuf>) -> bool {
+        let Some(path) = path else {
+            return false;
+        };
+        if !Self::valid_restore_token_file(&path) {
+            return false;
+        }
+        fs::read_to_string(&path)
+            .map(|token| !token.trim().is_empty())
+            .unwrap_or(false)
+    }
+
+    fn valid_restore_token_file(path: &Path) -> bool {
+        let Ok(metadata) = fs::metadata(path) else {
+            return false;
+        };
+        metadata.len() > 0 && metadata.len() <= MAX_RESTORE_TOKEN_BYTES
+    }
+
     pub fn restore_token_path(mut self, path: Option<PathBuf>) -> Self {
         self.restore_token_path = path;
         self
@@ -469,8 +497,7 @@ impl<'a> ScreenCastPortal<'a> {
 
     fn read_restore_token(&self) -> Option<String> {
         let path = self.restore_token_path.as_deref()?;
-        let metadata = fs::metadata(path).ok()?;
-        if metadata.len() == 0 || metadata.len() > MAX_RESTORE_TOKEN_BYTES {
+        if !Self::valid_restore_token_file(path) {
             return None;
         }
         let token = fs::read_to_string(path).ok()?;

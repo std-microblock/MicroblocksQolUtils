@@ -40,6 +40,7 @@ const AUDIO_MAX_SAMPLES_PER_CHUNK: usize = 16_384;
 const AUDIO_BUS_COUNT: usize = 3;
 
 static NEXT_HANDLE: AtomicU64 = AtomicU64::new(1);
+static AUTHORIZATION_EVENTS: AtomicU64 = AtomicU64::new(0);
 static SESSIONS: OnceLock<Mutex<HashMap<u64, Arc<CaptureSession>>>> = OnceLock::new();
 static LAST_ERROR: OnceLock<Mutex<String>> = OnceLock::new();
 
@@ -223,6 +224,10 @@ impl AudioBusClock {
             }
         }
     }
+
+    fn reset(&self) {
+        self.next_nanos.store(u64::MAX, Ordering::Release);
+    }
 }
 
 impl AudioChunkQueue {
@@ -404,6 +409,7 @@ struct CaptureSession {
     queue: Arc<LatestFrameQueue>,
     audio_queue: Arc<AudioChunkQueue>,
     audio_clocks: [AudioBusClock; AUDIO_BUS_COUNT],
+    origin_established: AtomicBool,
     stats: Arc<AtomicStats>,
     capture_thread: Mutex<Option<JoinHandle<()>>>,
     consumer_thread: Mutex<Option<JoinHandle<()>>>,
@@ -424,6 +430,7 @@ impl CaptureSession {
             running: AtomicBool::new(false),
             stop_requested: AtomicBool::new(false),
             capture_finished: AtomicBool::new(true),
+            origin_established: AtomicBool::new(false),
             stats: Arc::new(AtomicStats::default()),
             capture_thread: Mutex::new(None),
             consumer_thread: Mutex::new(None),
@@ -588,6 +595,13 @@ impl CaptureSession {
             audio_chunks_dropped: self.stats.audio_chunks_dropped.load(Ordering::Relaxed),
         }
     }
+
+    fn mark_video_origin(&self) {
+        for clock in &self.audio_clocks {
+            clock.reset();
+        }
+        self.origin_established.store(true, Ordering::Release);
+    }
 }
 
 fn run_consumer(session: &Arc<CaptureSession>) -> Result<(), String> {
@@ -725,6 +739,8 @@ fn run_capture(session: &Arc<CaptureSession>) -> Result<(), CaptureError> {
         restore_token_path: linux_portal_restore_token_path(),
     })
     .map_err(|error| CaptureError::Scap(error.to_string()))?;
+    #[cfg(target_os = "linux")]
+    record_authorization_event();
 
     capturer.start_capture();
     let mut origin_unix_nanos = None;
@@ -742,7 +758,11 @@ fn run_capture(session: &Arc<CaptureSession>) -> Result<(), CaptureError> {
             continue;
         };
         let captured_at_unix_nanos = captured.captured_at_unix_nanos;
-        let origin = *origin_unix_nanos.get_or_insert(captured_at_unix_nanos);
+        if origin_unix_nanos.is_none() {
+            origin_unix_nanos = Some(captured_at_unix_nanos);
+            session.mark_video_origin();
+        }
+        let origin = origin_unix_nanos.expect("video origin set on first frame");
         let media_time_nanos = captured_at_unix_nanos.saturating_sub(origin);
         session.stats.width.store(captured.width, Ordering::Relaxed);
         session
@@ -1006,6 +1026,10 @@ fn set_last_error(message: impl Into<String>) {
         .unwrap_or_else(|poisoned| poisoned.into_inner()) = message.into();
 }
 
+fn record_authorization_event() {
+    AUTHORIZATION_EVENTS.fetch_add(1, Ordering::Relaxed);
+}
+
 fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
     if let Some(message) = payload.downcast_ref::<&str>() {
         (*message).to_owned()
@@ -1139,6 +1163,55 @@ pub extern "C" fn mqol_capture_destroy(handle: u64) -> i32 {
     })
 }
 
+/// Authorize screen capture without starting a recording. On Linux this runs the desktop
+/// portal source-selection flow and persists the restore token, so a later capture session
+/// can skip the picker. When `force` is non-zero the persisted selection is discarded first
+/// and the picker is always shown. Other platforms are always authorized and return OK.
+#[unsafe(no_mangle)]
+pub extern "C" fn mqol_capture_authorize(force: i32) -> i32 {
+    ffi_status(|| {
+        #[cfg(target_os = "linux")]
+        {
+            scap::authorize_source(linux_portal_restore_token_path(), force != 0).map_err(
+                |error| {
+                    set_last_error(format!("portal authorization failed: {error}"));
+                    ERR_CAPTURE
+                },
+            )?;
+            #[cfg(target_os = "linux")]
+            record_authorization_event();
+            Ok(OK)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = force;
+            Ok(OK)
+        }
+    })
+}
+
+/// Returns 1 when a usable screen-capture authorization exists, 0 otherwise.
+#[unsafe(no_mangle)]
+pub extern "C" fn mqol_capture_has_authorization() -> i32 {
+    #[cfg(target_os = "linux")]
+    {
+        if scap::has_authorization(linux_portal_restore_token_path()) {
+            1
+        } else {
+            0
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        1
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn mqol_capture_authorization_events() -> u64 {
+    AUTHORIZATION_EVENTS.load(Ordering::Relaxed)
+}
+
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn mqol_capture_push_audio(
     handle: u64,
@@ -1168,6 +1241,12 @@ pub unsafe extern "C" fn mqol_capture_push_audio(
         let session = guard.get(&handle).cloned().ok_or(ERR_NOT_FOUND)?;
         drop(guard);
         if session.config.output_path.is_none() || !session.running.load(Ordering::Acquire) {
+            return Ok(OK);
+        }
+        // Sometimes audio arrives before the first video frame, especially when
+        // the user is granting screen recording permission in desktop portal picker.
+        // Drop the part ahead of video frame, so both tracks start from the same origin.
+        if !session.origin_established.load(Ordering::Acquire) {
             return Ok(OK);
         }
         // SAFETY: The caller guarantees `sample_count` readable f32 samples for this call.
@@ -1494,6 +1573,23 @@ mod tests {
         assert_eq!(clock.reserve(960, 48_000, 2_050_000_000), 2_010_000_000);
         assert_eq!(clock.reserve(480, 48_000, 9_000_000_000), 9_000_000_000);
         assert_eq!(clock.reserve(480, 48_000, 9_000_000_000), 9_010_000_000);
+    }
+
+    #[test]
+    fn audio_bus_clock_resets_to_the_video_origin_when_capture_starts() {
+        let clock = AudioBusClock::new();
+        assert_eq!(clock.reserve(480, 48_000, 0), 0);
+        assert_eq!(clock.reserve(480, 48_000, 0), 10_000_000);
+        clock.reset();
+        assert_eq!(clock.reserve(480, 48_000, 0), 0);
+        assert_eq!(clock.reserve(480, 48_000, 10_000_000), 10_000_000);
+    }
+
+    #[test]
+    fn authorization_events_counter_accumulates() {
+        let before = AUTHORIZATION_EVENTS.load(Ordering::Relaxed);
+        record_authorization_event();
+        assert_eq!(AUTHORIZATION_EVENTS.load(Ordering::Relaxed), before + 1);
     }
 
     #[test]

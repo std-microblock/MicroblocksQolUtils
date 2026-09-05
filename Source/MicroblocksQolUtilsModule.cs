@@ -80,6 +80,7 @@ public sealed class MicroblocksQolUtilsModule : EverestModule {
         try {
             orig(self, gameTime);
             AutoRecorder.AfterEngineUpdate();
+            AutoRecorder.UpdateRecordingSwitches();
             InstantDeaths.AfterEngineUpdate();
             MaterialUiSmoke.Update();
             WindowsInputLanguage.Update();

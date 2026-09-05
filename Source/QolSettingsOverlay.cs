@@ -55,6 +55,8 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private RecordingLibraryEntry? pendingRecordingDelete;
     private string recordingNotice = "";
     private float recordingNoticeTimer;
+    private Task<bool>? pendingRecorderAuthorization;
+    private static bool recordingAuthorized;
 
     public static QolSettingsOverlay? ActivePage => activePage is { Scene: not null, Visible: true }
         ? activePage
@@ -97,6 +99,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         editError = Calc.Approach(editError, 0f, Engine.RawDeltaTime * 4f);
         recordingNoticeTimer = Math.Max(0f, recordingNoticeTimer - Engine.RawDeltaTime);
         recordingRefreshTimer -= Engine.RawDeltaTime;
+        UpdateRecorderAuthorization();
         if (IsRecorderTab && recordingRefreshTimer <= 0f) RefreshRecordingFiles();
 
         if (bindingConfig is not null) return;
@@ -303,12 +306,18 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                 MaterialTextRole.Caption, palette.OnSurfaceVariant, alpha, scaleOverride: 0.26f);
         }
 
-        RenderRecorderButton(RecorderButtonRect(hero, 0), "打开文件夹", true, palette, alpha,
+        int authorizeCount = RecorderAuthorizeButtonCount;
+        if (authorizeCount == 1) {
+            bool authorizing = AutoRecorder.AuthorizationInFlight;
+            RenderRecorderButton(RecorderButtonRect(hero, 0), AuthorizeButtonLabel(authorizing),
+                !authorizing && !RecorderCapturing, palette, alpha, "settings.recorder.authorize");
+        }
+        RenderRecorderButton(RecorderButtonRect(hero, authorizeCount + 0), "打开文件夹", true, palette, alpha,
             "settings.recorder.folder");
-        RenderRecorderButton(RecorderButtonRect(hero, 1),
+        RenderRecorderButton(RecorderButtonRect(hero, authorizeCount + 1),
             active ? "停止并保存" : "开始录制", true, palette, alpha,
             "settings.recorder.toggle", primary: true);
-        RenderRecorderButton(RecorderButtonRect(hero, 2), "丢弃", active, palette, alpha,
+        RenderRecorderButton(RecorderButtonRect(hero, authorizeCount + 2), "丢弃", active, palette, alpha,
             "settings.recorder.discard", danger: active);
     }
 
@@ -755,15 +764,20 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
         MaterialRect hero = RecorderHeroRect(layout);
         if (MInput.Mouse.PressedLeftButton) {
-            if (RecorderButtonRect(hero, 0).Contains(mouse)) {
+            int authorizeCount = RecorderAuthorizeButtonCount;
+            if (authorizeCount == 1 && RecorderButtonRect(hero, 0).Contains(mouse)) {
+                AuthorizeRecording();
+                return;
+            }
+            if (RecorderButtonRect(hero, authorizeCount + 0).Contains(mouse)) {
                 OpenRecordingFolder();
                 return;
             }
-            if (RecorderButtonRect(hero, 1).Contains(mouse)) {
+            if (RecorderButtonRect(hero, authorizeCount + 1).Contains(mouse)) {
                 ToggleManualRecording();
                 return;
             }
-            if (RecorderButtonRect(hero, 2).Contains(mouse)) {
+            if (RecorderButtonRect(hero, authorizeCount + 2).Contains(mouse)) {
                 if (RecorderActive) DiscardManualRecording();
                 else Audio.Play("event:/ui/main/button_invalid");
                 return;
@@ -912,9 +926,20 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private void ToggleManualRecording() {
         bool wasActive = RecorderActive;
-        if (wasActive) AutoRecorder.StopManual(level, save: true);
-        else AutoRecorder.StartManual();
-        ShowRecordingNotice(wasActive ? "已停止，正在保存录像" : "已开启手动录制");
+        if (wasActive) {
+            AutoRecorder.StopManual(level, save: true);
+            ShowRecordingNotice("已停止，正在保存录像");
+            Audio.Play("event:/ui/main/button_toggle_on");
+            return;
+        }
+        if (AutoRecorder.AuthorizationInFlight) {
+            Audio.Play("event:/ui/main/button_invalid");
+            return;
+        }
+        AutoRecorder.StartManual();
+        if (NativeCaptureBridge.AuthorizationSupported)
+            pendingRecorderAuthorization = AutoRecorder.AuthorizationTask;
+        ShowRecordingNotice("已开启手动录制");
         Audio.Play("event:/ui/main/button_toggle_on");
     }
 
@@ -922,6 +947,44 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         AutoRecorder.StopManual(level, save: false);
         ShowRecordingNotice("已丢弃当前录制片段");
         Audio.Play("event:/ui/main/button_toggle_off");
+    }
+
+    private void AuthorizeRecording() {
+        if (RecorderCapturing) {
+            Audio.Play("event:/ui/main/button_invalid");
+            return;
+        }
+        if (AutoRecorder.AuthorizationInFlight) {
+            Audio.Play("event:/ui/main/button_invalid");
+            return;
+        }
+        AutoRecorder.ReauthorizeRecording();
+        pendingRecorderAuthorization = AutoRecorder.AuthorizationTask;
+        ShowRecordingNotice("正在请求录像授权，请在系统选择器中选择窗口…");
+        Audio.Play("event:/ui/main/button_select");
+    }
+
+    private void UpdateRecorderAuthorization() {
+        Task<bool>? task = pendingRecorderAuthorization;
+        if (task is null || !task.IsCompleted) return;
+        pendingRecorderAuthorization = null;
+        bool authorized = task.Result;
+        recordingAuthorized = authorized;
+        if (authorized) {
+            ShowRecordingNotice("录像授权成功");
+            Audio.Play("event:/ui/main/button_toggle_on");
+        } else {
+            // Roll the mode back so the UI does not claim to be recording
+            // while the capture thread never started.
+            if (AutoRecorder.ManualMode) AutoRecorder.StopManual(level, save: false);
+            ShowRecordingNotice("未完成录像授权");
+            Audio.Play("event:/ui/main/button_invalid");
+        }
+    }
+
+    private string AuthorizeButtonLabel(bool authorizing) {
+        if (authorizing) return "授权中…";
+        return recordingAuthorized ? "重新授权录像" : "授权录像";
     }
 
     private void SelectRecorderItem(int index, OverlayLayout layout) {
@@ -1316,10 +1379,18 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         if (IsRecorderTab) {
             MaterialRect hero = RecorderHeroRect(layout);
             bool active = AutoRecorder.IsRecording || AutoRecorder.ManualMode;
-            targets.Add(new MaterialInteractionTarget("settings.recorder.folder", RecorderButtonRect(hero, 0)));
-            targets.Add(new MaterialInteractionTarget("settings.recorder.toggle", RecorderButtonRect(hero, 1)));
-            targets.Add(new MaterialInteractionTarget("settings.recorder.discard", RecorderButtonRect(hero, 2),
-                Enabled: active));
+            int authorizeCount = RecorderAuthorizeButtonCount;
+            if (authorizeCount == 1) {
+                bool authorizing = AutoRecorder.AuthorizationInFlight;
+                targets.Add(new MaterialInteractionTarget("settings.recorder.authorize",
+                    RecorderButtonRect(hero, 0), Enabled: !authorizing && !RecorderCapturing));
+            }
+            targets.Add(new MaterialInteractionTarget("settings.recorder.folder",
+                RecorderButtonRect(hero, authorizeCount + 0)));
+            targets.Add(new MaterialInteractionTarget("settings.recorder.toggle",
+                RecorderButtonRect(hero, authorizeCount + 1)));
+            targets.Add(new MaterialInteractionTarget("settings.recorder.discard",
+                RecorderButtonRect(hero, authorizeCount + 2), Enabled: active));
             targets.Add(new MaterialInteractionTarget("settings.recorder.library.deaths",
                 RecorderLibraryTabRect(layout, 0), Focused: recordingLibraryKind == RecordingLibraryKind.DeathReplay));
             targets.Add(new MaterialInteractionTarget("settings.recorder.library.full",
@@ -1998,11 +2069,15 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
     private static bool RecorderActive => AutoRecorder.ManualMode || AutoRecorder.IsRecording;
 
+    private static bool RecorderCapturing =>
+        AutoRecorder.IsRecording || AutoRecorder.ManualMode || AutoRecorder.IsDeathReplayRecording;
+
     private static bool IsRecordingFinalizing(RecordingLibraryEntry file) =>
         AutoRecorder.TryGetFinalizationProgress(file.Path, out _, out _);
 
     private void RefreshRecordingFiles() {
         bool firstRefresh = !recordingLibraryInitialized;
+        if (NativeCaptureBridge.AuthorizationEventCount > 0) recordingAuthorized = true;
         int previousCount = recordingFiles.Count;
         int recorderSettingCount = RecorderRows.Count;
         int selectedSetting = recorderSelectedItem >= 0 && recorderSelectedItem < recorderSettingCount
@@ -2132,9 +2207,14 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         ? "死亡回放"
         : "完整录像";
 
+    private static int RecorderAuthorizeButtonCount =>
+        NativeCaptureBridge.AuthorizationSupported ? 1 : 0;
+
     private static MaterialRect RecorderButtonRect(MaterialRect hero, int index) {
         const float gap = 10f;
-        float[] widths = [164f, 196f, 112f];
+        float[] widths = RecorderAuthorizeButtonCount == 1
+            ? [148f, 150f, 176f, 96f]
+            : [150f, 176f, 96f];
         float total = widths.Sum() + gap * (widths.Length - 1);
         float x = hero.Right - total - 20f;
         for (int current = 0; current < index; current++) x += widths[current] + gap;
