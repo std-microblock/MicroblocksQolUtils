@@ -42,6 +42,7 @@ public static class AutoRecorder {
     private static bool reconstructBgm;
     private static bool completing;
     private static bool manualMode;
+    private static Task<bool>? recordingAuthorizationTask;
     private static int finalizingCount;
     private static int cleanupRunning;
     private static long nextFinalizationId;
@@ -136,13 +137,16 @@ public static class AutoRecorder {
         Player? player = level.Tracker.GetEntity<Player>();
         if (player is null) return;
         string key = RunKey(level);
-        if (!string.Equals(key, runKey, StringComparison.Ordinal)) {
+        bool newRun = !string.Equals(key, runKey, StringComparison.Ordinal);
+        if (newRun) {
             if (runKey.Length > 0 && !completing) StopAndReset(deleteSource: true);
             BeginRun(level);
         }
 
         fullRecordingEnabled = manualMode
             || (settings.AutoRecorderEnabled && ShouldRecord(player, settings));
+        if (newRun && (settings.AutoRecorderEnabled || settings.DeathReplayEnabled))
+            _ = EnsureRecordingAuthorization();
         UpdateFullRecording(level, player, settings);
         UpdateDeathReplayRecording(level, player, settings);
     }
@@ -218,6 +222,13 @@ public static class AutoRecorder {
 
     public static void StartManual() {
         manualMode = true;
+    }
+
+    private static Task<bool> EnsureRecordingAuthorization(bool force = false) {
+        if (!NativeCaptureBridge.AuthorizationSupported) return Task.FromResult(true);
+        if (!force && recordingAuthorizationTask is { IsCompleted: false }) return recordingAuthorizationTask;
+        recordingAuthorizationTask = NativeCaptureBridge.AuthorizeRecordingAsync(force);
+        return recordingAuthorizationTask;
     }
 
     public static void StopManual(Level? level, bool save) {
