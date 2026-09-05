@@ -47,6 +47,9 @@ public static class AutoRecorder {
     private static bool deathReplayStartFailed;
     private static bool fullRecordingStartAwaiting;
     private static bool deathReplayStartAwaiting;
+    private static bool recordingSwitchesInitialized;
+    private static bool autoRecorderWasEnabled;
+    private static bool deathReplayWasEnabled;
     private static int finalizingCount;
     private static int cleanupRunning;
     private static long nextFinalizationId;
@@ -240,6 +243,26 @@ public static class AutoRecorder {
         if (current is null) return;
         if (save && level is not null) FinalizeCurrent(level);
         else DiscardCurrentRecording();
+    }
+
+    public static void UpdateRecordingSwitches() {
+        QolSettings settings = MicroblocksQolUtilsModule.Settings;
+        if (!recordingSwitchesInitialized) {
+            autoRecorderWasEnabled = settings.AutoRecorderEnabled;
+            deathReplayWasEnabled = settings.DeathReplayEnabled;
+            recordingSwitchesInitialized = true;
+            return;
+        }
+        if (settings.AutoRecorderEnabled && !autoRecorderWasEnabled) {
+            fullRecordingStartFailed = false;
+            _ = EnsureRecordingAuthorization();
+        }
+        if (settings.DeathReplayEnabled && !deathReplayWasEnabled) {
+            deathReplayStartFailed = false;
+            _ = EnsureRecordingAuthorization();
+        }
+        autoRecorderWasEnabled = settings.AutoRecorderEnabled;
+        deathReplayWasEnabled = settings.DeathReplayEnabled;
     }
 
     public static void CleanupRecordings() {
