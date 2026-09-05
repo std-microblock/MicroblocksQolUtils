@@ -229,6 +229,16 @@ public static class AutoRecorder {
 
     public static void StartManual() {
         manualMode = true;
+        fullRecordingStartFailed = false;
+        _ = EnsureRecordingAuthorization();
+    }
+
+    public static bool AuthorizationInFlight => recordingAuthorizationTask is { IsCompleted: false };
+
+    public static Task<bool>? AuthorizationTask => recordingAuthorizationTask;
+
+    public static void ReauthorizeRecording() {
+        _ = EnsureRecordingAuthorization(force: true);
     }
 
     private static Task<bool> EnsureRecordingAuthorization(bool force = false) {

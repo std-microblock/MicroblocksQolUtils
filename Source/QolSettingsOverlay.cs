@@ -55,8 +55,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
     private RecordingLibraryEntry? pendingRecordingDelete;
     private string recordingNotice = "";
     private float recordingNoticeTimer;
-    private Task<bool>? recorderAuthorizationTask;
-    private bool pendingManualAfterAuthorization;
+    private Task<bool>? pendingRecorderAuthorization;
     private static bool recordingAuthorized;
 
     public static QolSettingsOverlay? ActivePage => activePage is { Scene: not null, Visible: true }
@@ -309,7 +308,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
 
         int authorizeCount = RecorderAuthorizeButtonCount;
         if (authorizeCount == 1) {
-            bool authorizing = recorderAuthorizationTask is { IsCompleted: false };
+            bool authorizing = AutoRecorder.AuthorizationInFlight;
             RenderRecorderButton(RecorderButtonRect(hero, 0), AuthorizeButtonLabel(authorizing),
                 !authorizing && !RecorderCapturing, palette, alpha, "settings.recorder.authorize");
         }
@@ -933,20 +932,13 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             Audio.Play("event:/ui/main/button_toggle_on");
             return;
         }
-        if (recorderAuthorizationTask is { IsCompleted: false }) {
+        if (AutoRecorder.AuthorizationInFlight) {
             Audio.Play("event:/ui/main/button_invalid");
             return;
         }
-        if (NativeCaptureBridge.AuthorizationSupported) {
-            // Always validate through the portal, so a persisted-but-revoked selection
-            // is caught here, instead of popping the picker during gameplay.
-            pendingManualAfterAuthorization = true;
-            recorderAuthorizationTask = NativeCaptureBridge.AuthorizeRecordingAsync(force: false);
-            ShowRecordingNotice("正在确认录像授权…");
-            Audio.Play("event:/ui/main/button_select");
-            return;
-        }
         AutoRecorder.StartManual();
+        if (NativeCaptureBridge.AuthorizationSupported)
+            pendingRecorderAuthorization = AutoRecorder.AuthorizationTask;
         ShowRecordingNotice("已开启手动录制");
         Audio.Play("event:/ui/main/button_toggle_on");
     }
@@ -962,32 +954,29 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             Audio.Play("event:/ui/main/button_invalid");
             return;
         }
-        if (recorderAuthorizationTask is { IsCompleted: false }) {
+        if (AutoRecorder.AuthorizationInFlight) {
             Audio.Play("event:/ui/main/button_invalid");
             return;
         }
-        recorderAuthorizationTask = NativeCaptureBridge.AuthorizeRecordingAsync(force: true);
+        AutoRecorder.ReauthorizeRecording();
+        pendingRecorderAuthorization = AutoRecorder.AuthorizationTask;
         ShowRecordingNotice("正在请求录像授权，请在系统选择器中选择窗口…");
         Audio.Play("event:/ui/main/button_select");
     }
 
     private void UpdateRecorderAuthorization() {
-        Task<bool>? task = recorderAuthorizationTask;
+        Task<bool>? task = pendingRecorderAuthorization;
         if (task is null || !task.IsCompleted) return;
-        recorderAuthorizationTask = null;
+        pendingRecorderAuthorization = null;
         bool authorized = task.Result;
         recordingAuthorized = authorized;
         if (authorized) {
-            if (pendingManualAfterAuthorization) {
-                pendingManualAfterAuthorization = false;
-                AutoRecorder.StartManual();
-                ShowRecordingNotice("已授权，已开启手动录制");
-            } else {
-                ShowRecordingNotice("录像授权成功");
-            }
+            ShowRecordingNotice("录像授权成功");
             Audio.Play("event:/ui/main/button_toggle_on");
         } else {
-            pendingManualAfterAuthorization = false;
+            // Roll the mode back so the UI does not claim to be recording
+            // while the capture thread never started.
+            if (AutoRecorder.ManualMode) AutoRecorder.StopManual(level, save: false);
             ShowRecordingNotice("未完成录像授权");
             Audio.Play("event:/ui/main/button_invalid");
         }
@@ -1392,7 +1381,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             bool active = AutoRecorder.IsRecording || AutoRecorder.ManualMode;
             int authorizeCount = RecorderAuthorizeButtonCount;
             if (authorizeCount == 1) {
-                bool authorizing = recorderAuthorizationTask is { IsCompleted: false };
+                bool authorizing = AutoRecorder.AuthorizationInFlight;
                 targets.Add(new MaterialInteractionTarget("settings.recorder.authorize",
                     RecorderButtonRect(hero, 0), Enabled: !authorizing && !RecorderCapturing));
             }
