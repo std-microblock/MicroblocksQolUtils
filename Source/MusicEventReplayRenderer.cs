@@ -120,7 +120,8 @@ internal static class MusicEventReplayRenderer {
         // A newly assigned instance can still report STOPPED until Studio consumes
         // start(). Its later playback notification must establish the track too.
         if (row.Kind is "start" or "switch" or "snapshot"
-            || (state.Event.Length == 0 && row.PlaybackState is "STARTING" or "PLAYING" or "SUSTAINING")) {
+            || (row.Kind == "playback" && state.Event.Length == 0
+                && row.PlaybackState is "STARTING" or "PLAYING" or "SUSTAINING")) {
             if (string.IsNullOrWhiteSpace(row.Event)
                 || (row.Kind != "start" && row.PlaybackState is "STOPPED" or "STOPPING")) {
                 if (state.Event.Length != 0) Stop(state, output, result);

@@ -48,6 +48,16 @@ internal static class AudioReplayTests {
         }
         Check(MusicEventReplayRenderer.Plan(delayedPath, clips, true).Count(c => c.Operation == "start") == 1,
             "Delayed playback was never started");
+        using (var journal = new MusicJournal(delayedPath)) {
+            journal.Start(0);
+            journal.Accept(new(0, 1, "start", "main", "event:/music/lvl1/main", 1, 0, false, "STOPPED", new Dictionary<string, float>()));
+            journal.Accept(new(10_000_000, 2, "stop-IMMEDIATE", "main", "event:/music/lvl1/main", 1, 0, false, "PLAYING", new Dictionary<string, float>()));
+            journal.Accept(new(20_000_000, 3, "stop-IMMEDIATE", "main", "event:/music/lvl1/main", 1, 0, false, "PLAYING", new Dictionary<string, float>()));
+            journal.Finish(true);
+        }
+        var delayedCommands = MusicEventReplayRenderer.Plan(delayedPath, clips, true);
+        Check(delayedCommands.Count(c => c.Operation == "start") == 1 && delayedCommands.Count(c => c.Operation == "stop") == 1,
+            "Asynchronous start/stop commands were lost or restarted stopped music");
         Ok(studio.getEvent("event:/music/lvl1/main", out var vanilla));
         Ok(vanilla.getID(out Guid vanillaId));
         Check(AudioEventReplayRenderer.RenderCommandsToSidecar(
@@ -57,6 +67,79 @@ internal static class AudioReplayTests {
             [new(0, 1, "event:/missing/replay-regression", "start", Bus: "music")], sidecar, 1),
             "Missing music event was reported as success");
         TestModBank(studio, output);
+        TestSfx(studio, output);
+    }
+
+    private static void TestSfx(FMOD.Studio.System studio, string output) {
+        const string oneShot = "event:/char/madeline/death";
+        const string loop = "event:/char/madeline/dreamblock_travel";
+        Ok(studio.getEvent(oneShot, out var shotDescription));
+        Ok(shotDescription.isOneshot(out bool isShot)); Check(isShot, "Test sound isn't a one-shot");
+        Ok(studio.getEvent(loop, out var loopDescription));
+        Ok(loopDescription.isOneshot(out bool isLoopShot)); Check(!isLoopShot, "Test loop isn't looping");
+        float[] Render(string name, AudioCommand[] commands, RecordingClip[] clips) {
+            string journalPath = Path.Combine(output, name + ".sfxevents");
+            using (var journal = new AudioEventJournal(journalPath)) {
+                journal.Start(0);
+                foreach (var command in commands) journal.Accept(command);
+                journal.Finish(true);
+            }
+            string sidecar = Path.Combine(output, name + ".sfxchunks");
+            Check(AudioEventReplayRenderer.RenderToSidecar(journalPath, sidecar, clips), name + " failed");
+            // Verify the source-clock contract consumed by the native muxer, not
+            // just the concatenated PCM: no gap or overlap may straddle a cut.
+            using (var reader = new BinaryReader(File.OpenRead(sidecar))) {
+                reader.ReadBytes(8);
+                long outputFrame = 0, clipOutputStart = 0;
+                double endSeconds = clips[0].DurationSeconds;
+                int clipIndex = 0;
+                while (reader.BaseStream.Position < reader.BaseStream.Length) {
+                    long frame = (long)Math.Round(reader.ReadUInt64() * 48000d / 1_000_000_000d);
+                    reader.ReadInt32(); reader.ReadUInt16(); reader.ReadUInt16();
+                    uint frames = reader.ReadUInt32(), count = reader.ReadUInt32();
+                    while (outputFrame >= (long)Math.Round(endSeconds * 48000)) {
+                        clipOutputStart = (long)Math.Round(endSeconds * 48000);
+                        endSeconds += clips[++clipIndex].DurationSeconds;
+                    }
+                    Check(frame == (long)Math.Round(clips[clipIndex].StartSeconds * 48000) + outputFrame - clipOutputStart,
+                        name + " has incorrect source-clock sample placement");
+                    Check(outputFrame + frames <= (long)Math.Round(endSeconds * 48000), name + " chunk crosses a source cut");
+                    outputFrame += frames;
+                    reader.BaseStream.Seek(count * 4, SeekOrigin.Current);
+                }
+            }
+            float[] samples = ReadSamples(sidecar);
+            Check(samples.Length == (int)Math.Round(clips.Sum(c => c.DurationSeconds) * 48000) * 2,
+                name + " lost samples at a partial DSP block boundary");
+            return samples;
+        }
+        RecordingClip[] uncut = [new("run.mkv", 0, 4, "", 0)];
+        RecordingClip[] edited = [new("run.mkv", 0, 0.137, "", 0), new("run.mkv", 20, 3.863, "", 0)];
+        AudioCommand start = new(0, 1, oneShot, "start", Bus: "sfx");
+        float[] natural = Render("sfx-natural", [start], uncut);
+        float[] stopped = Render("sfx-stop", [start, new(50_000_000, 1, oneShot, "stop", Value: 1)], uncut);
+        float[] cut = Render("sfx-cut", [start, new(50_000_000, 1, oneShot, "release"),
+            new(1_000_000_000, 2, "event:/discarded/must-not-load", "start")], edited);
+        double tail = Rms(natural, .2, .5);
+        Console.WriteLine($"One-shot tails: natural={tail:F6}, stopped={Rms(stopped, .2, .5):F6}, cut={Rms(cut, .2, .5):F6}");
+        Check(tail > .0001 && Rms(stopped, .2, .5) > tail * .8 && Rms(cut, .2, .5) > tail * .8,
+            "One-shot tail was cut by stop/release or a video edit");
+        AudioCommand loopStart = new(0, 1, loop, "start", Bus: "sfx");
+        float[] loopNatural = Render("loop-natural", [loopStart], uncut);
+        float[] loopCut = Render("loop-cut", [loopStart], edited);
+        float[] loopStopped = Render("loop-stop", [loopStart, new(137_000_000, 1, loop, "stop", Value: 1)], uncut);
+        Check(Rms(loopNatural, 2, 1) > .0001, "Test loop isn't audible");
+        Check(Rms(loopCut, 2, 1) < .00001 && Rms(loopStopped, 2, 1) < .00001, "Loop leaked after a cut/stop");
+        RecordingClip[] split = [new("run.mkv", 0, .137, "", 0), new("run.mkv", .137, 3.863, "", 0)];
+        float[] loopSplit = Render("loop-metadata", [loopStart], split);
+        Check(Rms(loopSplit, 2, 1) > .0001, "Metadata-only split cut a continuous loop");
+        var plan = AudioEventReplayRenderer.PlanSfxCommands(new(0, [start,
+            new(137_000_000, 2, oneShot, "start"), new(20_000_000_000, 1, oneShot, "start")]), edited);
+        Check(plan.Count(c => c.Operation == "start") == 2 && plan.Count(c => c.Operation == "cut") == 1,
+            "Discarded boundary start leaked into SFX plan");
+        Check(plan.Where(c => c.Operation == "start").Select(c => c.InstanceId).Distinct().Count() == 2,
+            "A reused source instance controls the previous branch's tail");
+        Console.WriteLine("PASS one-shot completion, loop stops, discarded events, metadata splits and exact sample counts");
     }
 
     private sealed class BankAsset(byte[] data) : Celeste.Mod.ModAsset(null!) {
