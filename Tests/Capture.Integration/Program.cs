@@ -56,6 +56,7 @@ Fmod(studio.getEvent("event:/char/madeline/jump",out var jumpDescription));
 NativeCaptureBridge.Initialize(null); Check(NativeCaptureBridge.Available,"native load failed");
 CaptureSource.Load(); Check(CaptureSource.VideoError is null,$"hook failed: {CaptureSource.VideoError}");
 if (Environment.GetEnvironmentVariable("MQOL_TEST_EVENT_RENDER") == "1") {
+    AudioReplayTests.Run(studio, output);
     string journal = Path.Combine(output, "event-render.jsonl");
     File.WriteAllLines(journal, new[] {
         "{\"type\":\"header\",\"version\":2,\"clock\":\"capture-monotonic-nanos\"}",

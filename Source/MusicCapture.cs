@@ -75,6 +75,7 @@ internal static class MusicCapture {
         var result = orig(instance, name, value); if (result == FMOD.RESULT.OK) Command(instance, "parameter", parameter: name, value: value); return result;
     }
     private static void Command(FMOD.Studio.EventInstance instance, string kind, int? position = null, bool? paused = null, string? parameter = null, float value = 0) {
+        if (AudioEventCapture.Suppress) return;
         try { RecordCommand(instance, kind, position, paused, parameter, value); }
         catch (Exception e) { Fail(e); }
     }

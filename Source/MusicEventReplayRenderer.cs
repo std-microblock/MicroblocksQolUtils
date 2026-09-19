@@ -91,7 +91,7 @@ internal static class MusicEventReplayRenderer {
     private static void ApplyInitial(Row? row, TrackState state, double sourceStart, double output,
         bool forceSync, ref ulong nextId, List<AudioCommand> result) {
         if (row is null || string.IsNullOrWhiteSpace(row.Event)
-            || row.PlaybackState is "STOPPED" or "STOPPING") {
+            || (row.Kind != "start" && row.PlaybackState is "STOPPED" or "STOPPING")) {
             if (state.Event.Length != 0) Stop(state, output, result);
             return;
         }
@@ -117,9 +117,12 @@ internal static class MusicEventReplayRenderer {
 
     private static void ApplyRow(Row row, TrackState state, double output,
         ref ulong nextId, List<AudioCommand> result) {
-        if (row.Kind is "start" or "switch" or "snapshot") {
+        // A newly assigned instance can still report STOPPED until Studio consumes
+        // start(). Its later playback notification must establish the track too.
+        if (row.Kind is "start" or "switch" or "snapshot"
+            || (state.Event.Length == 0 && row.PlaybackState is "STARTING" or "PLAYING" or "SUSTAINING")) {
             if (string.IsNullOrWhiteSpace(row.Event)
-                || row.PlaybackState is "STOPPED" or "STOPPING") {
+                || (row.Kind != "start" && row.PlaybackState is "STOPPED" or "STOPPING")) {
                 if (state.Event.Length != 0) Stop(state, output, result);
                 return;
             }
