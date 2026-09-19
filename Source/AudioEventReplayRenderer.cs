@@ -39,8 +39,8 @@ internal static class AudioEventReplayRenderer {
                 Check(lowLevel.setSoftwareFormat(SampleRate, FMOD.SPEAKERMODE.STEREO, 0), "set offline format");
                 Check(lowLevel.setOutput(FMOD.OUTPUTTYPE.NOSOUND_NRT), "set offline NRT output");
                 Check(studio.initialize(1024, FMOD.Studio.INITFLAGS.SYNCHRONOUS_UPDATE,
-                    FMOD.INITFLAGS.NORMAL, IntPtr.Zero), "initialize offline Studio system");
-                LoadBanks(studio);
+                    FMOD.INITFLAGS.STREAM_FROM_UPDATE, IntPtr.Zero), "initialize offline Studio system");
+                Dictionary<string, Guid> eventIds = LoadBanks(studio, source.Commands);
 
                 using MixerCapture capture = new(sidecarPath, clips, busId);
                 Check(lowLevel.getMasterChannelGroup(out FMOD.ChannelGroup master), "get offline master group");
@@ -75,7 +75,7 @@ internal static class AudioEventReplayRenderer {
                     }
                     while (index < commands.Count
                         && RelativeSeconds(source, commands[index].TimestampNanos) <= elapsed + 1e-9) {
-                        Apply(commands[index++], studio, instances);
+                        Apply(commands[index++], studio, instances, eventIds);
                     }
                     capture.SetTime(elapsed);
                     Check(studio.update(), "offline Studio update");
@@ -133,7 +133,7 @@ internal static class AudioEventReplayRenderer {
     private static double RelativeSeconds(AudioEventSource source, ulong timestamp) =>
         timestamp <= source.OriginNanos ? 0d : (timestamp - source.OriginNanos) / 1_000_000_000d;
 
-    private static void LoadBanks(FMOD.Studio.System studio) {
+    private static Dictionary<string, Guid> LoadBanks(FMOD.Studio.System studio, IReadOnlyList<AudioCommand> commands) {
         string root = FindCelesteRoot();
         string bankRoot = Path.Combine(root, "Content", "FMOD", "Desktop");
         string[] names = ["Master Bank.bank", "Master Bank.strings.bank", "sfx.bank", "ui.bank", "dlc_sfx.bank",
@@ -144,7 +144,35 @@ internal static class AudioEventReplayRenderer {
             Check(studio.loadBankFile(path, FMOD.Studio.LOAD_BANK_FLAGS.NORMAL, out var bank), $"load bank {name}");
             if (bank.isValid()) Check(bank.loadSampleData(), $"load samples {name}");
         }
+        // Mod banks frequently have no strings bank: Everest resolves their .guids
+        // aliases itself. Recreate both the bank and that lookup in the offline
+        // system instead of treating an unknown path as a successfully silent event.
+        HashSet<string> wanted = commands.Where(c => c.Operation == "start")
+            .Select(c => c.EventPath).ToHashSet(StringComparer.Ordinal);
+        Dictionary<string, Guid> eventIds = new(StringComparer.Ordinal);
+        foreach (var (asset, liveBank) in Audio.Banks.ModCache.ToArray()) {
+            if (!liveBank.isValid()) continue;
+            Check(liveBank.getEventList(out var events), $"enumerate bank {asset.PathVirtual}");
+            bool needed = false;
+            foreach (var description in events) {
+                string path = Audio.GetEventName(description) ?? "";
+                Check(description.getID(out Guid id), $"identify event {path}");
+                if (!wanted.Contains(path) && !wanted.Contains("guid://" + id)) continue;
+                eventIds[path] = id;
+                needed = true;
+            }
+            if (!needed) continue;
+            // Stream works for both unpacked and ZIP-backed Everest assets. FMOD's
+            // loadBankMemory copies the bytes, so no live bank/stream is reused.
+            using Stream input = asset.Stream;
+            using MemoryStream bytes = new();
+            input.CopyTo(bytes);
+            Check(studio.loadBankMemory(bytes.ToArray(), FMOD.Studio.LOAD_BANK_FLAGS.NORMAL, out var bank),
+                $"load mod bank {asset.PathVirtual}");
+            Check(bank.loadSampleData(), $"load mod samples {asset.PathVirtual}");
+        }
         Check(studio.flushSampleLoading(), "flush FMOD samples");
+        return eventIds;
     }
 
     private static string FindCelesteRoot() {
@@ -156,7 +184,7 @@ internal static class AudioEventReplayRenderer {
     }
 
     private static void Apply(AudioCommand command, FMOD.Studio.System studio,
-        Dictionary<ulong, FMOD.Studio.EventInstance> instances) {
+        Dictionary<ulong, FMOD.Studio.EventInstance> instances, IReadOnlyDictionary<string, Guid> eventIds) {
         if (command.Operation == "listener") {
             if (Unpack(command.Attributes) is { } listener) _ = studio.setListenerAttributes((int)command.Value.GetValueOrDefault(), listener);
             return;
@@ -165,8 +193,14 @@ internal static class AudioEventReplayRenderer {
             && !string.Equals(command.Bus, "music", StringComparison.OrdinalIgnoreCase)) return;
         if (command.Operation == "start") {
             if (!instances.TryGetValue(command.InstanceId, out var instance) || !instance.isValid()) {
-                if (studio.getEvent(command.EventPath, out var description) != FMOD.RESULT.OK
-                    || description.createInstance(out instance) != FMOD.RESULT.OK) return;
+                FMOD.Studio.EventDescription description;
+                FMOD.RESULT resolved = eventIds.TryGetValue(command.EventPath, out Guid id)
+                    || (command.EventPath.StartsWith("guid://", StringComparison.OrdinalIgnoreCase)
+                        && Guid.TryParse(command.EventPath.AsSpan(7), out id))
+                    ? studio.getEventByID(id, out description)
+                    : studio.getEvent(command.EventPath, out description);
+                Check(resolved, $"resolve replay event {command.EventPath}");
+                Check(description.createInstance(out instance), $"create replay event {command.EventPath}");
             }
             if (command.State is { } state) {
                 foreach (var pair in state.Parameters) _ = instance.setParameterValue(pair.Key, pair.Value);
@@ -177,7 +211,10 @@ internal static class AudioEventReplayRenderer {
                 instances[command.InstanceId] = instance;
                 if (command.State?.TimelineMilliseconds is > 0) _ = instance.setTimelinePosition(command.State.TimelineMilliseconds);
             }
-            else _ = instance.release();
+            else {
+                _ = instance.release();
+                throw new InvalidOperationException($"Cannot start replay event {command.EventPath}");
+            }
             return;
         }
         if (!instances.TryGetValue(command.InstanceId, out var target) || !target.isValid()) return;
