@@ -146,7 +146,7 @@ See [capture architecture and testing](docs/capture-architecture.md).
   limits are configurable.
 - Gameplay, UI SFX, and music are recorded as timestamped FMOD event commands in `.sfxevents` and
   `.music.jsonl`; no audio PCM is stored during capture. During finalization, Celeste's FMOD banks replay
-  both journals in a separate offline NRT system: SFX follows retained source clips while music is rendered
+  both journals in a separate offline NRT system: retained SFX starts follow the video edit, with one-shot tails continuing across cuts, while music is rendered
   on a continuous output timeline before AAC mixing. MKV files under `.working` are therefore silent
   intermediates; play the finalized MP4 files under `full` or `deaths` instead.
 - BGM can use the captured game mix or SfxOnlyWithPostMix. The latter edits only
@@ -166,6 +166,11 @@ directory containing the JSON file:
 ~~~
 
 Without a mapping, Celeste's FMOD music events are used as the post-mix BGM source.
+Custom-map music uses the needed loaded Everest banks and their GUID aliases too;
+an unavailable replay event is reported as an export error instead of silent audio.
+Retained one-shot SFX play to completion across edits and recorded stop/release calls
+(within the exported video's duration). Looping/sustained sounds still honor stops
+and fade out at removed branches. Sounds that begin in discarded footage are not replayed.
 
 The recording setting **Remove freeze frames** is disabled by default. When enabled, finalization
 detects stalls in the captured timeline and removes those intervals from the video, audio, and BGM
