@@ -20,7 +20,7 @@
     <Compile Include="../../Source/AudioEventReplayRenderer.cs" Link="AudioEventReplayRenderer.cs"/>
     <Compile Include="../../Source/AudioEventSource.cs" Link="AudioEventSource.cs"/>
     <Compile Include="../../Source/MusicEventReplayRenderer.cs" Link="MusicEventReplayRenderer.cs"/>
-    <Compile Include="../../Source/SdlFrameSource.cs" Link="SdlFrameSource.cs"/>
+    <Compile Include="../../Source/SdlFrameSource.cs" Link="SdlFrameSource.cs"/><Compile Include="../../Source/PresentationClock.cs" Link="PresentationClock.cs"/>
     <Compile Include="../../Source/NativeCaptureBridge.cs" Link="NativeCaptureBridge.cs"/>
     <Compile Include="../../Source/RecordingTimeline.cs" Link="RecordingTimeline.cs"/>
     <Compile Include="../../Source/RecordingDeathAudio.cs" Link="RecordingDeathAudio.cs"/>
