@@ -96,6 +96,8 @@ public sealed class MicroblocksQolUtilsModule : EverestModule {
         } finally {
             FrameProfiler.EndUpdate();
             FrameRateCounter.TickUpdate();
+            // Fixed-step content clock for captured frames (wall clock under decoupled MotionSmoothing).
+            PresentationClock.Shared.Advance(self.IsFixedTimeStep && !MotionSmoothingBridge.Enabled, self.TargetElapsedTime.Ticks);
         }
     }
 

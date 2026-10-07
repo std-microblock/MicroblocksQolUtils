@@ -185,6 +185,42 @@ var consumer = Task.Run(() => {
     }
 });
 await Timeout(Task.WhenAll(producer,consumer));
+
+// Presentation clock: fixed-step content must map one update to one 60-Hz tick even
+// when FNA catches up (2 updates, then 1) and Present call times jitter around ticks.
+static UInt128 Tick60(ulong t) => ((UInt128)t * 60 + 500_000_000) / 1_000_000_000;
+{
+    var pclock = new PresentationClock();
+    Check(pclock.Timestamp(1_000) == 1_000 && pclock.Timestamp(900) == 1_001, "wall fallback is not monotonic");
+    pclock.Reset();
+    const long step = 166_667; // Celeste/FNA TargetElapsedTime ticks
+    ulong wall = 1_700_000_000_008_333_333; // half a tick: worst case for wall rounding
+    var rng = new Random(7);
+    long updates = 0; UInt128? lastTick = null; UInt128 firstTick = 0; ulong firstUpdate = 0;
+    for (int frame = 0; frame < 3000; frame++) {
+        int n = frame % 2 == 0 ? 2 : 1; // three updates per two presents
+        for (int i = 0; i < n; i++) { pclock.Advance(true, step); updates++; }
+        // Present call time = ideal content time plus scheduling jitter (not a random walk).
+        wall = 1_700_000_000_008_333_333 + (ulong)updates * 16_666_700 + (ulong)rng.Next(0, 8_000_000);
+        UInt128 tick = Tick60(pclock.Timestamp(wall));
+        if (lastTick is null) { firstTick = tick; firstUpdate = (ulong)updates; }
+        else Check(tick - lastTick.Value == (UInt128)n, $"frame {frame}: {n} update(s) spanned {tick - lastTick.Value} ticks");
+        lastTick = tick;
+    }
+    Check(pclock.Resyncs == 0, "steady fixed-step play re-anchored to the wall clock");
+    // Genuine slowdown: 40 updates per wall second. Stay within the drift limit of wall time.
+    for (int frame = 0; frame < 400; frame++) {
+        pclock.Advance(true, step);
+        wall += 25_000_000;
+        ulong ts = pclock.Timestamp(wall);
+        Check(Math.Abs((double)ts - wall) <= PresentationClock.DriftLimitNanos, "content pclock drifted away from audio");
+    }
+    Check(pclock.Resyncs > 0, "slowdown never re-synchronized to wall time");
+    ulong before = pclock.Timestamp(wall);
+    Check(pclock.Timestamp(wall) > before, "present without a new update reused a timestamp");
+    pclock.Advance(false, step); // MotionSmoothing decoupled: wall pclock
+    Check(pclock.Timestamp(wall + 1_000_000_000) == wall + 1_000_000_000, "decoupled rendering did not use wall time");
+}
 Console.WriteLine("PASS: queues, fair delivery, bounded PCM rings/concurrency, callback isolation, cancellation/drain, clocks, music overflow and per-sink journals");
 
 namespace Celeste.Mod.MicroblocksQolUtils {

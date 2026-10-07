@@ -117,7 +117,7 @@ internal static class SdlFrameSource {
                     ConfigureRoutes();
                     SDL_GL_GetDrawableSize(value, out int width, out int height);
                     if (width > 0 && height > 0) {
-                        ulong timestamp = ClockNanos();
+                        ulong timestamp = PresentationClock.Shared.Timestamp(ClockNanos());
                         AutoRecorder.ManualSlPresented(timestamp);
                         RecordingSavePause.Presented(timestamp);
                         int status = Frame(resolver, SDL_GL_GetCurrentContext(), (uint)width, (uint)height,
@@ -148,7 +148,7 @@ internal static class SdlFrameSource {
                 if (window != 0 && SDL_GetWindowWMInfo(window, ref info) != 0 && info.Subsystem == 1) {
                     ConfigureRoutes();
                     if (trace) Logger.Log(LogLevel.Info, "MicroblocksQolUtils/Capture", $"DXGI HWND={info.Handle:X}");
-                    ulong timestamp = ClockNanos();
+                    ulong timestamp = PresentationClock.Shared.Timestamp(ClockNanos());
                     AutoRecorder.ManualSlPresented(timestamp);
                     RecordingSavePause.Presented(timestamp);
                     int status = D3dFrame(chain, info.Handle, CaptureSource.WantsPixels && failure is null ? 1u : 0u,
