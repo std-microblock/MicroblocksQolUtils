@@ -147,6 +147,12 @@ SFX 按源视频片段裁切，music 按输出时间线连续重放，再交给 
   临时 IO 不在 render/FMOD 线程；这不是保证任何磁盘/任意分辨率都能满帧。
 - 录制 sink 只写视频和事件日志；SFX/BGM 临时 PCM 由最终化阶段的独立 FMOD NRT renderer 产生，
   不阻塞游戏 mixer，也不把音频副本留在 `.working` 目录。
+- **帧时间戳是游戏内容时钟，不是 Present 调用时刻**（`PresentationClock`）。FNA 固定 60Hz 步长在落后时会一次
+  跑 2 次 Update 再绘制，Present 调用的墙钟时间因此与画面内容错开：带 2 个更新的帧可能只隔 16ms、带 1 个更新的隔 33ms。
+  直接按墙钟量化到 60FPS 网格，相位贴近取整边界时相邻帧会落入同一 tick 被当作重复丢弃（实测一段 60 FPS 游戏只录到约 40 FPS），
+  其余帧间距忽快忽慢，看起来就是“速度不对”。现在时间戳 = 锚点 + 更新次数 × TargetElapsedTime，锚点对齐 60Hz 网格中心；
+  与墙钟偏差超过 50ms（真实卡顿/减速）才重新锚定，保持与按墙钟记录的音频同步。没有上报过 Update、或 MotionSmoothing
+  解耦插值渲染时仍使用墙钟。同一更新内的多次呈现时间戳仍严格递增，由采集层按 tick 去重。
 - 编码 PTS/剪辑边界使用与采集匹配的 tick 映射，这是时间换算，不是额外筛选。
   原始 GPU 提交时间、首帧音频原点不改写。
   `NativeCaptureSession.DeliveryStatistics` 报告订阅损失，`Statistics` 报告 native 损失；排空后写 capture report。
