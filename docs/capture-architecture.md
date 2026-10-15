@@ -227,14 +227,15 @@ SFX 按源视频片段裁切，music 按输出时间线连续重放，再交给 
 
 玩家生命阶段由 `PlayerLifecycle` 统一：4 个线性状态（`Alive`/`Dying`/`Respawning`/`EnteringLevel`）带各自的
 上升/下降沿，另加正交信号（`PlayerAlive`/`PlayerDead`/`PlayerControllable`/`InCutscene`）和本帧的 `DeadBody` 引用。
-`AutoRecorder`（死亡回放与完整录像）、`RecordingDeathRecovery`、`RecordingTransitionAutoSave` 调用 `Advance` 读取，
-`InstantDeaths`、`MiniMapRenderer` 读上一次采样的快照，不再各自判定
-`player.Dead`/`PlayerDeadBody`/`StIntroRespawn`/wipe/过场。死亡回放在“离开 `Dying`”的第一帧收尾，下一轮从同一帧开始。
+`AutoRecorder` 每帧只调用一次 `AdvanceOnce`（上升/下降沿只由跨越它的那一次采样产生，调用点必须唯一），
+`RecordingDeathRecovery`、`RecordingTransitionAutoSave`、`InstantDeaths`、`MiniMapRenderer` 都读只读快照 `Latest`，
+不再各自判定 `player.Dead`/`PlayerDeadBody`/`StIntroRespawn`/wipe/过场；`NotifyDeath`/`Rewind` 这两个帧外入口各自重采样一次。死亡回放在“离开 `Dying`”的第一帧收尾，下一轮从同一帧开始。
 
-- 起点：渐入/过场的第一帧（`EnteredRespawning`），不是可玩帧。
+- 起点：`死亡时刻 − 缓冲`（`DeathReplayBufferSeconds`，10–60s，录不到则夹到 0），即裁剪区间从死前缓冲开始。
 - 终点：穿过整段死亡过场（`InCutscene`/`SkippingCutscene`），到**下一段渐入的第一帧**（复活 wipe 的 `WipeIn`
   黑帧，或场景已可玩）才结束；没有 wipe 时，还需 `PlayerDeadBody` 消失、不在 `Transitioning` 且玩家已复活。
-  裁剪区间为「死亡时刻 − 缓冲（10–60s）」到该帧，包含死前缓冲与完整死亡演出，而不只是死亡前最近的一段。
+  该帧即离开 `Dying` 的第一帧（`EnteredRespawning`，不是可玩帧），也是下一轮录制的起点；
+  裁剪区间为「死亡时刻 − 缓冲」到该帧，包含死前缓冲与完整死亡演出，而不只是死亡前最近的一段。
 - `Player.Die` 只登记死亡并保持死亡分支打开（暂停中 ESC→retry 会先重开分支）；
   帧末在同一黑帧立即开始下一段回放，使连续回放无缝衔接。
 - 死亡过场中途手动 load 时，在 load 帧就收尾并立即开下一轮：SRT 的 load 是原地换状态 + 渐入 wipe（没有渐出），
