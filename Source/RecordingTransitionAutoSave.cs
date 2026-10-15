@@ -104,7 +104,8 @@ internal static class RecordingTransitionAutoSave {
             Cancel();
             return;
         }
-        PlayerLiveSnapshot life = PlayerLifecycle.Advance(level);
+        // AutoRecorder.AfterEngineUpdate already sampled this frame (same Engine.Scene).
+        PlayerLiveSnapshot life = PlayerLifecycle.Latest;
         if (life.PlayerDead) {
             Cancel();
             return;

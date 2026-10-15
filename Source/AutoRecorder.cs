@@ -192,7 +192,7 @@ public static class AutoRecorder {
         FlushPendingRecordingStop();
         // The lifecycle ends a death replay on the first frame of the next segment
         // (respawn wipe / level entry), then the next replay starts on that same frame.
-        if (PlayerLifecycle.Advance(Engine.Scene as Level).LeftDying) {
+        if (PlayerLifecycle.AdvanceOnce(Engine.Scene as Level).LeftDying) {
             FinalizeDeathReplayCapture();
             if (MicroblocksQolUtilsModule.Settings.DeathReplayEnabled) StartDeathReplayRecording();
         }
@@ -416,7 +416,7 @@ public static class AutoRecorder {
         if (body is null) return body;
         RecordingTransitionAutoSave.Cancel();
         // Every real death is registered; the lifecycle owns the phase from here.
-        PlayerLifecycle.NotifyDeath();
+        PlayerLifecycle.NotifyDeath(self.Scene as Level);
 
         if (deathReplayCurrent is { } deathReplay) {
             // ESC -> retry kills the player while paused, so reopen the branch here,

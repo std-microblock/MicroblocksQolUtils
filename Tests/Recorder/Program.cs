@@ -418,16 +418,16 @@ foreach(bool deepCutscene in new[]{false,true}) {
     var l=new Level(); var p=new Player{Scene=l}; l.Tracker.Player=p;
     PlayerLifecycle.ResetRun();
     Check(PlayerLifecycle.State==PlayerLiveState.EnteringLevel,"run starts in EnteringLevel");
-    Check(PlayerLifecycle.Advance(l).EnteredAlive,"level entry settles to Alive");
-    Check(!PlayerLifecycle.Advance(l).EnteredAlive && PlayerLifecycle.State==PlayerLiveState.Alive,"Alive is stable");
+    Check(PlayerLifecycle.AdvanceOnce(l).EnteredAlive,"level entry settles to Alive");
+    Check(!PlayerLifecycle.AdvanceOnce(l).EnteredAlive && PlayerLifecycle.State==PlayerLiveState.Alive,"Alive is stable");
     Check(PlayerLifecycle.NotifyDeath().EnteredDying && PlayerLifecycle.InDeathSequence,"death latches Dying");
     l.Entities.DeadBody=new PlayerDeadBody();
-    Check(!PlayerLifecycle.Advance(l).LeftDying,"dead body keeps Dying");
+    Check(!PlayerLifecycle.AdvanceOnce(l).LeftDying,"dead body keeps Dying");
     l.Entities.DeadBody=null; p.Dead=false; l.Wipe=new(){WipeIn=true,Percent=0f};
-    var respawn=PlayerLifecycle.Advance(l);
+    var respawn=PlayerLifecycle.AdvanceOnce(l);
     Check(respawn.LeftDying && respawn.EnteredRespawning,"respawn wipe starts the next segment");
     l.Wipe=null;
-    Check(PlayerLifecycle.Advance(l).EnteredAlive,"respawn settles to Alive");
+    Check(PlayerLifecycle.AdvanceOnce(l).EnteredAlive,"respawn settles to Alive");
     PlayerLifecycle.NotifyDeath();
     Check(PlayerLifecycle.Rewind().LeftDying && PlayerLifecycle.State==PlayerLiveState.Alive,"manual load rewinds the death");
 }

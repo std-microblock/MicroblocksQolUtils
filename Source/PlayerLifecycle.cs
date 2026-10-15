@@ -32,13 +32,27 @@ internal static class PlayerLifecycle {
     internal static PlayerLiveSnapshot Latest { get; private set; }
     internal static ulong DeathEpoch { get; private set; }
 
-    internal static PlayerLiveSnapshot NotifyDeath() {
+    // Re-reads the live fields from the scene; the phase machine is untouched.
+    // NotifyDeath / Rewind call this too, since they run outside the frame cadence.
+    private static void Sample(Level? level) {
+        Player? playerNow = level?.Tracker.GetEntity<Player>();
+        deadBody = level?.Entities.FindFirst<PlayerDeadBody>();
+        playerAlive = playerNow is { Dead: false };
+        playerDead = playerNow is { Dead: true };
+        playerControllable = level is not null && IsControllable(level, playerNow);
+        inCutscene = level is not null && (level.InCutscene || level.SkippingCutscene);
+    }
+
+    internal static PlayerLiveSnapshot NotifyDeath(Level? level = null) {
         DeathEpoch++;
+        Sample(level ?? Engine.Scene as Level);
         return Enter(PlayerLiveState.Dying);
     }
 
-    internal static PlayerLiveSnapshot Rewind() =>
-        Enter(state == PlayerLiveState.Dying ? PlayerLiveState.Alive : state);
+    internal static PlayerLiveSnapshot Rewind(Level? level = null) {
+        Sample(level ?? Engine.Scene as Level);
+        return Enter(state == PlayerLiveState.Dying ? PlayerLiveState.Alive : state);
+    }
 
     internal static PlayerLiveSnapshot ResetRun() {
         playerAlive = playerDead = playerControllable = inCutscene = false;
@@ -52,25 +66,15 @@ internal static class PlayerLifecycle {
         return Build(before);
     }
 
-    internal static PlayerLiveSnapshot Advance(Level? level) {
-        Player? playerNow = level?.Tracker.GetEntity<Player>();
-        PlayerDeadBody? deadBodyNow = level?.Entities.FindFirst<PlayerDeadBody>();
-        bool aliveNow = playerNow is { Dead: false };
-        bool deadNow = playerNow is { Dead: true };
-        bool cutsceneNow = level is not null && (level.InCutscene || level.SkippingCutscene);
-        bool controllableNow = level is not null && IsControllable(level, playerNow);
-
+    // The single per-frame sample: call it once per frame (AutoRecorder.AfterEngineUpdate),
+    // everyone else reads Latest; a second call would consume this frame's LeftDying.
+    internal static PlayerLiveSnapshot AdvanceOnce(Level? level) {
+        Sample(level);
         PlayerLiveState before = state;
-        if (state == PlayerLiveState.Dying && (level is null || DeathSequenceSettled(level, deadBodyNow)))
+        if (state == PlayerLiveState.Dying && (level is null || DeathSequenceSettled(level, deadBody)))
             state = PlayerLiveState.Respawning;
-        else if (state is PlayerLiveState.Respawning or PlayerLiveState.EnteringLevel && controllableNow)
+        else if (state is PlayerLiveState.Respawning or PlayerLiveState.EnteringLevel && playerControllable)
             state = PlayerLiveState.Alive;
-
-        deadBody = deadBodyNow;
-        playerAlive = aliveNow;
-        playerDead = deadNow;
-        playerControllable = controllableNow;
-        inCutscene = cutsceneNow;
         return Build(before);
     }
 
