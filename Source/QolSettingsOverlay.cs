@@ -1680,6 +1680,10 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             row.IsVisible = () => settings.AutomaticRecording == AutoRecordingMode.Golden;
             return row;
         }
+        SettingRow BgmRebuildOnly(SettingRow row) {
+            row.IsVisible = () => settings.BgmMode == BgmRecordingMode.SfxOnlyWithPostMix;
+            return row;
+        }
         Group(RecorderSettingsSection.Automatic,
             EnumRow("自动录制", () => settings.AutomaticRecording, value => settings.AutomaticRecording = value),
             Golden(EnumRow("成功时录到", () => settings.GoldenRecordingEnd, value => settings.GoldenRecordingEnd = value)),
@@ -1696,6 +1700,10 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
             Toggle("切面自动存档（保持视频连续）", () => settings.RecordingAutoSaveOnTransition,
                 value => settings.RecordingAutoSaveOnTransition = value),
             EnumRow("BGM 拼接", () => settings.BgmMode, value => settings.BgmMode = value),
+            // Only the reconstruction mode has a music cursor that can either follow the
+            // source time or keep playing across cuts; game-mix BGM already follows the video.
+            BgmRebuildOnly(Toggle("BGM 跟随视频剪辑", () => settings.RecordingBgmFollowsVideo,
+                value => settings.RecordingBgmFollowsVideo = value)),
             Toggle("剪辑冻结帧", () => settings.RecordingRemoveFreezeFrames, value => settings.RecordingRemoveFreezeFrames = value, highlightWhenOn: true),
             Range("录制帧率", () => settings.RecordingFrameRate, value => settings.RecordingFrameRate = value,
                 30, 120, 30, value => $"{value} FPS"),

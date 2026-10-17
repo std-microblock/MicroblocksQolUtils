@@ -48,6 +48,25 @@ settings.BgmMode = BgmRecordingMode.CaptureGameMix;
 Call("BeginRun", level);
 Check(!State<bool>("reconstructBgm"), "explicit game-mix mode was ignored");
 
+// Forcing "BGM follows the video" makes every room read source time, so clips split by
+// room/music cuts jump with the picture instead of letting the reconstructed BGM run on.
+// The default (false) must keep the automatic per-room policy asserted above.
+settings.BgmMode = BgmRecordingMode.SfxOnlyWithPostMix;
+settings.RecordingBgmFollowsVideo = true;
+session.Level = normal.Name;
+Call("BeginRun", level);
+Check(State<bool>("recordingRoomBgmFollowsVideo"), "forced BGM policy was not applied before the first room snapshot");
+foreach (var room in new[] { normal, sensitive, normal, triggered }) {
+    session.Level = room.Name;
+    Call("ObserveRoom", level);
+    Check(State<bool>("recordingRoomBgmFollowsVideo"), $"forced BGM policy ignored in room {room.Name}");
+}
+settings.RecordingBgmFollowsVideo = false;
+session.Level = normal.Name;
+Call("BeginRun", level);
+Call("ObserveRoom", level);
+Check(!State<bool>("recordingRoomBgmFollowsVideo"), "clearing the forced BGM policy did not restore the per-room policy");
+
 // Exercise actual clip creation for BOTH sinks with a deterministic stopped clock.
 // No native handle, files, hooks, Steam process or game settings are touched.
 object Recording(string path) {

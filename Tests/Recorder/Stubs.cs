@@ -78,7 +78,7 @@ namespace Celeste.Mod.MicroblocksQolUtils {
         public AutoRecordingMode AutomaticRecording;
         public bool AutoRecorderEnabled => AutomaticRecording != AutoRecordingMode.Off;
         public bool DeathReplayEnabled, RecordingRemoveFreezeFrames, RecordingEditingEnabled = true,
-            RecordingKeepPausedFrames, RecordingKeepFailedAttempts;
+            RecordingKeepPausedFrames, RecordingKeepFailedAttempts, RecordingBgmFollowsVideo;
         public int DeathReplayBufferSeconds=30, RecordingRetentionCount, AutoRecordingRetentionCount, DeathReplayRetentionCount;
         public string RecordingDirectory="";
         public GoldenRecordingEnd GoldenRecordingEnd;
