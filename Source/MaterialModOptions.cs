@@ -90,6 +90,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private string settingSearchText = "";
     private string imeText = "";
     private SearchTarget searchTarget;
+    private bool externalOverlayOpen;
 
     public bool SuppressNormalRender { get; set; }
 
@@ -98,7 +99,9 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
             if (Engine.Scene is not Overworld overworld) return null;
             MaterialModOptions? page = overworld.Current as MaterialModOptions
                 ?? overworld.Next as MaterialModOptions;
-            return page is { Visible: true } ? page : null;
+            // The key/button config screen uses the normal composition path; feeding the
+            // blurred acrylic snapshot from this page would hide it behind the settings UI.
+            return page is { Visible: true, externalOverlayOpen: false } ? page : null;
         }
     }
 
@@ -206,6 +209,12 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         }
 
         if (menu is null) return;
+        RefreshExternalOverlay();
+        if (externalOverlayOpen) {
+            // The key/button config screen owns input while it is open.
+            menu.Focused = false;
+            return;
+        }
         bool acceptsInput = pauseLevel is not null || Selected && Focused;
         if (acceptsInput && inputDelay <= 0f && dropdownItem is null && compositePopupItem is null
             && UpdateSearchInput(layout)) {
@@ -1004,6 +1013,21 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
         }
     }
 
+    private void RefreshExternalOverlay() {
+        bool open = false;
+        if (Scene is { } scene) {
+            foreach (Entity entity in scene.Entities) {
+                if (entity is not (KeyboardConfigUI or ButtonConfigUI)) continue;
+                open = true;
+                // Keep the page at its normal depth and lift the config screen instead.
+                // Moving the page behind depth-0 scene entities made the bright world
+                // leak through for a frame when the config screen faded out (white flash).
+                if (entity.Depth > -100_000) entity.Depth = -100_000;
+            }
+        }
+        externalOverlayOpen = open;
+    }
+
     private void SelectItem(TextMenu.Item item) {
         if (menu is null || menu.Current == item) return;
         menu.Current?.OnLeave?.Invoke();
@@ -1034,6 +1058,12 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     }
 
     private void UpdateInteractions(ModOptionsLayout layout) {
+        if (externalOverlayOpen) {
+            // Do not leave hidden setting rows alive as touch targets under the config UI.
+            MaterialTouch.Publish(this, [], TouchContext);
+            motion.Update([]);
+            return;
+        }
         List<MaterialInteractionTarget> targets = [
             new MaterialInteractionTarget("mod-options.search.tabs", layout.TabSearch,
                 Focused: searchTarget == SearchTarget.Tabs, TouchKind: "text", TouchText: tabSearchText,
