@@ -14,7 +14,7 @@ namespace Celeste.Mod.MicroblocksQolUtils;
 /// TextMenu, so custom entries and binding/config sub-pages keep their original behavior;
 /// this class only owns grouping, navigation, layout and mouse interaction.
 /// </summary>
-public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
+public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcrylicOverlay {
     private const float ScreenWidth = 1920f;
     private const float ScreenHeight = 1080f;
     private const float TabHeight = MaterialSplitPageLayout.TabHeight;
@@ -91,6 +91,8 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     private string imeText = "";
     private SearchTarget searchTarget;
     private bool externalOverlayOpen;
+    private readonly List<Entity> externalOverlays = [];
+    private readonly List<(Entity Entity, bool Visible)> hiddenOverlays = [];
 
     public bool SuppressNormalRender { get; set; }
 
@@ -99,9 +101,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
             if (Engine.Scene is not Overworld overworld) return null;
             MaterialModOptions? page = overworld.Current as MaterialModOptions
                 ?? overworld.Next as MaterialModOptions;
-            // The key/button config screen uses the normal composition path; feeding the
-            // blurred acrylic snapshot from this page would hide it behind the settings UI.
-            return page is { Visible: true, externalOverlayOpen: false } ? page : null;
+            return page is { Visible: true } ? page : null;
         }
     }
 
@@ -1014,18 +1014,34 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
     }
 
     private void RefreshExternalOverlay() {
-        bool open = false;
+        externalOverlays.Clear();
         if (Scene is { } scene) {
             foreach (Entity entity in scene.Entities) {
                 if (entity is not (KeyboardConfigUI or ButtonConfigUI)) continue;
-                open = true;
-                // Keep the page at its normal depth and lift the config screen instead.
-                // Moving the page behind depth-0 scene entities made the bright world
-                // leak through for a frame when the config screen faded out (white flash).
+                externalOverlays.Add(entity);
                 if (entity.Depth >= Depth) entity.Depth = Depth - 1;
             }
         }
-        externalOverlayOpen = open;
+        externalOverlayOpen = externalOverlays.Count > 0;
+    }
+
+    void IMaterialAcrylicOverlay.HideOverlaysForAcrylicCapture() {
+        hiddenOverlays.Clear();
+        foreach (Entity entity in externalOverlays) {
+            hiddenOverlays.Add((entity, entity.Visible));
+            entity.Visible = false;
+        }
+    }
+
+    void IMaterialAcrylicOverlay.RestoreOverlaysAfterAcrylicCapture() {
+        foreach ((Entity entity, bool visible) in hiddenOverlays) entity.Visible = visible;
+        hiddenOverlays.Clear();
+    }
+
+    void IMaterialAcrylicOverlay.RenderOverlaysAboveAcrylic() {
+        foreach (Entity entity in externalOverlays) {
+            if (entity.Visible) entity.Render();
+        }
     }
 
     private void SelectItem(TextMenu.Item item) {

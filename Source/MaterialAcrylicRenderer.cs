@@ -86,6 +86,7 @@ internal static class MaterialAcrylicRenderer {
             orig(self);
             return;
         }
+        IMaterialAcrylicOverlay? overlay = page as IMaterialAcrylicOverlay;
 
         GraphicsDevice graphics = Engine.Graphics.GraphicsDevice;
         RenderTargetBinding[] originalTargets = graphics.GetRenderTargets();
@@ -103,7 +104,19 @@ internal static class MaterialAcrylicRenderer {
             graphics.SetRenderTarget(sceneTarget);
             graphics.Viewport = new Viewport(0, 0, sceneTarget.Width, sceneTarget.Height);
             graphics.Clear(Engine.ClearColor);
-            orig(self);
+            HiresSnow? snow = (self as Overworld)?.Snow;
+            bool renderSnow = snow is { Visible: true };
+            if (renderSnow) snow!.Visible = false;
+            try {
+                overlay?.HideOverlaysForAcrylicCapture();
+                try {
+                    orig(self);
+                } finally {
+                    overlay?.RestoreOverlaysAfterAcrylicCapture();
+                }
+            } finally {
+                if (renderSnow) snow!.Visible = true;
+            }
             sceneRendered = true;
 
             float sampleScale = MathHelper.Lerp(0.8f, 3.1f,
@@ -123,6 +136,8 @@ internal static class MaterialAcrylicRenderer {
 
             page.SuppressNormalRender = false;
             DrawMaterialPage(page);
+            DrawOverlays(overlay);
+            if (renderSnow) snow!.Render(self);
             successfulFrames++;
         } catch (Exception exception) {
             page.SuppressNormalRender = false;
@@ -163,6 +178,15 @@ internal static class MaterialAcrylicRenderer {
     }
 
     private static void DrawMaterialPage(IMaterialAcrylicPage page) {
+        DrawScreenBatch(() => page.RenderMaterialContent(acrylicActive: true));
+    }
+
+    private static void DrawOverlays(IMaterialAcrylicOverlay? overlay) {
+        if (overlay is null) return;
+        DrawScreenBatch(() => overlay.RenderOverlaysAboveAcrylic());
+    }
+
+    private static void DrawScreenBatch(Action render) {
         bool begun = false;
         try {
             Draw.SpriteBatch.Begin(
@@ -175,7 +199,7 @@ internal static class MaterialAcrylicRenderer {
                 Engine.ScreenMatrix
             );
             begun = true;
-            page.RenderMaterialContent(acrylicActive: true);
+            render();
         } finally {
             if (begun) Draw.SpriteBatch.End();
         }
