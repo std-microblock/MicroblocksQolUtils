@@ -6,6 +6,7 @@ internal interface IMaterialAcrylicPage {
 }
 
 internal interface IMaterialAcrylicOverlay {
+    bool HasOverlaysForAcrylic { get; }
     void HideOverlaysForAcrylicCapture();
     void RestoreOverlaysAfterAcrylicCapture();
     void RenderOverlaysAboveAcrylic();

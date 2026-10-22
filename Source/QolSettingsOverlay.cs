@@ -111,8 +111,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
         if (bindingConfig is not null) {
             // The key/button config screen handles its own input; do not leave the hidden
             // setting rows alive as touch targets underneath it.
-            MaterialTouch.Publish(this, [], TouchContext);
-            motion.Update([]);
+            MaterialTouch.Suppress(this, motion, TouchContext);
             return;
         }
 

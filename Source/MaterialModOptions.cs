@@ -1016,7 +1016,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
     private void RefreshExternalOverlays() {
         externalOverlays.Clear();
         configOverlayOpen = false;
-        if (Scene is not { } scene) return;
+        if (!Visible || Scene is not { } scene) return;
         foreach (Entity entity in scene.Entities) {
             if (entity is KeyboardConfigUI or ButtonConfigUI) {
                 configOverlayOpen = true;
@@ -1026,6 +1026,8 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
             externalOverlays.Add(entity);
         }
     }
+
+    bool IMaterialAcrylicOverlay.HasOverlaysForAcrylic => externalOverlays.Count > 0;
 
     void IMaterialAcrylicOverlay.HideOverlaysForAcrylicCapture() {
         hiddenOverlays.Clear();
@@ -1042,7 +1044,12 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
 
     void IMaterialAcrylicOverlay.RenderOverlaysAboveAcrylic() {
         foreach (Entity entity in externalOverlays) {
-            if (entity.Visible) entity.Render();
+            if (!entity.Visible) continue;
+            try {
+                entity.Render();
+            } catch (Exception exception) {
+                Logger.LogDetailed(exception, "MicroblocksQolUtils/MaterialAcrylic");
+            }
         }
     }
 
@@ -1078,8 +1085,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
     private void UpdateInteractions(ModOptionsLayout layout) {
         if (configOverlayOpen) {
             // Do not leave hidden setting rows alive as touch targets under the config UI.
-            MaterialTouch.Publish(this, [], TouchContext);
-            motion.Update([]);
+            MaterialTouch.Suppress(this, motion, TouchContext);
             return;
         }
         List<MaterialInteractionTarget> targets = [
