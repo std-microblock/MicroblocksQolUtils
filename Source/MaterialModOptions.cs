@@ -1022,7 +1022,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage {
                 // Keep the page at its normal depth and lift the config screen instead.
                 // Moving the page behind depth-0 scene entities made the bright world
                 // leak through for a frame when the config screen faded out (white flash).
-                if (entity.Depth > -100_000) entity.Depth = -100_000;
+                if (entity.Depth >= Depth) entity.Depth = Depth - 1;
             }
         }
         externalOverlayOpen = open;
