@@ -90,7 +90,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
     private string settingSearchText = "";
     private string imeText = "";
     private SearchTarget searchTarget;
-    private bool externalOverlayOpen;
+    private bool configOverlayOpen;
     private readonly List<Entity> externalOverlays = [];
     private readonly List<(Entity Entity, bool Visible)> hiddenOverlays = [];
 
@@ -192,6 +192,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
     public override void Update() {
         MaterialTouch.BeginUpdate(this);
         base.Update();
+        RefreshExternalOverlays();
         ModOptionsLayout layout = ModOptionsLayout.Create(1f - Ease.CubeOut(ease));
         tabScroll.Update(MaxTabScroll(layout));
         rowScroll.Update(MaxRowScroll(layout));
@@ -209,8 +210,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
         }
 
         if (menu is null) return;
-        RefreshExternalOverlay();
-        if (externalOverlayOpen) {
+        if (configOverlayOpen) {
             // The key/button config screen owns input while it is open.
             menu.Focused = false;
             return;
@@ -1013,16 +1013,18 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
         }
     }
 
-    private void RefreshExternalOverlay() {
+    private void RefreshExternalOverlays() {
         externalOverlays.Clear();
-        if (Scene is { } scene) {
-            foreach (Entity entity in scene.Entities) {
-                if (entity is not (KeyboardConfigUI or ButtonConfigUI)) continue;
-                externalOverlays.Add(entity);
+        configOverlayOpen = false;
+        if (Scene is not { } scene) return;
+        foreach (Entity entity in scene.Entities) {
+            if (entity is KeyboardConfigUI or ButtonConfigUI) {
+                configOverlayOpen = true;
                 if (entity.Depth >= Depth) entity.Depth = Depth - 1;
             }
+            if (!entity.Visible || !entity.TagCheck(Tags.HUD) || entity.Depth >= Depth) continue;
+            externalOverlays.Add(entity);
         }
-        externalOverlayOpen = externalOverlays.Count > 0;
     }
 
     void IMaterialAcrylicOverlay.HideOverlaysForAcrylicCapture() {
@@ -1074,7 +1076,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
     }
 
     private void UpdateInteractions(ModOptionsLayout layout) {
-        if (externalOverlayOpen) {
+        if (configOverlayOpen) {
             // Do not leave hidden setting rows alive as touch targets under the config UI.
             MaterialTouch.Publish(this, [], TouchContext);
             motion.Update([]);
