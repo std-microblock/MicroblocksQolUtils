@@ -24,7 +24,7 @@ env:
 
 jobs:
   test:
-    name: Rust checks
+    name: Tests
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -41,6 +41,12 @@ jobs:
 
       - name: Test capture subscriptions and clocks
         run: dotnet run --project Tests/Capture/Capture.csproj -c Release
+
+      - name: Test recorder orchestration
+        run: dotnet run --project Tests/Recorder/Recorder.csproj -c Release -- "${{ runner.temp }}/recorder-tests"
+
+      - name: Test mod option rules
+        run: dotnet run --project Tests/ModOptions/ModOptions.csproj -c Release
 
       - name: Cache Cargo
         uses: actions/cache@v6
@@ -228,6 +234,7 @@ jobs:
           node scripts/build-qol-mod.mjs
           --target ${{ matrix.target }}
           --archive ${{ matrix.artifact }}.zip
+          --no-tests
           ${{ needs.prepare-release.outputs.publish != 'true' && '--no-ffmpeg' || '' }}
 
       - name: Verify Linux library

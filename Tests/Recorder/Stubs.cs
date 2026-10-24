@@ -120,6 +120,7 @@ namespace Celeste.Mod.MicroblocksQolUtils {
         }
         public Task StopAsync(){Stopped=true;return Task.CompletedTask;}
     }
+    public static class NativeCaptureBridge { public static bool LastFinalizeMissingSfx; }
     public static class NativeRecordingFinalizer {
           public record Job(IReadOnlyList<RecordingClip> Clips,string Output,string Description,bool PreferVideoCopy);
         public static List<Job> Jobs=[];
