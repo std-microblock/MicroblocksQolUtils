@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using Celeste.Mod.Core;
 using Celeste.Mod.UI;
 using Microsoft.Xna.Framework;
 using Microsoft.Xna.Framework.Input;
@@ -59,6 +60,12 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
         BindingFlags.Instance | BindingFlags.NonPublic);
     private static readonly FieldInfo? intSliderMaximumField = typeof(TextMenuExt.IntSlider).GetField("max",
         BindingFlags.Instance | BindingFlags.NonPublic);
+    private static readonly FieldInfo? stringValueChangeField =
+        typeof(OuiModOptionString).GetField("OnValueChange",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+    private static readonly FieldInfo? stringExitField =
+        typeof(OuiModOptionString).GetField("OnExit",
+            BindingFlags.Instance | BindingFlags.NonPublic);
 
     private readonly List<ModTab> tabs = [];
     private readonly List<ModTab> sourceTabs = [];
@@ -105,6 +112,13 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
     private bool configOverlayOpen;
     private readonly List<Entity> externalOverlays = [];
     private readonly List<(Entity Entity, bool Visible)> hiddenOverlays = [];
+    private readonly Dictionary<TextMenu.Item, StringSettingEntry> stringSettings = [];
+    private TextEntryOverlay? textEntry;
+    private StringSettingEntry? inlineEditing;
+    private TextEditBuffer? inlineText;
+    private string inlineIme = "";
+    private bool inlineInputSubscribed;
+    private float inlineError;
 
     public bool SuppressNormalRender { get; set; }
 
@@ -113,7 +127,9 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
             if (Engine.Scene is not Overworld overworld) return null;
             MaterialModOptions? page = overworld.Current as MaterialModOptions
                 ?? overworld.Next as MaterialModOptions;
-            return page is { Visible: true } ? page : null;
+            // The text prompt is a separate foreground entity; keep the normal render path
+            // so the acrylic snapshot does not swallow it.
+            return page is { Visible: true, textEntry: null } ? page : null;
         }
     }
 
@@ -170,6 +186,8 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
     public override IEnumerator Leave(Oui next) {
         display = false;
         SetSearchTarget(SearchTarget.None);
+        if (inlineEditing is not null) CommitInlineEdit();
+        CloseTextEntry();
         if (menu is not null) menu.Focused = false;
         SaveTabState();
         for (float timer = 0f; timer < 0.16f; timer += Engine.RawDeltaTime) yield return null;
@@ -192,6 +210,8 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
 
     public override void Removed(Scene scene) {
         SetSearchTarget(SearchTarget.None);
+        EndInlineEdit();
+        CloseTextEntry();
         DetachMenu();
         if (pauseLevel is not null) pauseLevel.AllowHudHide = oldAllowHudHide;
         tabViewport.Dispose();
@@ -210,6 +230,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
         rowScroll.Update(MaxRowScroll(layout));
         compositePopupScroll.Update(MaxCompositePopupScroll(layout));
         ease = Calc.Approach(ease, display ? 1f : 0f, Engine.RawDeltaTime * 7.5f);
+        inlineError = Calc.Approach(inlineError, 0f, Engine.RawDeltaTime * 4f);
         inputDelay -= Engine.RawDeltaTime;
         sliderAudioCooldown = Math.Max(0f, sliderAudioCooldown - Engine.RawDeltaTime);
         UpdateInteractions(layout);
@@ -230,6 +251,17 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
         if (configOverlayOpen) {
             // The key/button config screen owns input while it is open.
             CancelSliderDrag();
+            menu.Focused = false;
+            return;
+        }
+        if (textEntry is { Scene: null }) textEntry = null;
+        if (textEntry is not null) {
+            // The string prompt is a foreground entity and owns input now.
+            menu.Focused = false;
+            return;
+        }
+        if (inlineEditing is not null) {
+            UpdateInlineEdit(layout);
             menu.Focused = false;
             return;
         }
@@ -328,6 +360,20 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
             }
         }
 
+        if ((Input.MenuConfirm.Pressed
+                || MInput.Keyboard.Pressed(Keys.Enter)
+                || MInput.Keyboard.Pressed(Keys.Space))
+            && menu.Current is { Disabled: false } stringItem
+            && TryGetStringSetting(stringItem, out StringSettingEntry? stringSetting)) {
+            // Keyboard/mouse users get the OS text input in place; only the gamepad
+            // (or a user who disabled "use keyboard for text input") needs the QWERTY.
+            OpenStringEditor(stringSetting!,
+                allowGameKeyboard: Input.MenuConfirm.Pressed
+                    && !MInput.Keyboard.Pressed(Keys.Enter)
+                    && !MInput.Keyboard.Pressed(Keys.Space));
+            return;
+        }
+
         bool rangeHandled = HandleRangeKeyboard();
         UpdateMouse(layout);
         int previousSelection = menu.Selection;
@@ -377,6 +423,7 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
         naturalVisibility.Clear();
         itemOwners.Clear();
         favoriteKeys.Clear();
+        stringSettings.Clear();
         menu = OuiModOptions.CreateMenu(inGame, null!);
         menu.Active = false;
         menu.Visible = false;
@@ -417,8 +464,137 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
             sourceTabs.Add(new ModTab("__empty",
                 UiText("microblocks_qol_modoptions_empty", "没有可用设置"), "", [], pinnable: false));
         }
+        IndexStringSettings();
         IndexSourceItems();
         RebuildTabs();
+    }
+
+    /// <summary>
+    /// Everest renders string settings as opaque buttons ("名称: 值") that open its own text
+    /// screen. Map those buttons back to their property so this page can show an inline text
+    /// field and drive the shared in-game entry prompt instead.
+    /// </summary>
+    private void IndexStringSettings() {
+        foreach (ModTab tab in sourceTabs) {
+            if (!tab.Pinnable) continue;
+            EverestModule? module = Everest.Modules.FirstOrDefault(candidate =>
+                MetadataMatches(candidate, tab.Title));
+            Type? type = module?.SettingsType;
+            object? settings = module?._Settings;
+            if (type is null || settings is null) continue;
+
+            string typeName = type.Name.ToLowerInvariant();
+            if (typeName.EndsWith("settings", StringComparison.Ordinal)) typeName = typeName[..^8];
+            string dialogPrefix = $"modoptions_{typeName}_";
+            List<TextMenu.Button> buttons = tab.Items.OfType<TextMenu.Button>().ToList();
+
+            foreach (PropertyInfo property in type.GetProperties()) {
+                if (!property.CanRead || !property.CanWrite) continue;
+                if (property.PropertyType != typeof(string)) continue;
+                if (property.GetCustomAttribute<SettingIgnoreAttribute>() != null) continue;
+
+                string name = property.GetCustomAttribute<SettingNameAttribute>()?.Name
+                    ?? $"{dialogPrefix}{property.Name.ToLowerInvariant()}";
+                name = (Dialog.Has(name) ? Dialog.Clean(name) : null)
+                    ?? SpacedPascalCase(property.Name);
+
+                TextMenu.Button? button = buttons.FirstOrDefault(candidate =>
+                    !stringSettings.ContainsKey(candidate)
+                    && LabelStartsWith(candidate.Label, name));
+                if (button is null) continue;
+
+                int maxLength = Math.Max(1,
+                    property.GetCustomAttribute<SettingMaxLengthAttribute>()?.Max ?? 12);
+                int minLength = Math.Max(0,
+                    property.GetCustomAttribute<SettingMinLengthAttribute>()?.Min ?? 1);
+                stringSettings[button] = new StringSettingEntry(name, button,
+                    () => {
+                        try {
+                            return property.GetValue(settings) as string ?? "";
+                        } catch {
+                            return "";
+                        }
+                    },
+                    value => {
+                        property.SetValue(settings, value);
+                        button.Label = Relabel(button.Label, name, value);
+                    },
+                    minLength, maxLength);
+            }
+            IndexManualStringButtons(buttons);
+        }
+    }
+
+    /// <summary>
+    /// Mods such as MiaoNet build their string entries by hand, so there is no property to
+    /// match against. Recognise the common `Func&lt;string&gt;` getter / `Action&lt;string&gt;`
+    /// setter closure behind such buttons and only accept it when the label still carries
+    /// the current value (which keeps ordinary action buttons out).
+    /// </summary>
+    private void IndexManualStringButtons(List<TextMenu.Button> buttons) {
+        foreach (TextMenu.Button button in buttons) {
+            if (stringSettings.ContainsKey(button) || button.OnPressed?.Target is not { } closure)
+                continue;
+            Func<string>? getter = null;
+            Action<string>? setter = null;
+            foreach (FieldInfo field in closure.GetType().GetFields(
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)) {
+                if (field.FieldType == typeof(Func<string>))
+                    getter ??= field.GetValue(closure) as Func<string>;
+                else if (field.FieldType == typeof(Action<string>))
+                    setter ??= field.GetValue(closure) as Action<string>;
+            }
+            if (getter is null || setter is null) continue;
+            string value;
+            try {
+                value = getter() ?? "";
+            } catch {
+                continue;
+            }
+            if (!LabelCarriesValue(button.Label, value)) continue;
+            string displayName = DisplayNameFromLabel(button.Label, value);
+            Action<string> apply = setter;
+            stringSettings[button] = new StringSettingEntry(displayName, button,
+                () => value,
+                newValue => {
+                    apply(newValue);
+                    value = newValue;
+                    button.Label = Relabel(button.Label, displayName, newValue);
+                },
+                1, 128);
+        }
+    }
+
+    private static bool LabelStartsWith(string label, string name) =>
+        label.StartsWith(name + ": ", StringComparison.Ordinal)
+        || label.StartsWith(name + "：", StringComparison.Ordinal)
+        || string.Equals(label, name, StringComparison.Ordinal);
+
+    private static bool LabelCarriesValue(string label, string value) {
+        if (value.Length == 0) return true;
+        if (label.EndsWith(value, StringComparison.Ordinal)) return true;
+        const int truncationLength = 24;
+        if (value.Length <= truncationLength) return false;
+        return label.EndsWith(value[..truncationLength] + "...", StringComparison.Ordinal);
+    }
+
+    private static bool MetadataMatches(EverestModule module, string title) {
+        string? name = module.Metadata?.Name;
+        if (string.IsNullOrEmpty(name)) return false;
+        return string.Equals(name, title, StringComparison.Ordinal)
+            || title.StartsWith(name, StringComparison.Ordinal)
+            || name.StartsWith(title, StringComparison.Ordinal);
+    }
+
+    private static string SpacedPascalCase(string value) {
+        System.Text.StringBuilder builder = new();
+        for (int index = 0; index < value.Length; index++) {
+            char character = value[index];
+            if (index > 0 && char.IsUpper(character) && char.IsLower(value[index - 1]))
+                builder.Append(' ');
+            builder.Append(character);
+        }
+        return builder.ToString();
     }
 
     private void IndexSourceItems() {
@@ -519,6 +695,253 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
         CloseCompositePopup(playSound: false);
         if (menu.Scene is not null) menu.RemoveSelf();
         menu = null;
+    }
+
+    private bool TryGetStringSetting(TextMenu.Item? item,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out StringSettingEntry? setting) {
+        setting = null;
+        return item is not null && stringSettings.TryGetValue(item, out setting);
+    }
+
+    private void OpenStringEditor(StringSettingEntry setting, bool allowGameKeyboard) {
+        if (allowGameKeyboard && PreferGameKeyboard()) OpenTextEntry(setting);
+        else BeginInlineEdit(setting);
+    }
+
+    /// <summary>
+    /// Mirror Everest's "use keyboard for text input" setting and the engine's last-input
+    /// flag: the QWERTY prompt is only needed when the gamepad drove the input (or when the
+    /// user explicitly turned physical-keyboard text input off).
+    /// </summary>
+    private static bool PreferGameKeyboard() {
+        try {
+            if (!CoreModule.Settings.UseKeyboardForTextInput) return true;
+        } catch {
+            // Core settings unavailable: fall back to the controller flag below.
+        }
+        return MInput.ControllerHasFocus;
+    }
+
+    private void BeginInlineEdit(StringSettingEntry setting) {
+        if (inlineEditing is not null) EndInlineEdit();
+        CloseDropdown(playSound: false);
+        CloseCompositePopup(playSound: false);
+        inlineEditing = setting;
+        inlineText = new TextEditBuffer(setting.Value(), setting.MaxLength);
+        inlineIme = "";
+        inlineError = 0f;
+        Audio.Play("event:/ui/main/savefile_rename_start");
+        SubscribeInlineInput();
+        MaterialTextInputFocus.Focus(this);
+        if (menu is not null) menu.Focused = false;
+    }
+
+    private void UpdateInlineEdit(ModOptionsLayout layout) {
+        if (inlineText is null) {
+            CancelInlineEdit();
+            return;
+        }
+        if (MaterialTextInputFocus.Pressed(Keys.Escape) || Input.MenuCancel.Pressed) {
+            CancelInlineEdit();
+            return;
+        }
+        if (MaterialTextInputFocus.Pressed(Keys.Enter)) {
+            CommitInlineEdit();
+            return;
+        }
+        if (MaterialTextInputFocus.Pressed(Keys.Left)) inlineText.MoveLeft();
+        else if (MaterialTextInputFocus.Pressed(Keys.Right)) inlineText.MoveRight();
+        else if (MaterialTextInputFocus.Pressed(Keys.Home)) inlineText.MoveHome();
+        else if (MaterialTextInputFocus.Pressed(Keys.End)) inlineText.MoveEnd();
+        else if (MaterialTextInputFocus.Pressed(Keys.Delete)) inlineText.Delete();
+
+        if (!MaterialTouch.PressedLeftButton) return;
+        MaterialRect? field = null;
+        foreach (RowPlacement placement in RowPlacements(layout)) {
+            if (placement.Item != inlineEditing!.Item) continue;
+            field = TextControlRect(placement.Rect);
+            break;
+        }
+        if (field is not { } control) {
+            CommitInlineEdit();
+            return;
+        }
+        if (!control.Contains(MaterialTouch.Position)) {
+            CommitInlineEdit();
+            return;
+        }
+        // Click inside the field moves the caret to the nearest character boundary.
+        TextEditBuffer.TextWindow window = inlineText.Window(
+            control.Width - 62f, 0.27f, UiFontWeight.Bold);
+        inlineText.SetCursorFromX(MaterialTouch.Position.X - (control.X + 15f), window,
+            0.27f, UiFontWeight.Bold);
+    }
+
+    private void OnInlineInput(char character) {
+        if (inlineEditing is null || inlineText is null) return;
+        bool changed;
+        if (character == '\b') {
+            changed = inlineText.Backspace();
+        } else if (!char.IsControl(character)) {
+            changed = inlineText.Insert(character);
+        } else {
+            return;
+        }
+        if (!changed) {
+            Audio.Play("event:/ui/main/button_invalid");
+            return;
+        }
+        inlineIme = "";
+        inlineError = 0f;
+    }
+
+    private void OnInlineEditing(string? text, int start, int length) {
+        _ = start;
+        _ = length;
+        if (inlineEditing is not null) inlineIme = text ?? "";
+    }
+
+    private void CommitInlineEdit() {
+        StringSettingEntry? setting = inlineEditing;
+        if (setting is null) return;
+        if (inlineText is null || !CommitStringSetting(setting, inlineText.Text)) {
+            inlineError = 1f;
+            Audio.Play("event:/ui/main/button_invalid");
+            return;
+        }
+        EndInlineEdit();
+        Audio.Play("event:/ui/main/button_select");
+    }
+
+    private void CancelInlineEdit() {
+        EndInlineEdit();
+        Audio.Play("event:/ui/main/button_back");
+    }
+
+    private void EndInlineEdit() {
+        if (inlineEditing is null) return;
+        inlineEditing = null;
+        inlineText = null;
+        inlineIme = "";
+        inlineError = 0f;
+        ReleaseInlineInput();
+        if (menu is not null) menu.Focused = searchTarget == SearchTarget.None;
+    }
+
+    private void SubscribeInlineInput() {
+        if (inlineInputSubscribed) return;
+        inlineInputSubscribed = true;
+        TextInput.OnInput += OnInlineInput;
+        TextInputEXT.TextEditing += OnInlineEditing;
+    }
+
+    private void ReleaseInlineInput() {
+        if (!inlineInputSubscribed) return;
+        inlineInputSubscribed = false;
+        TextInput.OnInput -= OnInlineInput;
+        TextInputEXT.TextEditing -= OnInlineEditing;
+        MaterialTextInputFocus.Blur(this);
+    }
+
+    private static void SetTextInputRectangle(MaterialRect rect) {
+        float xScale = Engine.ViewWidth / ScreenWidth;
+        float yScale = Engine.ViewHeight / ScreenHeight;
+        TextInputEXT.SetInputRectangle(new Rectangle(
+            (int)(rect.X * xScale),
+            (int)(rect.Y * yScale),
+            Math.Max(1, (int)(rect.Width * xScale)),
+            Math.Max(1, (int)(rect.Height * yScale))
+        ));
+    }
+
+    private void OpenTextEntry(StringSettingEntry setting) {
+        if (textEntry is not null || Scene is null || menu is null) return;
+        CloseDropdown(playSound: false);
+        CloseCompositePopup(playSound: false);
+        Audio.Play("event:/ui/main/savefile_rename_start");
+        menu.Focused = false;
+        textEntry = new TextEntryOverlay(
+            setting.DisplayName,
+            setting.Value(),
+            setting.MaxLength,
+            setting.MinLength,
+            value => CommitStringSetting(setting, value),
+            () => {
+                textEntry = null;
+                if (menu is not null) menu.Focused = searchTarget == SearchTarget.None;
+            }
+        );
+        Scene.Add(textEntry);
+    }
+
+    private bool CommitStringSetting(StringSettingEntry setting, string value) {
+        try {
+            setting.Setter(value);
+            return true;
+        } catch (Exception exception) {
+            Logger.LogDetailed(exception, "MicroblocksQolUtils/MaterialModOptions");
+            return false;
+        }
+    }
+
+    private void CloseTextEntry() {
+        textEntry?.RemoveSelf();
+        textEntry = null;
+    }
+
+    /// <summary>
+    /// Everest (and mods that build their own entries, like MiaoNet) route string settings
+    /// through <see cref="OuiModOptionString"/>. Capture that request and show the shared
+    /// in-game prompt instead of switching to Everest's page.
+    /// </summary>
+    internal bool BeginStringEntry(OuiModOptionString optionString) {
+        if (menu is null || Scene is null || menu.Current is not { Disabled: false } item) return false;
+        if (!stringSettings.TryGetValue(item, out StringSettingEntry? entry)) {
+            string initial = optionString.StartingValue ?? "";
+            string label = item is TextMenu.Button button
+                ? button.Label
+                : TryGetLabel(item, out string itemLabel) ? itemLabel : "";
+            string displayName = DisplayNameFromLabel(label, initial);
+            Action<string>? apply = stringValueChangeField?.GetValue(optionString) as Action<string>;
+            string current = initial;
+            entry = new StringSettingEntry(displayName, item,
+                () => current,
+                value => {
+                    current = value;
+                    apply?.Invoke(value);
+                    if (item is TextMenu.Button target)
+                        target.Label = Relabel(target.Label, displayName, value);
+                },
+                Math.Clamp(optionString.MinValueLength, 0, Math.Max(1, optionString.MaxValueLength)),
+                Math.Max(1, optionString.MaxValueLength));
+            stringSettings[item] = entry;
+        }
+        // Init() accumulates an exit handler per press; these requests never enter the Oui.
+        stringValueChangeField?.SetValue(optionString, null);
+        stringExitField?.SetValue(optionString, null);
+        OpenStringEditor(entry, allowGameKeyboard: MInput.ControllerHasFocus);
+        return true;
+    }
+
+    private static string DisplayNameFromLabel(string label, string value) {
+        string name = label;
+        if (value.Length > 0 && name.EndsWith(value, StringComparison.Ordinal)) {
+            name = name[..^value.Length];
+        } else if (value.Length > 24 && name.EndsWith(value[..24] + "...", StringComparison.Ordinal)) {
+            name = name[..^(24 + 3)];
+        }
+        name = name.TrimEnd().TrimEnd(':', '：');
+        return name.Length > 0 ? name : "文本";
+    }
+
+    private static string Relabel(string label, string displayName, string value) {
+        if (label.StartsWith(displayName, StringComparison.Ordinal)) {
+            string rest = label[displayName.Length..].TrimStart();
+            if (rest.Length == 0) return displayName + ": " + value;
+            char separator = rest[0];
+            if (separator is ':' or '：') return $"{displayName}{separator} {value}";
+        }
+        return $"{displayName}: {value}";
     }
 
     private void RestoreTab(bool restoreSaved) {
@@ -950,6 +1373,10 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
             }
         } else if (IsCompositeMenu(item)) {
             OpenCompositePopup(item);
+        } else if (TryGetStringSetting(item, out StringSettingEntry? setting)) {
+            // Touch goes through the published "text" target (CeleMod shows the system
+            // keyboard); desktop mouse edits in place with the OS input.
+            if (!MaterialTouch.Connected) OpenStringEditor(setting!, allowGameKeyboard: false);
         } else {
             ActivateItem(item);
         }
@@ -1264,6 +1691,11 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
             MaterialTouch.Suppress(this, motion, TouchContext);
             return;
         }
+        if (textEntry is not null) {
+            MaterialTouch.Publish(this, textEntry.InteractionTargets(), TouchContext + ":text-entry");
+            motion.Update([]);
+            return;
+        }
         List<MaterialInteractionTarget> targets = [
             new MaterialInteractionTarget("mod-options.search.tabs", layout.TabSearch,
                 Focused: searchTarget == SearchTarget.Tabs, TouchKind: "text", TouchText: tabSearchText,
@@ -1297,6 +1729,15 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
                 if (placement.Rect.Bottom < layout.Rows.Y || placement.Rect.Y > layout.Rows.Bottom) continue;
                 targets.Add(new MaterialInteractionTarget(ItemKey(placement.Item), placement.Rect,
                     Focused: menu.Current == placement.Item));
+                if (TryGetStringSetting(placement.Item, out StringSettingEntry? stringSetting)) {
+                    // CeleMod turns this into the system soft keyboard on Android; desktop
+                    // input never uses it (no touch bridge).
+                    targets.Add(new MaterialInteractionTarget(ItemKey(placement.Item) + ".text",
+                        TextControlRect(PrimaryRect(placement)), TouchKind: "text",
+                        TouchText: stringSetting!.Value(),
+                        TouchMaxLength: stringSetting.MaxLength,
+                        TouchTextChanged: value => CommitStringSetting(stringSetting, value)));
+                }
                 if (TryGetOption(placement.Item, out OptionSnapshot touchOption)
                     && touchOption.Kind == OptionKind.Range) {
                     // Only real ranges get a slider gesture; an enum is also a TextMenu.Slider
@@ -1485,6 +1926,13 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
             RenderIntSlider(slider, rect, palette, alpha, enabled);
             return true;
         }
+        if (TryGetStringSetting(item, out StringSettingEntry? stringSetting)) {
+            MaterialRect control = TextControlRect(rect);
+            RenderItemLabel(stringSetting!.DisplayName, rect, control.X - rect.X - 62f, labelColor,
+                alpha, hasDescription);
+            RenderStringControl(stringSetting, control, palette, alpha, enabled);
+            return true;
+        }
         if (item is TextMenu.Button button) {
             MaterialRect action = ActionControlRect(rect);
             RenderItemLabel(button.Label, rect, action.X - rect.X - 62f, labelColor, alpha,
@@ -1616,6 +2064,58 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
         MaterialUi.Circle(new Vector2(track.X + track.Width * amount, track.Center.Y), 10f,
             palette.Primary * (alpha * (enabled ? 1f : 0.45f)));
     }
+
+    private void RenderStringControl(StringSettingEntry setting, MaterialRect control,
+        MaterialPalette palette, float alpha, bool enabled) {
+        bool editing = ReferenceEquals(setting, inlineEditing);
+        MaterialUi.RoundedRect(control.X, control.Y, control.Width, control.Height, 16f,
+            palette.Surface * (0.76f * alpha));
+        MaterialUi.RoundedOutline(control.X, control.Y, control.Width, control.Height, 16f,
+            editing ? 2f : 1f,
+            (editing ? (inlineError > 0f ? Color.OrangeRed : palette.Primary) : palette.Outline)
+            * (editing ? alpha : alpha * 0.52f));
+        float textWidth = control.Width - 62f;
+        string shown;
+        bool empty;
+        Color textColor;
+        if (editing && inlineText is not null) {
+            TextEditBuffer.TextWindow window = inlineText.Window(textWidth, 0.27f,
+                UiFontWeight.Bold);
+            string before = window.Text[..Math.Clamp(window.CaretOffset, 0, window.Text.Length)];
+            string after = window.Text[Math.Clamp(window.CaretOffset, 0, window.Text.Length)..];
+            shown = before + inlineIme + after;
+            empty = shown.Length == 0;
+            textColor = palette.OnSurface;
+            if (Scene?.BetweenInterval(0.5f) == true) {
+                float caretWidth = SystemTtfFont.MeasureVisible(before + inlineIme, 0.27f,
+                    UiFontWeight.Bold).X;
+                float caretX = Math.Min(control.Right - 36f, control.X + 15f + caretWidth);
+                MaterialUi.Line(new Vector2(caretX, control.Y + 8f),
+                    new Vector2(caretX, control.Bottom - 8f), 2f, palette.Primary);
+            }
+            SetTextInputRectangle(control);
+        } else {
+            shown = TextEditBuffer.Visible(setting.Value());
+            empty = shown.Length == 0;
+            textColor = empty ? palette.OnSurfaceVariant * 0.72f : palette.OnSurface;
+            MaterialUiKit.Icon("edit", new Vector2(control.Right - 26f, control.Center.Y), 20f,
+                enabled ? palette.Primary : palette.OnSurfaceVariant * 0.5f, alpha);
+        }
+        MaterialUiKit.Text(MaterialTextUtil.Ellipsize(
+                empty ? UiText("microblocks_qol_modoptions_text_placeholder", "点击输入") : shown,
+                textWidth, 0.27f, UiFontWeight.Bold),
+            new Vector2(control.X + 15f, control.Center.Y), new Vector2(0f, 0.5f),
+            MaterialTextRole.Label,
+            enabled ? textColor : textColor * 0.45f,
+            alpha, scaleOverride: 0.27f);
+    }
+
+    private static MaterialRect TextControlRect(MaterialRect rect) => new(
+        rect.Right - 504f,
+        rect.Center.Y - 24f,
+        480f,
+        48f
+    );
 
     private static void RenderActionControl(MaterialRect control, string value, MaterialPalette palette,
         float alpha, bool enabled) {
@@ -2179,8 +2679,19 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
             && MicroblocksQolUtilsModule.Settings.ReplaceEverestModOptions
             && self.GetUI<MaterialModOptions>() is { } material) {
             next = material;
+        } else if (next is OuiModOptionString optionString
+            && MicroblocksQolUtilsModule.Settings.ReplaceEverestModOptions
+            && self.GetUI<MaterialModOptions>() is { } page
+            && page.Selected && page.Visible
+            && page.BeginStringEntry(optionString)) {
+            // Keep this page current and show the material text prompt instead.
+            return EmptyRoutine();
         }
         return orig(self, next);
+    }
+
+    private static IEnumerator EmptyRoutine() {
+        yield break;
     }
 
     private static bool TrySplitModuleHeader(string value, out string title, out string version) {
@@ -2294,6 +2805,24 @@ public sealed class MaterialModOptions : Oui, IMaterialAcrylicPage, IMaterialAcr
     }
 
     private readonly record struct TabVisual(string Icon, Color Accent);
+
+    private sealed class StringSettingEntry(
+        string displayName,
+        TextMenu.Item item,
+        Func<string> getter,
+        Action<string> setter,
+        int minLength,
+        int maxLength
+    ) {
+        public string DisplayName { get; } = displayName;
+        public TextMenu.Item Item { get; } = item;
+        public Func<string> Getter { get; } = getter;
+        public Action<string> Setter { get; } = setter;
+        public int MinLength { get; } = minLength;
+        public int MaxLength { get; } = maxLength;
+
+        public string Value() => Getter();
+    }
 
     private readonly record struct OptionSnapshot(
         string Label,
