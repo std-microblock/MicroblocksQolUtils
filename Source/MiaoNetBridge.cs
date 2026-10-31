@@ -360,11 +360,22 @@ public static class MiaoNetBridge {
             if (ghostNameTagIsOnSelfProperty?.GetValue(nameTag) is true) return true;
             if (ghostNameTagEntityProperty?.GetValue(nameTag) is not Entity player
                 || player.Scene is not Level level) return true;
+            // MiaoNet clamps off-screen names onto the screen edge and fades them, so they stay
+            // readable; only step aside where the minimap border icons actually replace them.
+            if (!MiniMapShowsOffscreenPlayers()) return true;
             return level.InsideCamera(player.Position);
         } catch {
             // A MiaoNet update should never make its normal name rendering disappear.
             return true;
         }
+    }
+
+    private static bool MiniMapShowsOffscreenPlayers() {
+        QolSettings settings = MicroblocksQolUtilsModule.Settings;
+        return settings.Enabled
+            && settings.MiniMapEnabled
+            && settings.ShowMiaoNetPlayers
+            && settings.MiniMapShowOffscreenPlayers;
     }
 
     private static bool TryResolveAvatarFont() {

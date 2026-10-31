@@ -16,6 +16,7 @@ public sealed class MicroblocksQolUtilsModule : EverestModule {
     public override void OnInputInitialize() {
         base.OnInputInitialize();
         Settings.MigrateMiniMapBindings();
+        Settings.MigrateMiaoNetOffscreenNames();
     }
 
     public override void Load() {

@@ -221,8 +221,12 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue(MiniMapNameMode.WatchedOnly)]
     public MiniMapNameMode MiniMapNames { get; set; } = MiniMapNameMode.WatchedOnly;
 
-    [DefaultValue(true)]
-    public bool HideMiaoNetOffscreenNames { get; set; } = true;
+    [SettingIgnore]
+    [DefaultValue(false)]
+    public bool MiaoNetOffscreenNamesMigrated { get; set; }
+
+    [DefaultValue(false)]
+    public bool HideMiaoNetOffscreenNames { get; set; }
 
     [DefaultValue(true)]
     public bool ShowRoomsRemaining { get; set; } = true;
@@ -370,6 +374,14 @@ public sealed class QolSettings : EverestModuleSettings {
         SetLegacyKey(MiniMapZoomInBinding, MiniMapZoomInKey);
         SetLegacyKey(MiniMapZoomOutBinding, MiniMapZoomOutKey);
         MiniMapBindingsMigrated = true;
+    }
+
+    // The option shipped enabled, so every existing configuration carries the old default
+    // without anyone choosing it. One-time reset; turning it back on keeps working.
+    internal void MigrateMiaoNetOffscreenNames() {
+        if (MiaoNetOffscreenNamesMigrated) return;
+        HideMiaoNetOffscreenNames = false;
+        MiaoNetOffscreenNamesMigrated = true;
     }
 
     private static void SetLegacyKey(ButtonBinding binding, Keys key) {
