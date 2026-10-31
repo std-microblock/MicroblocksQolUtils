@@ -333,6 +333,13 @@ public sealed class QolSettings : EverestModuleSettings {
     [DefaultValue(false)]
     public bool RecordingKeepFailedAttempts { get; set; }
 
+    // Rhythm-sensitive rooms already read the real source time so music keeps its
+    // on-screen timing. Outside those rooms the BGM is reconstructed across cuts and
+    // therefore keeps playing while the video jumps; this opt-in asks for the strict
+    // behaviour (jump with the video) in every room.
+    [DefaultValue(false)]
+    public bool RecordingBgmFollowsVideo { get; set; }
+
     [DefaultValue(60)]
     [SettingRange(30, 120)]
     public int RecordingFrameRate { get; set; } = 60;
