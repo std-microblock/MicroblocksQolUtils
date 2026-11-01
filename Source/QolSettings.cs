@@ -222,9 +222,6 @@ public sealed class QolSettings : EverestModuleSettings {
     public MiniMapNameMode MiniMapNames { get; set; } = MiniMapNameMode.WatchedOnly;
 
     [DefaultValue(true)]
-    public bool HideMiaoNetOffscreenNames { get; set; } = true;
-
-    [DefaultValue(true)]
     public bool ShowRoomsRemaining { get; set; } = true;
 
     [DefaultValue(true)]

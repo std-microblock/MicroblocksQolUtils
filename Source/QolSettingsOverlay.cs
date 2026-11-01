@@ -1638,9 +1638,7 @@ internal sealed class QolSettingsOverlay : Entity, IMaterialAcrylicPage {
                     value => settings.MiniMapShowOffscreenPlayers = value),
                 EnumRow("头像裁剪形状", () => settings.MiniMapAvatarShape,
                     value => settings.MiniMapAvatarShape = value),
-                EnumRow("玩家名字", () => settings.MiniMapNames, value => settings.MiniMapNames = value),
-                Toggle("隐藏原生越界名字", () => settings.HideMiaoNetOffscreenNames,
-                    value => settings.HideMiaoNetOffscreenNames = value)
+                EnumRow("玩家名字", () => settings.MiniMapNames, value => settings.MiniMapNames = value)
             ]),
             new SettingsTab("录制", "videocam", BuildRecorderRows(settings), RecorderPage: true),
             new SettingsTab("界面与系统", "settings", [

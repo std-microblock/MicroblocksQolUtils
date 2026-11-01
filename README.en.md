@@ -71,7 +71,6 @@ active, disable it when visual artifacts or added latency appear.
     for strawberries in nearby rooms.
 - Optional MiaoNet players, avatars, off-screen players, and names on the minimap.
   Names can be hidden, limited to watched players, or shown for everyone.
-- Optional suppression of MiaoNet's native off-screen name labels.
 
 ### MiaoNet watching and notifications
 
