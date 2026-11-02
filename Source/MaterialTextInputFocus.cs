@@ -62,6 +62,12 @@ internal static class MaterialTextInputFocus {
         && rawCurrentState.IsKeyDown(key)
         && rawPreviousState.IsKeyUp(key);
 
+    public static bool Down(Keys key) => key != Keys.None && rawCurrentState.IsKeyDown(key);
+
+    public static bool ControlDown => Down(Keys.LeftControl) || Down(Keys.RightControl);
+
+    public static bool ShiftDown => Down(Keys.LeftShift) || Down(Keys.RightShift);
+
     public static Keys[] GetPressedKeys() => rawCurrentState.GetPressedKeys();
 
     private static void KeyboardUpdate(

@@ -8,5 +8,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../Source/OptionRules.cs" Link="OptionRules.cs" />
+    <Compile Include="../../Source/TextEditBuffer.cs" Link="TextEditBuffer.cs" />
+    <Compile Include="../../Source/TextKeyRepeat.cs" Link="TextKeyRepeat.cs" />
   </ItemGroup>
 </Project>
