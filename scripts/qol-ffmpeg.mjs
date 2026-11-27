@@ -16,7 +16,7 @@ import { dirname, resolve, sep } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
-const ffmpegVersion = "8.1";
+const ffmpegVersion = "9.1";
 const archiveName = `ffmpeg-${ffmpegVersion}.tar.xz`;
 const extractedName = `ffmpeg-${ffmpegVersion}`;
 const buildName = process.platform === "win32"
@@ -26,7 +26,7 @@ const buildId = process.platform === "win32"
   ? "ffmpeg-8.1-qol-minimal-v2"
   : `ffmpeg-8.1-qol-minimal-v4-${process.platform}-${process.arch}`;
 const sourceUrl = `https://ffmpeg.org/releases/${archiveName}`;
-const sourceDigest = "sha256:b072aed6871998cce9b36e7774033105ca29e33632be5b6347f3206898e0756a";
+const sourceDigest = "sha256:1a4d394ae63d190a526cd052eb4415c156b5c5e2df37efab41a7de0b8fde2433";
 const downloadAttempts = 3;
 const downloadTimeoutMs = 2 * 60 * 1000;
 const extractTimeoutMs = 2 * 60 * 1000;
